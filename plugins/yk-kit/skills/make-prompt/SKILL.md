@@ -85,7 +85,7 @@ Print, in this order:
 3. The `assumed:` list (quick mode) or the open questions (interview).
 4. Next step, one line: small task → `say "go" — I start deliverable 1 in plan mode here`; big task → `/clear, then "continue <task folder>" (fresh context beats this one)`; when "done" is a checkable condition → `set it as /goal <condition> so the session cannot stop early`; design-heavy → "This needs a design pass — switch to your strongest model".
 
-7. **Receipt.** Write `.claude/yk-kit/pending.json` in the repo (create the folder) with: `{"skill":"make-prompt","task":"<feature name>","mode":"interview|quick","started_at":"<Invoked at, from the live context>","self_check":"<n>/13","corrections":<how many answers the user changed>,"notes":"<one line>"}`. The Stop hook turns it into one ledger line (tokens, minutes) when this turn ends — say `receipt: pending → ledger` in the report. `dry` mode: still write it (the ledger is how the skill proves its cost).
+7. **Receipt.** Write `~/.claude/yk-kit/projects/<repo folder name>/pending.json` (create the folder; never inside the repo) with: `{"skill":"make-prompt","task":"<feature name>","mode":"interview|quick","started_at":"<Invoked at, from the live context>","self_check":"<n>/13","corrections":<how many answers the user changed>,"notes":"<one line>"}`. The Stop hook turns it into one ledger line (tokens, minutes) when this turn ends — say `receipt: pending → ledger` in the report. `dry` mode: still write it (the ledger is how the skill proves its cost).
 
 ## Rules
 - Ground check before questions. Memory and grep answer before YK does.
