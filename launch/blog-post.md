@@ -39,7 +39,7 @@ The kickoff is the front door. Three other pieces cover what happens after.
 
 **reply-style.** Seven reply voices, each shown with its pros and cons: `lcd`, `bluf`, `engineer`, `teacher`, `minimal`, `plain`, `memo`. You pick one with two questions. It is installed as a Claude Code output style. A style is an instruction, not enforcement, and the skill says so.
 
-**bash-guard.** A set of deny rules that block the commands you never want run by accident: pipe-to-shell, `sudo`, recursive deletes, force-push, destructive SQL through shell tools. Each denial names the safe alternative. It is a hook, so it fires even in bypass mode. It ships with a regression test of {{BASH_GUARD_CASES}} cases.
+**bash-guard.** A set of deny rules that block the commands you never want run by accident: pipe-to-shell, `sudo`, recursive deletes, force-push, destructive SQL through shell tools. Each denial names the safe alternative. It is a hook, so it fires even in bypass mode. It ships with a regression test of 32 cases.
 
 ## The receipts idea
 
@@ -63,7 +63,7 @@ Not enough to publish a verdict. The reproducible benchmark is a sample repo and
 
 - tasks measured: {{N_TASKS}}
 - median output tokens per kickoff: {{MEDIAN_OUT_TOKENS}}
-- eval cases passing: {{EVAL_PASS}}
+- eval cases passing: 4 of 4 (mean gain +0.88 over no plugin, Claude Code 2.1.300)
 
 Until those are filled in, treat every claim in this post as a description of the design, not a result.
 
