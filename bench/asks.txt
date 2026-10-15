@@ -1,0 +1,5 @@
+add a CSV export of orders
+totals are off by one cent on some orders
+should we move the in-memory store to SQLite or Postgres
+add request logging to every route
+make orders faster

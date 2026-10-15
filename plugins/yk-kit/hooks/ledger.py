@@ -150,13 +150,14 @@ def report(n=10):
         print("ledger: empty")
         return
     print(f"ledger: {len(rows)} tasks  ({LEDGER})")
-    print("| when | project | skill | mode | task | min | in-tokens | out-tokens | self-check |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print("| when | project | skill | mode | task | min | fresh-in | cache-read | out | self-check |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
     for r in rows[-n:]:
+        f = flat(r.get("tokens") or {})
         print(f"| {str(r.get('ts',''))[:16]} | {r.get('project')} | {r.get('skill')} | {r.get('mode')} | {str(r.get('task',''))[:40]} | "
-              f"{(r.get('duration_s') or 0)//60} | {r.get('total_input',0):,} | {r.get('total_output',0):,} | {r.get('self_check') or ''} |")
+              f"{(r.get('duration_s') or 0)/60:.1f} | {f['input'] + f['cache_create']:,} | {f['cache_read']:,} | {r.get('total_output',0):,} | {r.get('self_check') or ''} |")
     ins = [r.get("total_input", 0) for r in rows]; outs = [r.get("total_output", 0) for r in rows]
-    print(f"median in {int(statistics.median(ins)):,} · median out {int(statistics.median(outs)):,} · total out {sum(outs):,}")
+    print(f"median total-in {int(statistics.median(ins)):,} (mostly cache reads) · median out {int(statistics.median(outs)):,} · total out {sum(outs):,}")
     by = {}
     for r in rows:
         k = f"{r.get('skill')}/{r.get('mode')}"; by.setdefault(k, []).append(r.get("total_output", 0))
