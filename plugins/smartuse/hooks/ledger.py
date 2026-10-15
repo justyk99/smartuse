@@ -108,7 +108,21 @@ def on_stop(data):
         return
     pending = claimed
     since = parse_ts(p.get("started_at") or "")
-    totals, turns = sum_usage(data.get("transcript_path") or "", since)
+    tp = data.get("transcript_path") or ""
+    totals, turns = sum_usage(tp, since)
+    # A forked skill (context: fork) or a subagent spends its tokens in <session>/subagents/agent-*.jsonl, not in the
+    # main transcript: add every subagent file of this session that has usage after started_at.
+    try:
+        sub = pathlib.Path(tp).with_suffix("") / "subagents"
+        for af in sorted(sub.glob("agent-*.jsonl")) if sub.is_dir() else []:
+            t2, n2 = sum_usage(str(af), since)
+            for model, d2 in t2.items():
+                d = totals.setdefault(model, {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0, "calls": 0})
+                for k in d2:
+                    d[k] += d2[k]
+            turns += n2
+    except Exception:
+        pass
     f = flat(totals)
     now = datetime.datetime.now(datetime.timezone.utc)
     rec = {
