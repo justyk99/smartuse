@@ -11,7 +11,7 @@
 
 A planner needs paths, owners, absolute dates, non-goals, gated deliverables and open questions with owners. Nobody types that by hand every time. Half of it is in your repo; the other half is in your head. `make-prompt` greps the first half and asks you a few multiple-choice questions for the second. The result is a spec a fresh session can execute. The other pieces keep the work honest afterwards: docs that update themselves after each commit, a reply voice you choose, a safety floor that fires even in bypass mode, and a ledger that shows what every run cost.
 
-<p align="center"><img src="docs/media/demo.gif" alt="one line in, kickoff out (demo)" width="720"></p>
+<!-- demo: docs/media/demo.gif — one line in, kickoff out, the receipts table (60 s). Recording pending. -->
 
 ## Install (30 seconds)
 
