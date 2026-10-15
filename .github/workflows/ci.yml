@@ -1,0 +1,32 @@
+name: ci
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/ledger.py
+      - name: JSON manifests parse
+        run: |
+          python3 -c "import json; json.load(open('.claude-plugin/marketplace.json')); json.load(open('plugins/smartuse/.claude-plugin/plugin.json')); json.load(open('plugins/smartuse/hooks/hooks.json'))"
+      - name: Shell syntax
+        run: bash -n plugins/smartuse/hooks/tests/run.sh && bash -n plugins/smartuse/hooks/tests/ledger-test.sh && bash -n bench/run.sh
+      - name: bash-guard regression (32 cases)
+        run: bash plugins/smartuse/hooks/tests/run.sh
+      - name: ledger regression
+        run: bash plugins/smartuse/hooks/tests/ledger-test.sh
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Claude Code
+        run: curl -fsSL https://claude.ai/install.sh | bash
+      - name: Validate plugin and marketplace (strict)
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          claude plugin validate --strict plugins/smartuse
+          claude plugin validate .

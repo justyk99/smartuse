@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Benchmark /yk-kit:make-prompt (quick dry) over asks.txt. See README.md.
+# Benchmark /smartuse:make-prompt (quick dry) over asks.txt. See README.md.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-PLUGIN_DIR=$(cd "$HERE/../plugins/yk-kit" 2>/dev/null && pwd || true)
+PLUGIN_DIR=$(cd "$HERE/../plugins/smartuse" 2>/dev/null && pwd || true)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -26,7 +26,7 @@ while IFS= read -r ask || [ -n "$ask" ]; do
   ( cd "$TMP" && git init -q ) 
   echo "[$n] $ask"
   ( cd "$TMP" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude --plugin-dir "$PLUGIN_DIR" \
-      -p "/yk-kit:make-prompt quick dry $ask" \
+      -p "/smartuse:make-prompt quick dry $ask" \
       --permission-mode bypassPermissions --output-format json \
       --max-turns 60 --max-budget-usd 4 ) > "$RESULTS/$n.json" 2> "$RESULTS/$n.err"
   rm -rf "$TMP"
