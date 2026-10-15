@@ -37,6 +37,13 @@ Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (
 ## Where docs live (docs root) — skip if absent
 Docs root and diff command come from the adapter (`docs_root`, `vcs`, `svn_flags`) or detection: git → `git show --stat <hash>` then `git show <hash> -- <file>`; svn → `svn diff -c rNNNN --summarize` then `svn diff -c rNNNN <file>` with `svn_flags`. No docs root → print `living-docs: no docs root, skipping` and stop. Never create a docs root on your own.
 
+## Step 0 — say what is missing before doing anything
+Check, in this order, and print the matching line as the FIRST line of the reply, then stop:
+- no docs root (adapter `docs_root` unset and no detectable one) → `living-docs: no docs root, skipping`
+- the task folder / task.md named in the arguments does not exist → `living-docs: task folder not found: <path>`
+- the commit id cannot be found in the task.md stamp or the arguments → `living-docs: no commit id, give me rNNNN / <hash>`
+Never draft DEV.md or USER.md content for a feature you could not find; a missing input is reported, not invented.
+
 ## Procedure (T3 — after a commit)
 
 1. **Read** task.md fully (status line, requirements, plan checklist, `## Decisions` if present, `decisions.md` if present). Note the commit id and version.
