@@ -1,0 +1,4 @@
+node_modules/
+.claude/*.local.md
+.claude/settings.local.json
+*.log

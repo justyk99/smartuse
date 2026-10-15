@@ -1,0 +1,15 @@
+{
+  "name": "yk-kit",
+  "description": "yk-kit \u2014 kickoff specs from one line, living docs after every commit, switchable reply styles, a deterministic safety floor.",
+  "owner": {
+    "name": "YK"
+  },
+  "plugins": [
+    {
+      "name": "yk-kit",
+      "description": "One line in, planner-grade kickoff out \u2014 plus living docs, reply styles and a bash safety floor.",
+      "source": "./plugins/yk-kit",
+      "category": "productivity"
+    }
+  ]
+}
