@@ -159,6 +159,16 @@ def on_subagent_stop(data):
     if not routing.exists():
         return
     tp = data.get("agent_transcript_path") or data.get("transcript_path") or ""
+    # Two SubagentStop hooks may run (a user-level copy and the plugin's): claim this agent once, atomically.
+    aid = data.get("agent_id") or pathlib.Path(tp).stem
+    marker = state_dir(project) / f"receipt.{aid}.done"
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        return
+    except Exception:
+        pass
     totals, turns = sum_usage(tp)
     f = flat(totals)
     rec = {
