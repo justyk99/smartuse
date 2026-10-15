@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 — in progress (2026-10-15)
+- `run-plan --until-done`: the lazy-CEO loop. A Stop hook (`until-done.py`) refuses to end the turn while units or the repo's `check` command are unfinished; the model stops only for a real human question (`needs_human`), a double failure, a rule gate, or after 6 blocks. 10-case test.
+- Adapter field `check:`.
+
 ## 0.2.0 — 2026-10-15, first public release
 - Renamed from `yk-kit` to `smartuse` before the first push (no installs existed under the old name).
 - Repository scaffolding: CI (hook + ledger tests, strict manifest validation), issue and PR templates, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, `docs/research` and `docs/notes`.

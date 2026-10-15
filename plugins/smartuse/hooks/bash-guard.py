@@ -16,7 +16,7 @@ RULES = [
     (r"\bchmod\s+(-R\s+)?(777|a\+rwx|o\+w)\b",
      "world-writable chmod"),
     (r"\b(cat|less|more|head|tail|sed|awk|grep|strings|base64|xxd|cp|scp|rsync|curl|python3?|node|tee|jq)\b[^;&|]*"
-     r"(\.claude\.json|db-creds\.json|\.jira_env|/\.ssh/id_[a-z0-9]+(\s|$)|\.ssh/config|gh/hosts\.yml|\.git-credentials|\.netrc)",
+     r"(\.claude\.json|db-creds\.json|\.jira_env|/\.ssh/id_[a-z0-9]+(\s|$)|\.ssh/config|gh/hosts\.yml|\.git-credentials|\.netrc|recovery-codes|/secrets/)",
      "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
     (r"(?=.*\b(sqlcmd|osql|tsql|sqlq|spapply|mssql)\b)(?=.*\b(DROP\s+(TABLE|DATABASE|PROC|PROCEDURE|LOGIN|USER)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b)",
      "destructive SQL through the shell — SQL in chat, a human runs it"),
