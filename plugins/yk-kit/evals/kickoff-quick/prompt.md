@@ -1,1 +1,1 @@
-Write me a kickoff brief for this work, quick mode, no questions, dry run: add a CSV export button to the orders report page. Deadline about three weeks. The tester signs off.
+Write me a kickoff brief for this work, quick mode, no questions, dry run: add a CSV export button to the orders report page. Deadline about three weeks. The tester signs off. When you are done, show me the full kickoff here as well, not just the summary.

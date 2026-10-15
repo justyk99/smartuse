@@ -72,7 +72,7 @@ Fill `templates/kickoff.md` (sections: where things are · people / scope / date
 - Task folder per the adapter: `task_root/<task>/task.md` (+ `decisions.md`); if `task_template` is set, start from it and put the prompt under `## Task`, leaving `## Decisions` empty.
 - Docs root present → living-docs stubs `DEV.md` + `USER.md` from the `living-docs` skill templates (same plugin) with only the summary line filled.
 - Wrong repo per § 1 → save to `~/.claude/tmp/make-prompt/<task>/` and say "open Claude in <repo>, then `/make-prompt` again or paste <path>".
-- `dry` mode → `~/.claude/tmp/make-prompt/<task>/` only, nothing in the repo.
+- `dry` mode → `~/.claude/tmp/make-prompt/<task>/` only, nothing in the repo. If that path cannot be written (sandbox, permission denied), try `${TMPDIR:-/tmp}/yk-kit/make-prompt/<task>/`; if that is refused too, **print the whole kickoff in the reply under `## Kickoff (unsaved)`** so nothing is lost — never answer with only the summary.
 
 ## 5. Self-check — the quality gate, shown with the hand-off
 Score the saved prompt, ✓ / ✗ per line; fix every ✗ with one more question (interview) or an explicit `unknown → who` (quick) before handing off:
