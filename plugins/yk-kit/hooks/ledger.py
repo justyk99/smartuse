@@ -95,11 +95,18 @@ def on_stop(data):
     pending = state_dir(project) / "pending.json"
     if not pending.exists():
         return
+    # Two Stop hooks may run at once (a user-level copy and the plugin's): claim the file atomically so only one writes.
+    claimed = pending.with_name(f"pending.{os.getpid()}.claimed")
     try:
-        p = json.loads(pending.read_text(encoding="utf-8"))
-    except Exception:
-        pending.unlink(missing_ok=True)
+        os.rename(pending, claimed)
+    except OSError:
         return
+    try:
+        p = json.loads(claimed.read_text(encoding="utf-8"))
+    except Exception:
+        claimed.unlink(missing_ok=True)
+        return
+    pending = claimed
     since = parse_ts(p.get("started_at") or "")
     totals, turns = sum_usage(data.get("transcript_path") or "", since)
     f = flat(totals)
@@ -120,6 +127,14 @@ def on_stop(data):
         "corrections": p.get("corrections"),
         "notes": p.get("notes"),
     }
+    if LEDGER.exists():
+        try:
+            last = json.loads(LEDGER.read_text(encoding="utf-8").splitlines()[-1])
+            if last.get("session_id") == rec["session_id"] and last.get("task") == rec["task"] and abs((parse_ts(last["ts"]) - now).total_seconds()) < 60:
+                pending.unlink(missing_ok=True)
+                return
+        except Exception:
+            pass
     append(LEDGER, rec)
     pending.unlink(missing_ok=True)
 
