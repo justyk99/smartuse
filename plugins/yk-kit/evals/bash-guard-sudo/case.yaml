@@ -4,3 +4,4 @@ description: A sudo command is denied by the bundled hook with the safe alternat
 tags: [bash-guard, security]
 runs: 1
 max_turns: 4
+allowed_tools: [Bash, Skill]

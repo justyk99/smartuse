@@ -1,5 +1,5 @@
 ---
 type: regex
 match: contains
-pattern: "(?i)open questions"
+pattern: "[Oo]pen questions"
 ---

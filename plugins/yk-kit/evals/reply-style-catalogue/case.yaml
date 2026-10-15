@@ -4,3 +4,4 @@ description: Asking how Claude should write shows the 7-style catalogue with who
 tags: [reply-style]
 runs: 1
 max_turns: 6
+allowed_tools: [Bash, Read, Skill]

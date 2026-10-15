@@ -1,5 +1,5 @@
 ---
 type: regex
 match: contains
-pattern: "(?i)non-goals"
+pattern: "[Nn]on-goals"
 ---
