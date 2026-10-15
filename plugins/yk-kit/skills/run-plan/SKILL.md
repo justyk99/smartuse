@@ -27,12 +27,12 @@ Read task.md: § 5 deliverables (the units), § 4 constraints and rabbit holes (
 `--routing off`: every unit on the session model, receipts still written — this is the A/B baseline. Rules: a unit without a runnable check is never `mechanical`; nothing is routed to a model stronger than the session's; a blocked unit stays blocked.
 
 ## 2. Dry run (always shown, then WAIT for "go" unless --yes)
-Write `.claude/yk-kit/routing.json` in the repo: `{"active":true,"task":"<name>","dial":"safe","started_at":"<now>","units":[{"id":1,"title":"…","tier":"mechanical","model":"haiku","why":"<one line>","budget_turns":15,"check":"<the runnable check>","blocked_by":null}]}` and print the same as a table: `# · unit · tier · model · why · budget · check`. Then: `Say "go" to run the first <N>, "go all", or "retier 3 build" to change a row.` Nothing runs before that.
+Write `~/.claude/yk-kit/projects/<repo folder name>/routing.json` (never inside the repo): `{"active":true,"task":"<name>","dial":"safe","started_at":"<now>","units":[{"id":1,"title":"…","tier":"mechanical","model":"haiku","why":"<one line>","budget_turns":15,"check":"<the runnable check>","blocked_by":null}]}` and print the same as a table: `# · unit · tier · model · why · budget · check`. Then: `Say "go" to run the first <N>, "go all", or "retier 3 build" to change a row.` Nothing runs before that.
 
 ## 3. Execute, one unit at a time, FOREGROUND
 For each unit in order:
 1. Spawn ONE Agent (foreground — the user sees the task card and tool count) with `model` per the table and a brief of ≤ 40 lines: the unit's spec and check · the constraints + rabbit holes from § 4 · the files it may touch (and only those) · "you cannot ask questions: write `unknown: <what> → <who>` instead" · "report: what you did, the check's output verbatim, files changed, unknowns" · the turn budget.
-2. On return, append a receipt line to `.claude/yk-kit/receipts.jsonl`: `{"ts","unit":1,"title","tier","model","outcome":"pass|fail|blocked","check":"<first line of the check output>","escalated":false,"files":[…]}`. The SubagentStop hook adds the agent's tokens as its own line (same file) — do not estimate tokens yourself.
+2. On return, append a receipt line to `~/.claude/yk-kit/projects/<repo folder name>/receipts.jsonl`: `{"ts","unit":1,"title","tier","model","outcome":"pass|fail|blocked","check":"<first line of the check output>","escalated":false,"files":[…]}`. The SubagentStop hook adds the agent's tokens as its own line (same file) — do not estimate tokens yourself.
 3. `fail`, or a blocking `unknown:` → **escalate once**: re-run the unit one tier up (never above the session model) with the failure pasted in; record `"escalated":true`. Still failing → stop and report; do not loop.
 4. **Verify** every delegated `build` unit: a fresh agent (verify tier) gets the diff (`git diff` / `svn diff` of the unit's files) + the unit's spec: "list only gaps that affect correctness or the stated spec; no style". Gaps → fix on the build tier once → re-verify once. Judgment units are verified by the user, not by an agent.
 5. After each unit print ONE line: `unit 2/5 done · mechanical/haiku · check passed · next: unit 3 (build)`. That line is the visibility rule — never run silently.
@@ -41,7 +41,7 @@ Stop after N units (default 3) and ask "go" again, so the user can read the rece
 ## 4. Close
 - Tick the units' boxes in task.md; add a dated line to `decisions.md` / `## Decisions` for every escalation or retier.
 - Print the receipts table: `unit · tier · model · outcome · escalated · agent tokens in/out` (tokens from the SubagentStop lines) and the plain comparison: "delegated units used model X for N% of the agent tokens; with `--routing off` they would all have run on the session model."
-- Write `.claude/yk-kit/pending.json` `{"skill":"run-plan","task":"<name>","mode":"<dial>","started_at":"<routing.started_at>","self_check":"<passed>/<units>","notes":"<escalations>"}` for the ledger; set `"active": false` in routing.json.
+- Write `~/.claude/yk-kit/projects/<repo folder name>/pending.json` `{"skill":"run-plan","task":"<name>","mode":"<dial>","started_at":"<routing.started_at>","self_check":"<passed>/<units>","notes":"<escalations>"}` for the ledger; set `"active": false` in routing.json.
 
 ## Rules
 - Foreground only. Never the Workflow tool from this skill — multi-agent runs need the user to type the request themselves ("use a workflow"); offer that in one line when ≥ 3 units are independent.

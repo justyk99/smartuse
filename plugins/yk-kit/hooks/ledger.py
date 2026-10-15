@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """ledger.py — yk-kit receipts. Runs as a Stop hook (and SubagentStop). Deterministic, 0 model tokens.
 
-Stop:        if <project>/.claude/yk-kit/pending.json exists (written by a skill at hand-off), sum the token usage
+Stop:        if ~/.claude/yk-kit/projects/<project-dir-name>/pending.json exists (written by a skill at hand-off), sum the token usage
              in this session's transcript since pending.started_at, append one line to ~/.claude/yk-kit/ledger.jsonl,
              delete pending.json. No pending file -> do nothing.
-SubagentStop: if <project>/.claude/yk-kit/routing.json exists (written by run-plan), append one receipt line per
-             finished agent to <project>/.claude/yk-kit/receipts.jsonl with its model and tokens.
+SubagentStop: if ~/.claude/yk-kit/projects/<project-dir-name>/routing.json exists (written by run-plan), append one receipt line per
+             finished agent to that folder's receipts.jsonl with its model and tokens.
 Report:      python3 ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /yk-kit:ledger).
 Never blocks a turn. Any error -> exit 0 silently (a receipt must never stop the work).
 """
@@ -78,9 +78,16 @@ def append(path, obj):
         fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
+def state_dir(project):
+    """Per-project receipt state lives under the user's home, never inside the repo (team repos stay clean)."""
+    d = HOME / ".claude" / "yk-kit" / "projects" / project.name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def on_stop(data):
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
-    pending = project / ".claude" / "yk-kit" / "pending.json"
+    pending = state_dir(project) / "pending.json"
     if not pending.exists():
         return
     try:
@@ -114,7 +121,7 @@ def on_stop(data):
 
 def on_subagent_stop(data):
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
-    routing = project / ".claude" / "yk-kit" / "routing.json"
+    routing = state_dir(project) / "routing.json"
     if not routing.exists():
         return
     tp = data.get("agent_transcript_path") or data.get("transcript_path") or ""
@@ -131,7 +138,7 @@ def on_subagent_stop(data):
         "total_input": f["input"] + f["cache_read"] + f["cache_create"],
         "total_output": f["output"],
     }
-    append(project / ".claude" / "yk-kit" / "receipts.jsonl", rec)
+    append(state_dir(project) / "receipts.jsonl", rec)
 
 
 def report(n=10):
