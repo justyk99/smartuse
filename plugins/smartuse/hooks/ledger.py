@@ -108,6 +108,11 @@ def on_stop(data):
         return
     pending = claimed
     since = parse_ts(p.get("started_at") or "")
+    now0 = datetime.datetime.now(datetime.timezone.utc)
+    if since and since > now0 + datetime.timedelta(seconds=60):
+        # a forked skill wrote a local-time clock labelled Z (future) -> count the last 15 minutes instead of nothing
+        since = now0 - datetime.timedelta(minutes=15)
+        p["notes"] = (p.get("notes") or "") + " [started_at was in the future; window = last 15 min]"
     tp = data.get("transcript_path") or ""
     totals, turns = sum_usage(tp, since)
     # A forked skill (context: fork) or a subagent spends its tokens in <session>/subagents/agent-*.jsonl, not in the
@@ -132,7 +137,7 @@ def on_stop(data):
         "skill": p.get("skill"),
         "task": p.get("task"),
         "mode": p.get("mode"),
-        "duration_s": int((now - since).total_seconds()) if since else None,
+        "duration_s": max(0, int((now - since).total_seconds())) if since else None,
         "assistant_calls": turns,
         "tokens": totals,
         "total_input": f["input"] + f["cache_read"] + f["cache_create"],
