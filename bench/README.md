@@ -1,13 +1,13 @@
-# yk-kit benchmark
+# smartuse benchmark
 
-Runs `/yk-kit:make-prompt quick dry <ask>` on 5 typical asks against a tiny sample repo and prints one comparison table.
+Runs `/smartuse:make-prompt quick dry <ask>` on 5 typical asks against a tiny sample repo and prints one comparison table.
 
 ## Run
 
 ```bash
-cd /home/yk/yk-kit/bench
-./run.sh                          # loads ../plugins/yk-kit via --plugin-dir
-./run.sh --plugin-dir /path/to/yk-kit
+cd /home/yk/smartuse/bench
+./run.sh                          # loads ../plugins/smartuse via --plugin-dir
+./run.sh --plugin-dir /path/to/smartuse
 ```
 
 Needs `claude` and `jq`. Each ask runs on a fresh temp copy of `sample-repo/` (git-initialised), so the fixture stays clean. Raw JSON goes to `results/<n>.json`. Runs spend plan usage (cap: 60 turns, $4 each).
