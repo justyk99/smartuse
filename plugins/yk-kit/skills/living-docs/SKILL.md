@@ -53,6 +53,8 @@ Docs root and diff command come from the adapter (`docs_root`, `vcs`, `svn_flags
 5. **Index.** Add or update the feature's line in `<docs-root>/../INDEX.md` (`| feature | DEV | USER | last version | date |`), create INDEX.md from the one-line header if missing.
 6. **Report, one line per file, then stop:** `docs updated: DEV.md (flow, objects, +1 decision) · USER.md (+1 step, +1 change) · INDEX.md`. If a section needed a fact you could not find in the diff or the repo, say `unknown: <what>` instead of guessing.
 
+7. **Receipt.** Write `.claude/yk-kit/pending.json` in the repo with `{"skill":"living-docs","task":"<feature>","mode":"update|fix|publish","started_at":"<now, ISO UTC>","self_check":"<sections updated>/<sections>","notes":"<one line>"}`; the Stop hook appends the ledger line.
+
 ## Guardrails (restated — you do not inherit the project rules)
 
 1. **Source of truth = the committed diff + task.md.** A task.md decision without a matching diff goes in `decisions`, never in `flow` or `steps`. Never describe behaviour you did not see in the diff.

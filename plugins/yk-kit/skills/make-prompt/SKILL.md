@@ -31,7 +31,7 @@ jira_cli:                        # optional command that prints a ticket, e.g. "
 Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (only if `docs/` exists); svn → `_SESSIONS/` / `_SESSIONS/archive/` / `_KNOWLEDGE_BASE/features/` (only if `_KNOWLEDGE_BASE/` exists). Keep the file out of git (`.gitignore`).
 
 ## Live context (injected when the skill is invoked — do not re-run these)
-- Today: !`date +%F || true` · cwd: !`pwd || true`
+- Today: !`date +%F || true` · Invoked at: !`date -u +%FT%TZ || true` · cwd: !`pwd || true`
 - VCS: !`git branch --show-current 2>/dev/null || svn info --show-item revision 2>/dev/null || echo none` · dirty files: !`{ git status --short 2>/dev/null || svn status 2>/dev/null || true; } | wc -l`
 - Open task folders: !`{ ls -d _SESSIONS/*/ .task/ACTIVE/*/ .task/PARKED/*/ 2>/dev/null || true; } | grep -v -i "archive\|template" | head -12 | tr '\n' ' ' || true`
 - Docs root: !`{ ls -d _KNOWLEDGE_BASE/features docs/features 2>/dev/null || echo none; } | tr '\n' ' ' || true`
@@ -84,6 +84,8 @@ Print, in this order:
 2. **Human summary, 5 lines** (what · who · when · done · not) — ready to paste to the team or Jira.
 3. The `assumed:` list (quick mode) or the open questions (interview).
 4. Next step, one line: small task → `say "go" — I start deliverable 1 in plan mode here`; big task → `/clear, then "continue <task folder>" (fresh context beats this one)`; when "done" is a checkable condition → `set it as /goal <condition> so the session cannot stop early`; design-heavy → "This needs a design pass — switch to your strongest model".
+
+7. **Receipt.** Write `.claude/yk-kit/pending.json` in the repo (create the folder) with: `{"skill":"make-prompt","task":"<feature name>","mode":"interview|quick","started_at":"<Invoked at, from the live context>","self_check":"<n>/13","corrections":<how many answers the user changed>,"notes":"<one line>"}`. The Stop hook turns it into one ledger line (tokens, minutes) when this turn ends — say `receipt: pending → ledger` in the report. `dry` mode: still write it (the ledger is how the skill proves its cost).
 
 ## Rules
 - Ground check before questions. Memory and grep answer before YK does.

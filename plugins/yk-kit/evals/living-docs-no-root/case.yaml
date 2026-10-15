@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: living-docs-no-root
+description: With no docs root the living-docs skill says so and stops instead of inventing docs.
+tags: [living-docs]
+runs: 1
+max_turns: 8
