@@ -25,6 +25,8 @@ check deny  'python3 -c "print(open(\"/home/yk/.claude/tools/db-creds.json\").re
 check deny  'grep TOKEN ~/.claude/tools/.jira_env'
 check deny  'cat ~/.config/gh/hosts.yml'
 check deny  'cat ~/.git-credentials'
+check deny  'cat ~/.claude/tools/secrets/github-recovery-codes.txt'
+check deny  'grep -r . ~/.claude/tools/secrets/'
 check deny  'sqlcmd -S x -Q "DROP TABLE t_x"'
 check deny  'node ~/.claude/tools/sqlq.cjs 1.2.3.4 db "DELETE FROM t_member"'
 check deny  'git push --force origin staging'

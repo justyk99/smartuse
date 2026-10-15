@@ -1,7 +1,7 @@
 ---
 name: run-plan
-description: Execute a saved kickoff (the task.md that make-prompt wrote) with a tier plan and receipts. The session model tags each deliverable judgment / build / mechanical / verify, shows a routing table as a DRY RUN (unit → tier → model → why → turn budget) and waits for "go"; then runs units in the FOREGROUND through the Agent tool with the model per tier (never above the session's model), writes a receipt per unit, verifies every delegated result with a fresh agent, and closes with a receipts summary. Dial: --routing off | safe (default) | aggressive. Use when the user says "run the plan", "execute the kickoff", "start deliverable 1", or answers make-prompt's hand-off with "go".
-argument-hint: "<task folder or task.md> [--routing off|safe|aggressive] [--units N] [--yes]"
+description: Execute a saved kickoff (the task.md that make-prompt wrote) with a tier plan and receipts. The session model tags each deliverable judgment / build / mechanical / verify, shows a routing table as a DRY RUN (unit → tier → model → why → turn budget) and waits for "go"; then runs units in the FOREGROUND through the Agent tool with the model per tier (never above the session's model), writes a receipt per unit, verifies every delegated result with a fresh agent, and closes with a receipts summary. Dial: --routing off | safe (default) | aggressive. `--until-done` = the lazy-CEO loop: no "go" between batches, the Stop gate refuses to end the turn while units or the repo check are unfinished, stops only for a real human question, a double failure, a rule gate or the cap. Use when the user says "run the plan", "execute the kickoff", "start deliverable 1", or answers make-prompt's hand-off with "go".
+argument-hint: "<task folder or task.md> [--routing off|safe|aggressive] [--units N] [--yes] [--until-done]"
 allowed-tools: Read, Grep, Glob, Agent, Write, Edit, Bash(ls *), Bash(cat *), Bash(date *), Bash(mkdir *), Bash(git diff *), Bash(git status *), Bash(svn diff *), Bash(svn status *)
 disable-model-invocation: true
 ---
@@ -14,7 +14,8 @@ Manual-only on purpose (`disable-model-invocation: true`): it spends plan usage,
 
 ## Live context
 - Now: !`date -u +%FT%TZ || true` · session model: the model answering this turn (never spawn an agent on a stronger one)
-- Arguments: `$ARGUMENTS` — a task folder or task.md; `--routing off|safe|aggressive` (default safe); `--units N` (default 3 per "go"); `--yes` skips the dry-run wait (headless only).
+- Arguments: `$ARGUMENTS` — a task folder or task.md; `--routing off|safe|aggressive` (default safe); `--units N` (default 3 per "go"); `--yes` skips the dry-run wait (headless only); `--until-done` = run every unit without waiting, keep going until done or a stop reason (see § 3b).
+- Repo check command: from the adapter `check:` (e.g. `npm test`, `bash .claude/build-check.sh`) — required for `--until-done`; without it the gate only tracks unit status.
 
 ## 0. Read the kickoff
 Read task.md: § 5 deliverables (the units), § 4 constraints and rabbit holes (restated in every brief), § 7 open questions (a unit that depends on an unanswered one is **blocked** — say so, do not guess), § 8 verification. No task.md → "run `make-prompt` first" and stop.
@@ -39,6 +40,14 @@ For each unit in order:
 4. **Verify** every delegated `build` unit: a fresh agent (verify tier) gets the diff (`git diff` / `svn diff` of the unit's files) + the unit's spec: "list only gaps that affect correctness or the stated spec; no style". Gaps → fix on the build tier once → re-verify once. Judgment units are verified by the user, not by an agent.
 5. After each unit print ONE line: `unit 2/5 done · mechanical/haiku · check passed · next: unit 3 (build)`. That line is the visibility rule — never run silently.
 Stop after N units (default 3) and ask "go" again, so the user can read the receipts between batches.
+
+## 3b. `--until-done` — the lazy-CEO loop
+Write `"until_done": true`, `"check": "<adapter check command>"` and a `"status": "pending"` on every unit into routing.json before the first unit. Then:
+1. Run units in order with no "go" between batches. After each unit set its `status` (`pass` · `fail` · `blocked`) in routing.json and print the one-line progress message.
+2. The `until-done` Stop hook refuses to end the turn while any unit is pending / running / failed or while the check command fails, and tells you what is left. Keep working; do not argue with the gate.
+3. **Stop reasons — the only ways out:** (a) every unit is pass or blocked AND the check passes; (b) a unit needs the human: write the exact question into routing.json as `"needs_human": "<question>"` and make it the FIRST line of your final message (`NEEDS YOU: …`); (c) a unit failed twice (escalation used) → mark it `blocked`, record why, continue with units that do not depend on it; (d) a rule gate (a file owned by someone else, a shared server, money or security paths) → `needs_human`; (e) the gate has blocked 6 times → it lets you stop; say what is left.
+4. Never commit. The final message: `NEEDS YOU` line if any, then the receipts table, then "what the human should look at first".
+In an interactive session the user may also set `/goal <§ 8 acceptance>`; in headless use the CLI caps: `claude -p "/smartuse:run-plan <task.md> --until-done" --max-budget-usd N --max-turns M`.
 
 ## 4. Close (always — after a finished batch, a stop, or a block)
 - Tick the units' boxes in task.md; add a dated line to `decisions.md` / `## Decisions` for every escalation or retier.

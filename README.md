@@ -25,7 +25,7 @@ Or from your shell: `claude plugin marketplace add justyk99/smartuse && claude p
 | Skill | You type | You get |
 |---|---|---|
 | `make-prompt` | `/smartuse:make-prompt add PWA install to the player site` | a ground check of your repo (reference code, owners from git log, lockfiles, missing tools, past tasks, incidents in memory), ≤ 3 screens of multiple-choice questions where option 1 is Claude's evidence-backed guess and "I don't know" is always allowed, an 8-section kickoff saved in your task folder, a 5-line summary for your team, a 13-line self-check. `quick` = no questions, every guess marked `assumed:`. |
-| `run-plan` | `/smartuse:run-plan <task.md> --routing safe` | a dry-run routing table (unit → judgment / build / mechanical / verify → model → why), then foreground agents with a model per tier, one escalation, a fresh-agent review of every delegated build, a receipt per unit, one progress line per unit. `--routing off` is the baseline for your own A/B. |
+| `run-plan` | `/smartuse:run-plan <task.md> --routing safe` (add `--until-done` for the loop) | a dry-run routing table (unit → judgment / build / mechanical / verify → model → why), then foreground agents with a model per tier, one escalation, a fresh-agent review of every delegated build, a receipt per unit, one progress line per unit. `--routing off` is the baseline for your own A/B. `--until-done` keeps going without "go": a Stop gate refuses to end the turn while units or the repo check are unfinished; it stops only for a real human question, a double failure, a rule gate or the cap. |
 | `living-docs` | runs by itself after a commit lands | `DEV.md` (developers) + `USER.md` (operators) per feature, only the sections the diff touched, from the diff + task notes; forked on a cheaper model |
 | `reply-style` | `/smartuse:reply-style` | 7 voices (lcd · bluf · engineer · teacher · minimal · plain · memo) with who-they-are-for and pros/cons, installed as a Claude Code output style |
 | `ledger` | `/smartuse:ledger` | every run's minutes, fresh vs cached input, output tokens and self-check, with medians. Written by a Stop hook from the session transcript; costs 0 model tokens |
@@ -62,7 +62,7 @@ Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tool
 - Token savings from `run-plan` routing are **not yet measured**; the A/B on 20 real tasks is on the roadmap. The ledger exists so that the number, when published, has a line of evidence per task.
 
 ## Configure per repo (optional)
-`.claude/smartuse.local.md` with YAML frontmatter: `vcs`, `task_root`, `archive_root`, `docs_root`, `task_template`, `svn_flags`, `author`, `jira_cli`. Without it the skills detect git/svn and the usual folders. Receipts live under `~/.claude/smartuse/`, never inside your repo.
+`.claude/smartuse.local.md` with YAML frontmatter: `vcs`, `task_root`, `archive_root`, `docs_root`, `task_template`, `svn_flags`, `author`, `jira_cli`, `check` (the runnable check `run-plan --until-done` must pass, e.g. `npm test`). Without it the skills detect git/svn and the usual folders. Receipts live under `~/.claude/smartuse/`, never inside your repo.
 
 ## Repository map
 ```

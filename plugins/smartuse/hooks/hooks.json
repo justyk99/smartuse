@@ -1,5 +1,5 @@
 {
-  "description": "smartuse: bash-guard safety floor (PreToolUse) + receipts ledger (Stop / SubagentStop), all deterministic",
+  "description": "smartuse: bash-guard safety floor (PreToolUse) \u00b7 receipts ledger (Stop / SubagentStop) \u00b7 until-done gate (Stop), all deterministic",
   "hooks": {
     "PreToolUse": [
       {
@@ -20,6 +20,11 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/until-done.py\"",
+            "timeout": 330
           }
         ]
       }
