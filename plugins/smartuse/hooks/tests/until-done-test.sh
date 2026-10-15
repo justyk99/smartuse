@@ -24,11 +24,11 @@ printf -- '---\ncheck: python3 -c "print(1)"\n---\n' > "$D/proj/.claude/smartuse
 printf -- '---\ncheck: npx something\n---\n' > "$D/proj/.claude/smartuse.local.md"; fresh; expect block "npx refused"
 printf -- '---\ncheck: npm test -- --watch\n---\n' > "$D/proj/.claude/smartuse.local.md"; fresh; expect block "extra args after npm test refused"
 printf 'exit 0\n' > "$D/proj/check.sh"; printf -- '---\ncheck: bash check.sh\n---\n' > "$D/proj/.claude/smartuse.local.md"; fresh; expect block "unpinned bash script refused"
-( cd "$D/proj" && python3 "$H/until-done.py" --trust "bash check.sh" < /dev/null | grep -q "refused" ) && [ ! -f "$HOME/.claude/smartuse/trusted-checks.json" ] && echo "PASS --trust without a TTY is refused" || { echo "FAIL --trust worked without a TTY"; fail=1; }
+( cd "$D/proj" && python3 "$H/until-done.py" --trust "bash check.sh" < /dev/null | grep -q "sudo tee /etc/smartuse" ) && [ ! -f "$HOME/.claude/smartuse/trusted-checks.json" ] && [ ! -w /etc/smartuse/trusted-checks.json ] && echo "PASS --trust only prints the sudo instructions, writes nothing" || { echo "FAIL --trust wrote or printed wrongly"; fail=1; }
 SHA=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$D/proj/check.sh"); PROJ=$(cd "$D/proj" && pwd -P)
 mkdir -p "$HOME/.claude/smartuse"; printf '{"%s": {"check": "bash check.sh", "sha256": "%s"}}' "$PROJ" "$SHA" > "$HOME/.claude/smartuse/trusted-checks.json"
-fresh; expect allow "pinned bash script (hash matches) runs"
-printf 'exit 1\n' > "$D/proj/check.sh"; fresh; expect block "pinned script modified -> hash mismatch -> refused"
+fresh; expect block "a user-owned pin file is ignored (only root-owned /etc/smartuse counts)"
+printf 'exit 1\n' > "$D/proj/check.sh"; fresh; expect block "still refused after the script changes"
 printf -- '---\ncheck: true\n---\n' > "$D/proj/.claude/smartuse.local.md"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"needs_human":"which rounding rule?"}' > "$R"; expect allow "needs_human set"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"blocks":6}' > "$R"; expect allow "max_blocks reached"

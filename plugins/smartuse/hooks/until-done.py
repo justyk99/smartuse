@@ -12,7 +12,8 @@ reason the model reads ("units left: 3, 4 · check failed: …"), so the session
 The check command is NEVER taken from routing.json (the model writes that file). It comes only from the human-authored
 adapter `.claude/smartuse.local.md` (`check:`), is screened by the bash-guard rules, must be one of a few exact shapes
 (`npm test`, `pytest`, `make test`, `cargo test`, `go test ./...`, `dotnet test`, …) or a `bash <script>` the human pinned by
-hash from outside the repo (`--trust`), contains no shell metacharacters, and runs with shell=False. A file-guard hook denies
+hash in a ROOT-OWNED file (/etc/smartuse/trusted-checks.json, installed with sudo — `--trust` only prints the commands),
+contains no shell metacharacters, and runs with shell=False. A file-guard hook denies
 Claude's Write/Edit on the adapter and on the pin file. Its output is redacted (last 8 lines, secrets masked).
 0 model tokens. Any error -> allow the stop (a gate must never trap the session).
 """
@@ -27,7 +28,7 @@ FIXED = {("npm", "test"): False, ("pnpm", "test"): False, ("yarn", "test"): Fals
          ("go", "test", "./..."): False, ("dotnet", "test"): False, ("mvn", "test"): False, ("gradle", "test"): False,
          ("true",): False, ("false",): False}
 ARG_OK = re.compile(r"^[A-Za-z0-9_./:-]+$")
-TRUSTED = HOME / ".claude" / "smartuse" / "trusted-checks.json"   # human-pinned `bash <script>` checks: {project: {"check": str, "sha256": str}}
+TRUSTED = pathlib.Path("/etc/smartuse/trusted-checks.json")   # human-pinned `bash <script>` checks, ROOT-OWNED: the agent runs as the user and cannot write it
 META = re.compile(r"[;&|`$<>\\]|\$\(|\n")
 SECRET = re.compile(r"(?i)(token|password|passwd|secret|api[_-]?key|authorization)[^\n]{0,80}")
 
@@ -59,8 +60,20 @@ def sha256_of(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def pins_are_trustworthy():
+    """The pin file counts only if root owns it and its directory, and neither is writable by anyone else.
+    The agent runs as the user: it cannot create, replace or edit such a file (sudo is denied to it), so a pin there is a human act."""
+    try:
+        f = TRUSTED.stat(); d = TRUSTED.parent.stat()
+    except Exception:
+        return False
+    return f.st_uid == 0 and d.st_uid == 0 and not (f.st_mode & 0o022) and not (d.st_mode & 0o022)
+
+
 def trusted_match(check, project):
-    """A `bash <relative script>` check runs only if the human pinned exactly this command + the script's hash."""
+    """A `bash <relative script>` check runs only if a root-owned pin names exactly this command + the script's hash."""
+    if not pins_are_trustworthy():
+        return False
     try:
         t = json.loads(TRUSTED.read_text(encoding="utf-8")).get(str(project.resolve())) or {}
     except Exception:
@@ -102,24 +115,21 @@ def safe_argv(check, project):
 
 
 def trust(check):
-    """Human command: pin `bash <script>` + its sha256 for the current repo. Needs a real terminal and a typed `y`:
-    the model's Bash tool has no TTY, so it cannot pin anything (and bash-guard denies the command anyway)."""
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print("refused: --trust must be typed by a human in an interactive terminal (no TTY here)"); return
+    """Human helper: prints the pin entry and the sudo command that installs it. Writes nothing itself."""
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
     argv = shlex.split(check)
     if len(argv) != 2 or argv[0] not in ("bash", "sh") or argv[1].startswith(("-", "/", "~")) or ".." in argv[1] or not (project / argv[1]).is_file():
         print("refused: the form is `bash <relative script inside the repo>`"); return
-    if input(f"Pin `{check}` for {project}? The script runs on every Stop while run-plan --until-done is active. [y/N] ").strip().lower() != "y":
-        print("not pinned"); return
-    TRUSTED.parent.mkdir(parents=True, exist_ok=True)
+    entry = {str(project): {"check": check, "sha256": sha256_of(project / argv[1])}}
     try:
-        data = json.loads(TRUSTED.read_text(encoding="utf-8"))
+        existing = json.loads(TRUSTED.read_text(encoding="utf-8")) if TRUSTED.exists() else {}
     except Exception:
-        data = {}
-    data[str(project)] = {"check": check, "sha256": sha256_of(project / argv[1]), "pinned": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    TRUSTED.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"pinned for {project}: {check} (sha256 {data[str(project)]['sha256'][:12]}…) — re-pin after you change the script")
+        existing = {}
+    existing.update(entry)
+    body = json.dumps(existing, indent=2)
+    print("Run these yourself in your terminal (root-owned file = the human boundary; the agent cannot write it):\n")
+    print("sudo mkdir -p /etc/smartuse && sudo chmod 755 /etc/smartuse && sudo tee /etc/smartuse/trusted-checks.json >/dev/null <<'JSON'\n" + body + "\nJSON\nsudo chmod 644 /etc/smartuse/trusted-checks.json")
+    print("\nRe-run this after you change the script (the hash is pinned).")
 
 
 def redact(text):
@@ -138,7 +148,7 @@ def block(reason):
 
 def main():
     if len(sys.argv) > 2 and sys.argv[1] == "--trust":
-        trust(sys.argv[2]); return
+        trust(sys.argv[2]); return   # prints instructions only
     try:
         data = json.load(sys.stdin)
     except Exception:

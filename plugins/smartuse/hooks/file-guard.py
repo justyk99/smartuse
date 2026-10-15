@@ -4,7 +4,7 @@
 `~/.claude/smartuse/trusted-checks.json` (the human's hash pins). The model may read them, never write them.
 """
 import json, re, sys
-HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json)$")
+HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse/)")
 
 def main():
     try:
