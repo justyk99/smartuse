@@ -34,8 +34,8 @@ while IFS= read -r ask || [ -n "$ask" ]; do
   cost=$(jq -r '.total_cost_usd // "n/a"' "$f" 2>/dev/null || echo n/a)
   turns=$(jq -r '.num_turns // "n/a"' "$f" 2>/dev/null || echo n/a)
   mins=$(jq -r 'if .duration_ms then (.duration_ms/60000*10|round/10|tostring) else "n/a" end' "$f" 2>/dev/null || echo n/a)
-  saved=no; jq -r '.result // ""' "$f" 2>/dev/null | grep -q "Prompt saved" && saved=yes
-  check=no;  jq -r '.result // ""' "$f" 2>/dev/null | grep -q "✓" && check=yes
+  saved=no; jq -r '.result // ""' "$f" 2>/dev/null | grep -q -i -E "prompt saved|kickoff prompt is saved|saved (at|to)" && saved=yes
+  check=no;  jq -r '.result // ""' "$f" 2>/dev/null | grep -q -i -E "self-check" && check=yes
   ROWS="$ROWS| $ask | $cost | $turns | $mins | $saved | $check |"$'\n'
 done < "$HERE/asks.txt"
 
