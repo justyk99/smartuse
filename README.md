@@ -29,7 +29,7 @@ Then: `/yk-kit:make-prompt <one line about the work>`.
 - Styles and skills are instructions, not enforcement; the hook is enforcement.
 - `make-prompt quick` costs real plan usage because the ground check reads a lot: in the author's runs, 1–8 minutes and 3–4k output tokens on top of 130–200k cached reads per kickoff ($0.5–3 at API list prices). Right for multi-day work, wrong for one-file fixes — which it refuses. `/yk-kit:ledger` shows your own numbers.
 - Subagents cannot ask you questions. Unknowns come back as `unknown: … → who`.
-- Numbers in this README come from the author's own runs on two production codebases; the reproducible benchmark ships with 0.2.
+- Measured so far (2026-10-15, Claude Code 2.1.300): `claude plugin eval` 4 of 4 cases pass with the kit vs 0.00 / 0.00 / 0.50 / 0.00 without it (mean gain +0.88, $1.27 per full run at list price); three real kickoffs on live repos: 0.9–1.8 min, 3.1–3.9k output tokens each. Re-run them yourself: `claude plugin eval plugins/yk-kit --runs 1 --allow-tools "Bash,Read,Grep,Glob,Agent,Write,Skill"` (needs `bubblewrap` + `socat` on Linux) and `bench/run.sh`.
 
 ## Configure per repo (optional)
 `.claude/yk-kit.local.md` with YAML frontmatter: `vcs`, `task_root`, `archive_root`, `docs_root`, `task_template`, `svn_flags`, `author`, `jira_cli`. Without it the skills detect git/svn and the usual folders.
