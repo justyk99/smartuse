@@ -10,15 +10,24 @@ reason the model reads ("units left: 3, 4 · check failed: …"), so the session
   - the hook has blocked `max_blocks` times for this run (default 6; stored in routing.json),
   - routing.active is false.
 The check command is NEVER taken from routing.json (the model writes that file). It comes only from the human-authored
-adapter `.claude/smartuse.local.md` (`check:`), is screened by the bash-guard rules, must start with a known test runner,
-contains no shell metacharacters, and runs with shell=False. Its output is redacted (last 8 lines, secrets masked).
+adapter `.claude/smartuse.local.md` (`check:`), is screened by the bash-guard rules, must be one of a few exact shapes
+(`npm test`, `pytest`, `make test`, `cargo test`, `go test ./...`, `dotnet test`, …) or a `bash <script>` the human pinned by
+hash from outside the repo (`--trust`), contains no shell metacharacters, and runs with shell=False. A file-guard hook denies
+Claude's Write/Edit on the adapter and on the pin file. Its output is redacted (last 8 lines, secrets masked).
 0 model tokens. Any error -> allow the stop (a gate must never trap the session).
 """
 import json, os, sys, subprocess, pathlib, datetime, re, shlex
 
 HOME = pathlib.Path(os.path.expanduser("~"))
 
-RUNNERS = {"npm", "pnpm", "yarn", "bun", "npx", "pytest", "python", "python3", "make", "dotnet", "go", "cargo", "mvn", "gradle", "bash", "sh", "true", "false"}
+# Exact command shapes that may run. Extra args are allowed only for the runners marked True, and only if they look like
+# plain paths/names (no flags, no URLs, no package specs).
+FIXED = {("npm", "test"): False, ("pnpm", "test"): False, ("yarn", "test"): False, ("bun", "test"): False,
+         ("pytest",): True, ("make", "test"): False, ("make", "check"): False, ("cargo", "test"): False,
+         ("go", "test", "./..."): False, ("dotnet", "test"): False, ("mvn", "test"): False, ("gradle", "test"): False,
+         ("true",): False, ("false",): False}
+ARG_OK = re.compile(r"^[A-Za-z0-9_./:-]+$")
+TRUSTED = HOME / ".claude" / "smartuse" / "trusted-checks.json"   # human-pinned `bash <script>` checks: {project: {"check": str, "sha256": str}}
 META = re.compile(r"[;&|`$<>\\]|\$\(|\n")
 SECRET = re.compile(r"(?i)(token|password|passwd|secret|api[_-]?key|authorization)[^\n]{0,80}")
 
@@ -45,8 +54,28 @@ def guard_rules():
         return []
 
 
+def sha256_of(path):
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def trusted_match(check, project):
+    """A `bash <relative script>` check runs only if the human pinned exactly this command + the script's hash."""
+    try:
+        t = json.loads(TRUSTED.read_text(encoding="utf-8")).get(project.name) or {}
+    except Exception:
+        return False
+    if t.get("check") != check:
+        return False
+    argv = shlex.split(check)
+    if len(argv) != 2 or argv[0] not in ("bash", "sh") or argv[1].startswith(("-", "/", "~")) or ".." in argv[1]:
+        return False
+    script = project / argv[1]
+    return script.is_file() and sha256_of(script) == t.get("sha256")
+
+
 def safe_argv(check, project):
-    """Return argv for a check that is allowed to run, else None with a reason."""
+    """Return argv for a check that is allowed to run, else (None, reason)."""
     if META.search(check):
         return None, "shell metacharacters are not allowed in `check:`"
     for pat, why in guard_rules():
@@ -56,12 +85,36 @@ def safe_argv(check, project):
         argv = shlex.split(check)
     except ValueError as e:
         return None, f"cannot parse: {e}"
-    if not argv or argv[0] not in RUNNERS:
-        return None, f"`{argv[0] if argv else ''}` is not an allowed test runner ({', '.join(sorted(RUNNERS))})"
-    if argv[0] in ("bash", "sh"):
-        if len(argv) < 2 or argv[1].startswith(("-", "/", "~")) or ".." in argv[1] or not (project / argv[1]).is_file():
-            return None, "bash/sh checks must name a script inside the repo (relative path, no flags)"
-    return argv, ""
+    if not argv:
+        return None, "empty"
+    if trusted_match(check, project):
+        return argv, ""
+    for shape, extras_ok in FIXED.items():
+        if tuple(argv[:len(shape)]) == shape:
+            rest = argv[len(shape):]
+            if not rest:
+                return argv, ""
+            if extras_ok and all(ARG_OK.match(a) and not a.startswith("-") and "://" not in a and "@" not in a for a in rest):
+                return argv, ""
+            return None, f"extra arguments not allowed after `{' '.join(shape)}`"
+    return None, ("not an allowed check. Allowed: " + ", ".join(" ".join(k) for k in FIXED if k[0] not in ("true", "false")) +
+                  ", or a `bash <script-in-repo>` the human pinned with: python3 <hook dir>/until-done.py --trust \"bash path/to/check.sh\" (run from the repo)")
+
+
+def trust(check):
+    """Human command: pin `bash <script>` + its sha256 for the current repo (never run by the model)."""
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    argv = shlex.split(check)
+    if len(argv) != 2 or argv[0] not in ("bash", "sh") or argv[1].startswith(("-", "/", "~")) or ".." in argv[1] or not (project / argv[1]).is_file():
+        print("refused: the form is `bash <relative script inside the repo>`"); return
+    TRUSTED.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(TRUSTED.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    data[project.name] = {"check": check, "sha256": sha256_of(project / argv[1]), "pinned": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    TRUSTED.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    print(f"pinned for {project.name}: {check} (sha256 {data[project.name]['sha256'][:12]}…) — re-pin after you change the script")
 
 
 def redact(text):
@@ -79,6 +132,8 @@ def block(reason):
 
 
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "--trust":
+        trust(sys.argv[2]); return
     try:
         data = json.load(sys.stdin)
     except Exception:
