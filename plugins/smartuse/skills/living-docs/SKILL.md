@@ -26,6 +26,9 @@ jira_cli:                        # optional command that prints a ticket, e.g. "
 ```
 Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (only if `docs/` exists); svn → `_SESSIONS/` / `_SESSIONS/archive/` / `_KNOWLEDGE_BASE/features/` (only if `_KNOWLEDGE_BASE/` exists). Keep the file out of git (`.gitignore`).
 
+## Live context
+- Invoked at: !`date -u +%FT%TZ || true` (use this exact value as `started_at` in the receipt — never your own clock)
+
 ## Inputs (arguments)
 
 `$ARGUMENTS` = one of:
@@ -59,7 +62,7 @@ Never draft DEV.md or USER.md content for a feature you could not find; a missin
 5. **Index.** Add or update the feature's line in `<docs-root>/../INDEX.md` (`| feature | DEV | USER | last version | date |`), create INDEX.md from the one-line header if missing.
 6. **Report, one line per file, then stop:** `docs updated: DEV.md (flow, objects, +1 decision) · USER.md (+1 step, +1 change) · INDEX.md`. If a section needed a fact you could not find in the diff or the repo, say `unknown: <what>` instead of guessing.
 
-7. **Receipt.** Write `~/.claude/smartuse/projects/<repo folder name>/pending.json` with `{"skill":"living-docs","task":"<feature>","mode":"update|fix|publish","started_at":"<now, ISO UTC>","self_check":"<sections updated>/<sections>","notes":"<one line>"}`; the Stop hook appends the ledger line.
+7. **Receipt.** Write `~/.claude/smartuse/projects/<repo folder name>/pending.json` with `{"skill":"living-docs","task":"<feature>","mode":"update|fix|publish","started_at":"<Invoked at, from the live context>","self_check":"<sections updated>/<sections>","notes":"<one line>"}`; the Stop hook appends the ledger line.
 
 ## Guardrails (restated — you do not inherit the project rules)
 
