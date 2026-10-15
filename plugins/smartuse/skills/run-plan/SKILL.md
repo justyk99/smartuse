@@ -51,7 +51,7 @@ In an interactive session the user may also set `/goal <§ 8 acceptance>`; in he
 
 ## 4. Close (always — after a finished batch, a stop, or a block)
 - Tick the units' boxes in task.md; add a dated line to `decisions.md` / `## Decisions` for every escalation or retier.
-- Print the receipts table: `unit · tier · model · outcome · escalated · agent tokens in/out` (tokens from the SubagentStop lines) and the plain comparison: "delegated units used model X for N% of the agent tokens; with `--routing off` they would all have run on the session model."
+- Print the receipts table: `unit · tier · model · outcome · escalated · agent tokens in/out`. Tokens come from the hook lines in `~/.claude/smartuse/projects/<repo folder name>/receipts.jsonl` (`agent_id`, `models`, `total_input`, `total_output`), appended by the SubagentStop hook after each agent returns — read that file at close, never estimate and the plain comparison: "delegated units used model X for N% of the agent tokens; with `--routing off` they would all have run on the session model."
 - Write `~/.claude/smartuse/projects/<repo folder name>/pending.json` `{"skill":"run-plan","task":"<name>","mode":"<dial>","started_at":"<routing.started_at>","self_check":"<passed>/<units>","notes":"<escalations>"}` for the ledger; set `"active": false` in routing.json.
 
 ## Rules
