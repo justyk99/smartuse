@@ -10,13 +10,14 @@ printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:10Z","message":
  '{"type":"assistant","timestamp":"2026-01-01T00:00:31Z","message":{"id":"dup","model":"m-a","usage":{"input_tokens":5,"output_tokens":5}}}' \
  '{"type":"assistant","timestamp":"2026-01-01T00:00:40Z","message":{"id":"grow","model":"m-a","usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":100}}}' \
  '{"type":"assistant","timestamp":"2026-01-01T00:00:41Z","message":{"id":"grow","model":"m-a","usage":{"input_tokens":2,"output_tokens":900,"cache_read_input_tokens":100}}}' > "$T"
+mkdir -p "$D/t/subagents"; printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:50Z","message":{"id":"sub1","model":"m-fork","usage":{"input_tokens":7,"output_tokens":70}}}' '{"type":"assistant","timestamp":"2025-12-31T00:00:00Z","message":{"id":"old","model":"m-fork","usage":{"input_tokens":1,"output_tokens":1}}}' > "$D/t/subagents/agent-x.jsonl"
 echo '{"skill":"make-prompt","task":"t","mode":"quick","started_at":"2026-01-01T00:00:00Z","self_check":"13/13"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/ledger.py"
 L="$HOME/.claude/smartuse/ledger.jsonl"; [ -f "$L" ] || { echo "FAIL no ledger"; exit 1; }
 python3 - "$L" <<'PY'
 import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1])
-assert r["total_output"]==100+5+900, r; assert r["total_input"]==100+100+2000+10+5+2+100, r; assert list(r["tokens"])==["m-a"], r; assert r["assistant_calls"]==4
-print("PASS stop: calls after started_at summed, earlier record ignored, shared message id -> max of each counter, one call")
+assert r["total_output"]==100+5+900+70, r; assert r["total_input"]==100+100+2000+10+5+2+100+7, r; assert sorted(r["tokens"])==["m-a","m-fork"], r; assert r["assistant_calls"]==5
+print("PASS stop: main + forked-subagent usage after started_at summed; earlier records ignored; shared id -> max")
 PY
 [ -f "$HOME/.claude/smartuse/projects/proj/pending.json" ] && { echo "FAIL pending not removed"; exit 1; } || echo "PASS pending removed"
 echo '{"active":true}' > "$HOME/.claude/smartuse/projects/proj/routing.json"
