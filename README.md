@@ -51,6 +51,7 @@ flowchart LR
 | `claude plugin eval`, 4 cases, with vs without the plugin | **4 of 4 pass with it** (1.00 each); without: 0.00 / 0.00 / 0.50 / 0.00 · mean gain **+0.88** · $1.27 list price per full run |
 | `make-prompt quick` on three real asks (two production repos + the bench repo) | 0.9 – 1.8 min · 3.1k – 3.9k output tokens · 130k – 205k cached reads each · self-check 11/13 – 12/13 |
 | `run-plan` first real unit | tiered to Haiku (7 calls, 24k output tokens), reported **blocked** by a read-only database rule instead of working around it |
+| `run-plan --until-done`, bench repo, one line in | kickoff 14/14 → endpoint + 4 tests built (11/11 pass) → verified end to end → stopped with a precise human question (pre-existing lint gap). $1.30, 5.6 min, 19 turns. `bench/results-example/` |
 | bash-guard · ledger hook | 32 / 32 and 5 / 5 regression cases |
 
 Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tools "Bash,Read,Grep,Glob,Agent,Write,Skill"` (Linux needs `bubblewrap` + `socat` for the sandbox) and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks).

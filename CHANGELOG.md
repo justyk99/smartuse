@@ -3,6 +3,8 @@
 ## 0.3.0 — in progress (2026-10-15)
 - `run-plan --until-done`: the lazy-CEO loop. A Stop hook (`until-done.py`) refuses to end the turn while units or the repo's `check` command are unfinished; the model stops only for a real human question (`needs_human`), a double failure, a rule gate, or after 6 blocks. 10-case test.
 - Adapter field `check:`.
+- First end-to-end run on the bench repo (2026-10-15): one line → kickoff (14/14) → loop built the endpoint + 4 tests (11/11), verified end to end, stopped with a precise human question (pre-existing lint gap) instead of guessing; $1.30, 5.6 min, 19 turns. Artefacts in `bench/results-example/2026-10-15-csv-export/`.
+- Security hardening of the gate (4 review rounds): check command only from the human-written adapter, fixed shapes, root-owned pin file for bash scripts, file-guard on the two human-only files, TTY-faker denial.
 
 ## 0.2.0 — 2026-10-15, first public release
 - Renamed from `yk-kit` to `smartuse` before the first push (no installs existed under the old name).
