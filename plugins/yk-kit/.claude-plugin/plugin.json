@@ -1,0 +1,19 @@
+{
+  "name": "yk-kit",
+  "version": "0.1.0",
+  "description": "One line in, planner-grade kickoff out. make-prompt interviews you with basic questions and writes the spec; living-docs keeps a DEV + USER doc current after every commit; reply-style picks how Claude writes from 7 researched voices; bash-guard is a deterministic safety floor that fires even in bypass mode.",
+  "author": {
+    "name": "YK"
+  },
+  "license": "MIT",
+  "keywords": [
+    "kickoff",
+    "spec",
+    "interview",
+    "living-docs",
+    "output-styles",
+    "safety",
+    "hooks"
+  ],
+  "hooks": "./hooks/hooks.json"
+}
