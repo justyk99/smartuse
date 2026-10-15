@@ -42,7 +42,7 @@ For each unit in order:
 Stop after N units (default 3) and ask "go" again, so the user can read the receipts between batches.
 
 ## 3b. `--until-done` — the lazy-CEO loop
-Write `"until_done": true`, `"check": "<adapter check command>"` and a `"status": "pending"` on every unit into routing.json before the first unit. Then:
+Write `"until_done": true` and a `"status": "pending"` on every unit into routing.json before the first unit. The check command is read by the gate from the human-written adapter (`check:` in `.claude/smartuse.local.md`) — you cannot set or change it from routing.json; if the adapter has none, the gate only tracks unit status. Then:
 1. Run units in order with no "go" between batches. After each unit set its `status` (`pass` · `fail` · `blocked`) in routing.json and print the one-line progress message.
 2. The `until-done` Stop hook refuses to end the turn while any unit is pending / running / failed or while the check command fails, and tells you what is left. Keep working; do not argue with the gate.
 3. **Stop reasons — the only ways out:** (a) every unit is pass or blocked AND the check passes; (b) a unit needs the human: write the exact question into routing.json as `"needs_human": "<question>"` and make it the FIRST line of your final message (`NEEDS YOU: …`); (c) a unit failed twice (escalation used) → mark it `blocked`, record why, continue with units that do not depend on it; (d) a rule gate (a file owned by someone else, a shared server, money or security paths) → `needs_human`; (e) the gate has blocked 6 times → it lets you stop; say what is left.
