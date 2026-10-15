@@ -1,5 +1,5 @@
 {
-  "description": "yk-kit safety floor: deterministic deny list for Bash (fires even in bypass mode)",
+  "description": "yk-kit: bash-guard safety floor (PreToolUse) + receipts ledger (Stop / SubagentStop), all deterministic",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +9,28 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"",
+            "timeout": 20
           }
         ]
       }

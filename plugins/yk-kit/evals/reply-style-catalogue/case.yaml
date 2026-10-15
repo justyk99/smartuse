@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: reply-style-catalogue
+description: Asking how Claude should write shows the 7-style catalogue with who each is for and pros/cons.
+tags: [reply-style]
+runs: 1
+max_turns: 6
