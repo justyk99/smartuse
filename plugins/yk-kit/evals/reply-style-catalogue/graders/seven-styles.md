@@ -1,5 +1,5 @@
 ---
 type: regex
 match: contains
-pattern: "(?s)lcd.*bluf.*engineer.*teacher.*minimal.*plain.*memo"
+pattern: "lcd[\s\S]*bluf[\s\S]*engineer[\s\S]*teacher[\s\S]*minimal[\s\S]*plain[\s\S]*memo"
 ---
