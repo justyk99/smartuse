@@ -62,7 +62,7 @@ def sha256_of(path):
 def trusted_match(check, project):
     """A `bash <relative script>` check runs only if the human pinned exactly this command + the script's hash."""
     try:
-        t = json.loads(TRUSTED.read_text(encoding="utf-8")).get(project.name) or {}
+        t = json.loads(TRUSTED.read_text(encoding="utf-8")).get(str(project.resolve())) or {}
     except Exception:
         return False
     if t.get("check") != check:
@@ -102,19 +102,24 @@ def safe_argv(check, project):
 
 
 def trust(check):
-    """Human command: pin `bash <script>` + its sha256 for the current repo (never run by the model)."""
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    """Human command: pin `bash <script>` + its sha256 for the current repo. Needs a real terminal and a typed `y`:
+    the model's Bash tool has no TTY, so it cannot pin anything (and bash-guard denies the command anyway)."""
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print("refused: --trust must be typed by a human in an interactive terminal (no TTY here)"); return
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
     argv = shlex.split(check)
     if len(argv) != 2 or argv[0] not in ("bash", "sh") or argv[1].startswith(("-", "/", "~")) or ".." in argv[1] or not (project / argv[1]).is_file():
         print("refused: the form is `bash <relative script inside the repo>`"); return
+    if input(f"Pin `{check}` for {project}? The script runs on every Stop while run-plan --until-done is active. [y/N] ").strip().lower() != "y":
+        print("not pinned"); return
     TRUSTED.parent.mkdir(parents=True, exist_ok=True)
     try:
         data = json.loads(TRUSTED.read_text(encoding="utf-8"))
     except Exception:
         data = {}
-    data[project.name] = {"check": check, "sha256": sha256_of(project / argv[1]), "pinned": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    data[str(project)] = {"check": check, "sha256": sha256_of(project / argv[1]), "pinned": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     TRUSTED.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"pinned for {project.name}: {check} (sha256 {data[project.name]['sha256'][:12]}…) — re-pin after you change the script")
+    print(f"pinned for {project}: {check} (sha256 {data[str(project)]['sha256'][:12]}…) — re-pin after you change the script")
 
 
 def redact(text):
