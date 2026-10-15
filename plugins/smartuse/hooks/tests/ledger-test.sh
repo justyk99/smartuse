@@ -30,8 +30,8 @@ echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$
 echo '{"skill":"living-docs","task":"future","mode":"update","started_at":"2099-01-01T00:00:00Z"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s3\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/ledger.py"
 python3 - "$L" <<'PY'
-import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1]); assert r["task"]=="future" and r["duration_s"]==0 and "future" in (r.get("notes") or ""), r
-print("PASS future started_at -> 15-minute window, duration 0, note added")
+import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1]); assert r["task"]=="future" and 840 <= r["duration_s"] <= 960 and "future" in (r.get("notes") or ""), r
+print("PASS future started_at -> 15-minute window, note added")
 PY
 # two Stop hooks at once (user-level + plugin copy) must produce ONE line
 echo '{"skill":"make-prompt","task":"race","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"

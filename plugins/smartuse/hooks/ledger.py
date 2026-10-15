@@ -137,6 +137,7 @@ def on_stop(data):
         "skill": p.get("skill"),
         "task": p.get("task"),
         "mode": p.get("mode"),
+        "started_at": since.strftime("%Y-%m-%dT%H:%M:%SZ") if since else None,
         "duration_s": max(0, int((now - since).total_seconds())) if since else None,
         "assistant_calls": turns,
         "tokens": totals,
@@ -227,7 +228,10 @@ def recompute():
         hits = glob.glob(str(HOME / ".claude" / "projects" / "*" / f"{sid}.jsonl"))
         if not hits:
             continue
-        since = end - datetime.timedelta(seconds=int(r.get("duration_s") or 0) + 5)
+        since = parse_ts(r.get("started_at") or "")
+        if not since or since > end:
+            dur = int(r.get("duration_s") or 0)
+            since = end - datetime.timedelta(seconds=dur + 5 if dur > 0 else 15 * 60)
         totals, turns = sum_usage(hits[0], since); f = flat(totals)
         r.update({"tokens": totals, "assistant_calls": turns, "total_input": f["input"] + f["cache_read"] + f["cache_create"], "total_output": f["output"], "recomputed": iso_now()})
         changed += 1
