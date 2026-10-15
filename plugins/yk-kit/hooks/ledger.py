@@ -27,8 +27,10 @@ def parse_ts(s):
 
 
 def sum_usage(transcript, since=None):
-    """Per-model token totals from assistant records with message.usage, optionally only after `since`."""
-    totals, turns, seen = {}, 0, set()
+    """Per-model token totals from assistant records with message.usage, optionally only after `since`.
+    Records that share one message id are partial views of the same API call (streamed content blocks / parallel
+    tool calls); the LAST record carries the full counts, so per id we keep the MAX of each counter and count one call."""
+    per_id, order = {}, []
     try:
         with open(transcript, encoding="utf-8", errors="ignore") as fh:
             for line in fh:
@@ -42,25 +44,28 @@ def sum_usage(transcript, since=None):
                 u = m.get("usage") or {}
                 if not u:
                     continue
-                mid = m.get("id")  # parallel tool calls share one message id -> count usage once (official cost-tracking rule)
-                if mid:
-                    if mid in seen:
-                        continue
-                    seen.add(mid)
                 if since:
                     t = parse_ts(r.get("timestamp") or "")
                     if t and t < since:
                         continue
-                model = m.get("model") or "unknown"
-                d = totals.setdefault(model, {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0, "calls": 0})
-                d["input"] += int(u.get("input_tokens") or 0)
-                d["output"] += int(u.get("output_tokens") or 0)
-                d["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
-                d["cache_create"] += int(u.get("cache_creation_input_tokens") or 0)
-                d["calls"] += 1
-                turns += 1
+                mid = m.get("id") or f"_{len(order)}"
+                cur = per_id.get(mid)
+                vals = {"input": int(u.get("input_tokens") or 0), "output": int(u.get("output_tokens") or 0),
+                        "cache_read": int(u.get("cache_read_input_tokens") or 0), "cache_create": int(u.get("cache_creation_input_tokens") or 0)}
+                if cur is None:
+                    per_id[mid] = {"model": m.get("model") or "unknown", **vals}; order.append(mid)
+                else:
+                    for k, v in vals.items():
+                        cur[k] = max(cur[k], v)
     except Exception:
         pass
+    totals, turns = {}, 0
+    for mid in order:
+        c = per_id[mid]
+        d = totals.setdefault(c["model"], {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0, "calls": 0})
+        for k in ("input", "output", "cache_read", "cache_create"):
+            d[k] += c[k]
+        d["calls"] += 1; turns += 1
     return totals, turns
 
 
@@ -164,7 +169,31 @@ def report(n=10):
     print("by skill/mode (median out): " + " · ".join(f"{k} {int(statistics.median(v)):,} (n={len(v)})" for k, v in by.items()))
 
 
+def recompute():
+    """Re-sum every ledger line whose session transcript still exists (used after a counting-rule change)."""
+    import glob
+    if not LEDGER.exists():
+        print("ledger: empty"); return
+    rows = [json.loads(l) for l in LEDGER.read_text(encoding="utf-8").splitlines() if l.strip()]
+    changed = 0
+    for r in rows:
+        sid = r.get("session_id"); end = parse_ts(r.get("ts") or "")
+        if not sid or not end:
+            continue
+        hits = glob.glob(str(HOME / ".claude" / "projects" / "*" / f"{sid}.jsonl"))
+        if not hits:
+            continue
+        since = end - datetime.timedelta(seconds=int(r.get("duration_s") or 0) + 5)
+        totals, turns = sum_usage(hits[0], since); f = flat(totals)
+        r.update({"tokens": totals, "assistant_calls": turns, "total_input": f["input"] + f["cache_read"] + f["cache_create"], "total_output": f["output"], "recomputed": iso_now()})
+        changed += 1
+    LEDGER.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rows), encoding="utf-8")
+    print(f"ledger: recomputed {changed} of {len(rows)} lines")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--recompute":
+        recompute(); return
     if len(sys.argv) > 1 and sys.argv[1] == "--report":
         report(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
         return

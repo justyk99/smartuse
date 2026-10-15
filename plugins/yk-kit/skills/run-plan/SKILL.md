@@ -33,12 +33,12 @@ Write `~/.claude/yk-kit/projects/<repo folder name>/routing.json` (never inside 
 For each unit in order:
 1. Spawn ONE Agent (foreground — the user sees the task card and tool count) with `model` per the table and a brief of ≤ 40 lines: the unit's spec and check · the constraints + rabbit holes from § 4 · the files it may touch (and only those) · "you cannot ask questions: write `unknown: <what> → <who>` instead" · "report: what you did, the check's output verbatim, files changed, unknowns" · the turn budget.
 2. On return, append a receipt line to `~/.claude/yk-kit/projects/<repo folder name>/receipts.jsonl`: `{"ts","unit":1,"title","tier","model","outcome":"pass|fail|blocked","check":"<first line of the check output>","escalated":false,"files":[…]}`. The SubagentStop hook adds the agent's tokens as its own line (same file) — do not estimate tokens yourself.
-3. `fail`, or a blocking `unknown:` → **escalate once**: re-run the unit one tier up (never above the session model) with the failure pasted in; record `"escalated":true`. Still failing → stop and report; do not loop.
+3. `fail`, or a blocking `unknown:` → **escalate once**: re-run the unit one tier up (never above the session model) with the failure pasted in; record `"escalated":true`. Still failing or blocked → stop the batch and go to § 4 Close anyway (the receipts and the ledger line must exist even for a blocked run); do not loop.
 4. **Verify** every delegated `build` unit: a fresh agent (verify tier) gets the diff (`git diff` / `svn diff` of the unit's files) + the unit's spec: "list only gaps that affect correctness or the stated spec; no style". Gaps → fix on the build tier once → re-verify once. Judgment units are verified by the user, not by an agent.
 5. After each unit print ONE line: `unit 2/5 done · mechanical/haiku · check passed · next: unit 3 (build)`. That line is the visibility rule — never run silently.
 Stop after N units (default 3) and ask "go" again, so the user can read the receipts between batches.
 
-## 4. Close
+## 4. Close (always — after a finished batch, a stop, or a block)
 - Tick the units' boxes in task.md; add a dated line to `decisions.md` / `## Decisions` for every escalation or retier.
 - Print the receipts table: `unit · tier · model · outcome · escalated · agent tokens in/out` (tokens from the SubagentStop lines) and the plain comparison: "delegated units used model X for N% of the agent tokens; with `--routing off` they would all have run on the session model."
 - Write `~/.claude/yk-kit/projects/<repo folder name>/pending.json` `{"skill":"run-plan","task":"<name>","mode":"<dial>","started_at":"<routing.started_at>","self_check":"<passed>/<units>","notes":"<escalations>"}` for the ledger; set `"active": false` in routing.json.
