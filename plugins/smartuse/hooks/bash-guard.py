@@ -24,6 +24,8 @@ RULES = [
      "force push"),
     (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bprintf\b|\becho\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json)",
      "human-only file (it decides what the until-done gate may run) — ask the user to edit it"),
+    (r"(^|[;&|]\s*)(unbuffer|expect|script)\s",
+     "faking an interactive terminal (script / unbuffer / expect) is not allowed"),
     (r"until-done\.py\s+--trust",
      "pinning a check script is a human-only action — the user runs it in their own terminal"),
     (r"\bsvn\s+(revert|resolve\s+--accept\s+theirs-full)\b",
