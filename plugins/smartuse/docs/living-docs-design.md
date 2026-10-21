@@ -4,7 +4,7 @@ Status: **PLAN — not installed anywhere.** the author's idea (15 Oct 2026): ev
 
 ## 0. Verdict in three lines
 
-- **Important: yes.** Docs drift is the #1 complaint of every "vibe coding" write-up in 2026, and both GSG systems have the gap (Old: 5 module KBs for ~40 modules; New: `docs/` has guides and ADRs but no per-feature DEV/USER pair).
+- **Important: yes.** Docs drift is the #1 complaint of every "vibe coding" write-up in 2026, and both of my work systems have the gap (Old: 5 module KBs for ~40 modules; New: `docs/` has guides and ADRs but no per-feature DEV/USER pair).
 - **Novel: no.** At least 8 tools / templates do a version of it (§ 2). Most do dev docs only; almost none produce a user doc from the same flow.
 - **Top-tier = the execution, not the idea:** deterministic trigger, delta-only input, isolated cheap context, marker-protected sections, and a human checkpoint before a doc records a bug as a feature. the author's flow already has the checkpoint (the commit closes the task, built 15 Oct). Add "the commit updates the docs" and a one-line mid-task decision log and the idea is complete.
 
@@ -12,7 +12,7 @@ Status: **PLAN — not installed anywhere.** the author's idea (15 Oct 2026): ev
 
 | the author said | Keep | Change |
 |---|---|---|
-| "explanation in LCD… even a 10-year-old can understand" | True for the **USER doc** and for every explanation sentence. | The **DEV doc must keep exact names** (`usp_update_promotion`, `t_app_settings.GmtOffSetInMinutes`, `views/Bank/BankList.vue`). LCD = plain words *around* precise names, never instead of them. Two audiences → two files; one file for both goes wrong for both. |
+| "explanation in LCD… even a 10-year-old can understand" | True for the **USER doc** and for every explanation sentence. | The **DEV doc must keep exact names** (`usp_update_order`, `app_settings.TimezoneOffsetMinutes`, `views/Orders/OrderList.vue`). LCD = plain words *around* precise names, never instead of them. Two audiences → two files; one file for both goes wrong for both. |
 | "Claude keeps updating the document every time it finishes a task" | Yes — but "finished" must mean **committed**, not "Claude thinks it is done". | The Living Docs template author's warning (§ 2): a silent after-every-task update records a bug as intended behaviour and the next session treats it as a rule. The commit gates (GATE 1/2 on New, svn checklist on Old) are the human checkpoint. Docs update **after** the commit lands, as step 9 of `commit-log` / step 6 of git EXECUTE. |
 | "very less token spend" | Right goal. | Achieved by **inputs**, not by skipping: diff stat + task.md + the two docs (≈ 6–8 k tokens in, ≈ 1 k out) in a `context: fork` skill on `model: sonnet`. The main session pays one report line. Never "re-read the codebase to write docs". |
 
@@ -47,7 +47,7 @@ Status: **PLAN — not installed anywhere.** the author's idea (15 Oct 2026): ev
 | Repo | docs-root | Why |
 |---|---|---|
 | the svn repo | `_KNOWLEDGE_BASE/features/<feature>/` | KB is already the dev-doc convention; svn-ignored, so it is local until the author decides to version it (`svn add` is the only change) |
-| the git repo | `docs/features/<feature>/` | `docs/` is tracked (41 files, has `adr/`, `v2-handbook/`); the team sees it in GitLab |
+| the git repo | `docs/features/<feature>/` | `docs/` is tracked (tracked, has `adr/`); the team sees it in the code host |
 | the git repo | same as the git repo | |
 
 Feature name = the task folder name without the date (`a shipped feature`, `a shipped feature`).
@@ -57,18 +57,18 @@ Feature name = the task folder name without the date (`a shipped feature`, `a sh
 ```markdown
 # <Feature> — DEV
 <!-- AUTO-MANAGED: summary -->
-**What it does:** one sentence.  **Who uses it:** role.  **Since:** 2.8.YYMMDD.XX (rNNNN) / <hash>.
+**What it does:** one sentence.  **Who uses it:** role.  **Since:** vX.Y.Z (rNNNN) / <hash>.
 <!-- /AUTO-MANAGED -->
 <!-- AUTO-MANAGED: flow -->
 ## Flow (exact names)
-page `bo_web/.../x.aspx` → `services/X.ashx` case `do_thing` → `BL.X_YK.DoThing()` → `DAL.X_YK` → `usp_do_thing`
+page `pages/x.aspx` → `api/X.ashx` case `do_thing` → `BL.Thing.DoThing()` → `DAL.Thing` → `usp_do_thing`
 <!-- /AUTO-MANAGED -->
 <!-- AUTO-MANAGED: objects -->
 ## DB / config objects
 | Object | Kind | Note |
 |---|---|---|
 | `usp_do_thing` | SP | @error_code / @error_msg OUT |
-| `t_app_settings.ThingEnabled` | app setting | default 0; description on advanced_settings.aspx |
+| `app_settings.ThingEnabled` | app setting | default 0; description on the settings page |
 <!-- /AUTO-MANAGED -->
 <!-- AUTO-MANAGED: decisions -->
 ## Decisions (dated, newest first — copied from task.md `## Decisions`)
@@ -80,7 +80,7 @@ page `bo_web/.../x.aspx` → `services/X.ashx` case `do_thing` → `BL.X_YK.DoTh
 <!-- /AUTO-MANAGED -->
 <!-- AUTO-MANAGED: verify -->
 ## How to verify
-`bash .claude/build-check.sh` → BUILD CLEAN · open page → filter `yk_test` → expect 1 row
+`bash .claude/build-check.sh` → BUILD CLEAN · open page → filter `test_user` → expect 1 row
 <!-- /AUTO-MANAGED -->
 <!-- AUTO-MANAGED: history -->
 ## History
@@ -157,9 +157,9 @@ disable-model-invocation: true
 
 ## 4. Rollout order (when the user says "g")
 
-1. **Templates + skill** in `~/.claude/skills/living-docs/` (S). Copy to Guru `library/skills/living-docs/`.
+1. **Templates + skill** in `~/.claude/skills/living-docs/` (S). Copy to the course library `library/skills/living-docs/`.
 2. **Wire T3**: one line in the svn repo `commit-log/SKILL.md` (step 9) and the git repo `git-workflow.md` (EXECUTE step 6): "then `/living-docs <task-folder>`; report its line". Opt-in per repo: a repo without a docs-root skips with "living-docs: no docs root, skipping" (S).
-3. **Wire T1 + T2**: add `## Decisions` to `_SESSIONS/_TEMPLATE_task.md` and the gsg `.task` template; one rule line in both `task-management.md`: "any mid-task verification / change / bug / concept change → one dated line under `## Decisions` immediately" (S).
+3. **Wire T1 + T2**: add `## Decisions` to `_SESSIONS/_TEMPLATE_task.md` and the git repo's `.task` template; one rule line in both `task-management.md`: "any mid-task verification / change / bug / concept change → one dated line under `## Decisions` immediately" (S).
 4. **Back-fill 2 features** as the proof: `a shipped feature` (Old, active) and `a shipped feature` (New, shipped) — generated from their task.md + commit diff, then the author reads both USER.md files as the 10-year-old test (M).
 5. Run for a month → decide T4 (staleness hook) and the Confluence publish.
 

@@ -17,7 +17,7 @@ Every question: ≤ 2 lines, plain words. Option 1 = Claude's best guess from th
 
 ## feature (default)
 Call 1: goal · appetite · done (+ type if unclear). Call 2: who · when · not · trouble. Call 3: unknowns · "these 3 rabbit holes — agree?" (multi-select).
-Follow-ups (max 3): "done = no mistakes" → "what can we check to prove it?" · a reviewer without a name → "who signs off?" · a sister system named → "same change there too, or BO only?"
+Follow-ups (max 3): "done = no mistakes" → "what can we check to prove it?" · a reviewer without a name → "who signs off?" · a sister system named → "same change there too, or this system only?"
 
 ## bug (turns into a root-cause plan, not a feature plan)
 | Key | Ask | Options | Turns into |
@@ -25,7 +25,7 @@ Follow-ups (max 3): "done = no mistakes" → "what can we check to prove it?" ·
 | symptom | "What exactly do you see? Paste the message or screenshot." | (Other = paste) · "it's in the attachment" | symptom, verbatim |
 | where | "Where: which page / SP / customer / environment?" | from the ground check | trace entry point |
 | since | "Since when, and what changed around then?" | after a deploy (last commit date) · after a data change · always · don't know | suspects (log window) |
-| repro | "How do I make it happen again? Account, steps, data." | "same as the report" · can't reproduce · Other | repro script with `yk` data |
+| repro | "How do I make it happen again? Account, steps, data." | "same as the report" · can't reproduce · Other | repro script with sample data |
 | expected | "What should happen instead?" | the obvious inverse (guess) · Other | expected = the test |
 | reporter | "Who reported it, how urgent?" | customer live · tester · colleague · me | priority + who confirms the fix |
 | not | "What must not change while fixing it?" | shared SP callers (from grep) · other projects · nothing | blast radius + owners' sanction |
