@@ -2,11 +2,12 @@
 """render-demo.py — render a terminal-replay GIF from a scene file of REAL captured output. No model, no network.
 
 Scene file format (plain text):
-  $ <command>          a prompt line, typed character by character
+  $ <command>          a shell prompt line, typed character by character
+  > <text>             a Claude Code prompt line, typed the same way
   <any other line>     output, revealed line by line
   @pause <seconds>     hold the current frame
   @clear               clear the screen
-Lines are drawn verbatim (keep them ≤ 100 columns). The point is honesty: paste what the tool printed, not a mock-up.
+Lines are drawn verbatim; a line longer than --cols wraps. The point is honesty: paste what the tool printed, not a mock-up.
 
 usage: python3 scripts/render-demo.py <scene.txt> <out.gif> [--cols 100] [--rows 30] [--font-size 15]
 """
@@ -36,7 +37,7 @@ class Term:
         self.frames, self.durations = [], []
 
     def color(self, line):
-        if line.startswith("$ "):
+        if line.startswith(("$ ", "> ")):
             return PROMPT
         if line.startswith(("|", "+--", "steps ", "receipts:", "ledger:")):
             return ACCENT if line.startswith(("receipts:", "steps ", "ledger:")) else FG
@@ -50,9 +51,12 @@ class Term:
         d.rounded_rectangle((0, 0, self.w, self.h), radius=12, fill=BG)
         for i, (dot) in enumerate(((255, 95, 86), (255, 189, 46), (39, 201, 63))):
             d.ellipse((self.pad + i * 18, 6, self.pad + i * 18 + 10, 16), fill=dot)
-        vis = self.lines[-self.rows:]
-        for i, line in enumerate(vis):
-            d.text((self.pad, self.pad + 6 + i * self.ch), line[: self.cols], font=self.font, fill=self.color(line))
+        rows = []
+        for line in self.lines:
+            chunks = [line[i:i + self.cols] for i in range(0, max(len(line), 1), self.cols)]
+            rows += [(c, self.color(line)) for c in chunks]
+        for i, (text, col) in enumerate(rows[-self.rows:]):
+            d.text((self.pad, self.pad + 6 + i * self.ch), text, font=self.font, fill=col)
         self.frames.append(img.quantize(colors=64, method=Image.Quantize.MEDIANCUT))
         self.durations.append(int(dur * 1000))
 
@@ -81,8 +85,8 @@ def main():
             t.snap(float(raw.split()[1]) if len(raw.split()) > 1 else 1.0)
         elif raw.startswith("@clear"):
             t.lines = []; t.snap(0.2)
-        elif raw.startswith("$ "):
-            t.type_line(raw)
+        elif raw.startswith(("$ ", "> ")):
+            t.type_line(raw, cps=60 if len(raw) > 60 else 28)
         else:
             t.out_line(raw)
     t.snap(3.0)

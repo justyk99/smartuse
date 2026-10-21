@@ -1,23 +1,25 @@
-# STATUS — smartuse 0.3.0 relaunch (owner: Smartuse-Brain · updated 2026-10-21 15:20 UTC)
+# STATUS — smartuse 0.3.0 relaunch (owner: Smartuse-Brain · updated 2026-10-21 15:40 UTC)
 
 Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2 ("a receipt per plan step"). Branch: `claude/inspiring-galileo-8icw6s` (pushed; main untouched).
 
 ## Done
-- **Receipt per plan step**: SubagentStop hook attaches the agent's real calls/tokens to the `running` unit in routing.json (two running → unattached, never guessed); run-plan records `override`, `escalated`, `verify`; Stop hook archives closed runs under `runs/`; new `/smartuse:receipts [task|all]` skill + eval case. Tests: ledger 13, bash-guard 44, until-done 23, file-guard 4 — all green; strict validate green (plugin + marketplace, both warnings fixed).
-- CHANGELOG 0.3.0 final · `docs/releases/0.3.0.md` (release-page text) · README (table, roadmap, numbers) · SECURITY (4 hooks) · CI runs all 4 tests + term scan · versions 0.3.0 in both manifests · pyc files untracked.
-- **Term scan** (`scripts/term-scan.py`, tree + history, generic patterns only — no private list present): 18 real hits in the tree, all fixed (company abbreviation, internal SQL/table names, employer version scheme, a real customer bug in a test log, `/home/yk` paths, author-suffixed fixtures). Remaining 50 tree hits are expected (guard's own deny patterns, placeholder names, public source URLs). History still carries the old names → fresh history (RELAUNCH.md §3) drops them.
-- `docs/RELAUNCH.md`: the hand-run commands (pre-flight scan with your list → merge to main → fresh-history export → empty public repo → release → install check).
+- **Receipt per plan step** shipped and **verified on a real headless run** (2026-10-21, Claude Code 2.1.306): kickoff 14/14 ($1.57) → `run-plan --until-done` 6 steps, 6/6 tests, three reviews "no gaps", step 6 blocked by rule; the hook attached every agent's tokens to its step. $3.72, 6.4 min, 22 turns. Artefacts: `bench/results-example/2026-10-21-csv-export/`.
+- **Demo gif** `docs/media/demo.gif` (22 s, 0.5 MB) rendered from that run's captured output by `scripts/render-demo.py` (nothing mocked); README embeds it. `demo-last-frame.png` = the receipts table for the post.
+- **Post #2 draft** `docs/launch/post-2-linkedin.md`, numbers and table from the run.
+- Tests 44/13/23/4 green · strict validate green · CHANGELOG, release notes `docs/releases/0.3.0.md`, README numbers, SECURITY, CI, versions 0.3.0.
+- Term scan: 18 real tree hits fixed; remaining hits are expected generic patterns. `docs/RELAUNCH.md` has the hand-run commands.
 
-## In progress / Next
-- Nothing on the branch; waiting on YK's hands (below). Optional before Thursday: one real `run-plan` on the bench repo to replace the self-reported receipts table in `bench/results-example/` with hook-attached numbers.
+## Next (mine, once YK answers)
+- Public repo: create it, push the single-commit history + `v0.3.0` tag (no force, nothing to the existing main). Blocked on decision 1.
+- Term scan with the private list (decision 2), then the final export.
 
 ## Blocked
-- (none)
+- Public repo name (decision 1). Release page + LinkedIn posting have no tool here (YK, 5 min total).
 
 ## Decisions for YK
-1. **Gate date**: 22 Oct is the Thursday, 23 Oct the Friday. I am working to 23 Oct.
-2. **Public repo name**: RELAUNCH §3 recommends keeping `justyk99/smartuse` (rename current → `smartuse-archive`, private). Say if you want a new name — then two manifests + README change before the root commit.
-3. **Incident, reported for transparency**: a doc-writing command of mine mis-terminated and ran RELAUNCH's shell lines inside this container: it checked out main (no commits were added, nothing new pushed — origin main and tags verified unchanged), and `git init` + commit ran in the container's home dir. That accidental repo had its remote removed and was moved into the session scratchpad; nothing left the container. The private-list file was not created.
+1. **Public repo name.** `justyk99/smartuse` exists (private, old history). Either (A) you rename it to `smartuse-archive` in Settings → General, then I create a new public `smartuse`; or (B) I create `smartuse-plugin` (or a name you give) and update both manifests + README. Say A or B.
+2. **Private terms list.** Paste the terms here (they land only in the gitignored file and this session's transcript) or run the scan yourself per RELAUNCH §1. Or say "generic only" and I export as is.
+3. Gate date: I am working to 23 Oct; 22 Oct is the Thursday.
 
-## Needs YK's hands
-- Paste `.smartuse-terms.local` on the laptop and run the scan (RELAUNCH §1). · Demo gif → `docs/media/demo.gif`. · Public repo (RELAUNCH §3–4). · Post #2.
+## Needs YK's hands (after my export)
+- Click "Publish release" (text ready in `docs/releases/0.3.0.md`). · Paste the LinkedIn post + attach `demo.gif` / `demo-last-frame.png`. · Optional: a laptop screen recording to replace the rendered gif later.
