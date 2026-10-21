@@ -33,7 +33,7 @@ Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (
 
 `$ARGUMENTS` = one of:
 - `<task-folder>` — path to the task folder (`_SESSIONS/<task>_<date>/` or `.task/COMPLETED/<task>/`), optionally followed by the commit id (`r3534` or a git hash). Without an id, read it from the `DONE — committed …` stamp in task.md.
-- `fix "<correction>"` — YK read a doc and found an error; apply the correction to the right section, add nothing else.
+- `fix "<correction>"` — the user read a doc and found an error; apply the correction to the right section, add nothing else.
 - `publish <feature>` — push USER.md to Confluence (Atlassian MCP `createConfluencePage` / `updateConfluencePage`; ask for the space key if unknown) or, if no Atlassian MCP, publish it as an Artifact. The repo markdown stays the source of truth.
 
 ## Where docs live (docs root) — skip if absent
@@ -71,12 +71,12 @@ Never draft DEV.md or USER.md content for a feature you could not find; a missin
 3. **Names are verified, never assumed.** Every page, SP, table, column, method, route or key in DEV.md must appear in the diff or be found by grep in the repo. USER.md menu paths, permission names and button labels come from `module.json` / `aff_module.json` / the router / `.resx` or `locales` — grep them. Not found → write `unknown: <what>` and say so in the report.
 4. **LCD language.** Every block ≤ 3 short lines, one idea per line. USER.md: no code names, no SP names, no file paths; a technical term gets a 3-word gloss the first time ("settled bets (bets already paid out)"). DEV.md: plain sentences around exact names.
 5. **≤ 1 page per doc.** If a doc would exceed ~60 lines, split by sub-feature (`<feature>/<sub>/`), never compress the language.
-6. **Edit tool only; smallest edit.** Never rewrite the whole file. Never touch any file outside the docs root, task.md and INDEX.md. No commits, no `svn add`, no `git add` — YK decides what gets versioned.
+6. **Edit tool only; smallest edit.** Never rewrite the whole file. Never touch any file outside the docs root, task.md and INDEX.md. No commits, no `svn add`, no `git add` — the user decides what gets versioned.
 7. **Nothing else.** No "docs are up to date" without the per-section list. No extra sections, no emojis, no marketing tone.
 
 ## `fix "<correction>"`
 
-Locate the section the correction belongs to (by the words YK used), apply the smallest edit inside its markers, add nothing else, report `fixed: <file> § <section>`.
+Locate the section the correction belongs to (by the words the user used), apply the smallest edit inside its markers, add nothing else, report `fixed: <file> § <section>`.
 
 ## `publish <feature>`
 

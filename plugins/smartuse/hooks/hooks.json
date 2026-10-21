@@ -1,5 +1,5 @@
 {
-  "description": "smartuse: bash-guard safety floor (PreToolUse) \u00b7 receipts ledger (Stop / SubagentStop) \u00b7 until-done gate (Stop), all deterministic",
+  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop), all deterministic",
   "hooks": {
     "PreToolUse": [
       {

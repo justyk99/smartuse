@@ -1,10 +1,15 @@
 # Changelog
 
-## 0.3.0 — in progress (2026-10-15)
-- `run-plan --until-done`: the lazy-CEO loop. A Stop hook (`until-done.py`) refuses to end the turn while units or the repo's `check` command are unfinished; the model stops only for a real human question (`needs_human`), a double failure, a rule gate, or after 6 blocks. 10-case test.
-- Adapter field `check:`.
-- First end-to-end run on the bench repo (2026-10-15): one line → kickoff (14/14) → loop built the endpoint + 4 tests (11/11), verified end to end, stopped with a precise human question (pre-existing lint gap) instead of guessing; $1.30, 5.6 min, 19 turns. Artefacts in `bench/results-example/2026-10-15-csv-export/`.
+## 0.3.0 — 2026-10-23, "a receipt per plan step"
+- **One receipt per plan step.** `run-plan` marks the unit it is about to run as `running`; the `SubagentStop` hook attaches that agent's real API calls and tokens (`agent_calls`, `agent_input`, `agent_output`, `agent_models`, `agents`) to that unit in `routing.json` — never estimated, never guessed (two running units → the receipt line stays unattached). Build and verify agents on the same step accumulate. The unit also records the user's retier as `override: {from, to, by}`, the one escalation, and the fresh-agent verdict `verify: no gaps | gaps fixed | gaps open`.
+- **`/smartuse:receipts [task|all]`** — new skill, 0 model tokens to compute: one row per plan step (`# · step · tier · model · override · outcome · esc · verify · calls · in · out · check`) plus the delegated share ("delegated out 4.0k, 100% of agent output on sonnet"). Closed runs are archived by the Stop hook under `~/.claude/smartuse/projects/<repo>/runs/<started_at>_<task>.json`, so a task's receipts outlive the next run.
+- `run-plan --until-done`: the lazy-CEO loop. A Stop hook (`until-done.py`) refuses to end the turn while units or the repo's `check` command are unfinished; the model stops only for a real human question (`needs_human`), a double failure, a rule gate, or after 6 blocks. 23-case test.
+- Adapter field `check:`; `file-guard` hook (PreToolUse on Write/Edit) keeps the adapter and the pin file human-only.
+- First end-to-end run on the bench repo (2026-10-15): one line → kickoff (14/14) → loop built the endpoint + 4 tests (11/11), verified end to end, stopped with a precise human question (pre-existing lint gap) instead of guessing; $1.30, 5.6 min, 19 turns. Artefacts in `bench/results-example/2026-10-15-csv-export/`. That run exposed the gap this release closes: the hook's per-agent token lines were not joined to the plan steps, so the receipts table carried self-reported numbers.
 - Security hardening of the gate (4 review rounds): check command only from the human-written adapter, fixed shapes, root-owned pin file for bash scripts, file-guard on the two human-only files, TTY-faker denial.
+- ledger: `started_at` kept in the record; `--recompute` uses it (or a 15-minute window when missing / future); one receipt per agent even with two SubagentStop hooks; GitHub token files (`gh/hosts.yml`, `.git-credentials`, `.netrc`) count as credential files in bash-guard.
+- Repo: CI runs all four hook tests (bash-guard 44 cases · file-guard · ledger + receipts · until-done) and strict validation of plugin and marketplace; `scripts/term-scan.py` (generic private-term patterns + an optional gitignored `.smartuse-terms.local`, never printed) runs in CI as a warning and by hand before a public push; internal names in design notes and test fixtures replaced with neutral ones.
+- Tests: ledger-test 13 cases (7 new for the receipt per step, the archive and `--receipts`); bash-guard 44; until-done 23; file-guard 4. Hook tests and strict validate green on Claude Code 2.1.306.
 
 ## 0.2.0 — 2026-10-15, first public release
 - Renamed from `yk-kit` to `smartuse` before the first push (no installs existed under the old name).
