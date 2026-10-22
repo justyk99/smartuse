@@ -1,21 +1,21 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 09:40 UTC)
+# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 10:20 UTC)
 
 Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisions; the laptop session Smartuse-Worker does laptop-only steps. Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s`.
 
-## Done since the mandate
-- 0.3.0 on `main`, CI green; marketplace serves it. Release page still needs the laptop (blocked on YK's permission prompt) or YK's click.
-- Heartbeat, receipts by model, A/B runner (pinned model, no-work rule, exact split, no jq), Windows rounds 1–2: **all five hook suites green on the laptop and on the Windows CI runner**; CI now runs ubuntu + macOS + Windows and on the dev branch.
-- A/B run 1 found a run-plan defect (fixed); run 2 clean: safe −17 % cost, aggressive −31 %, output flat (n=1, README row with caveat).
-- 1.0 audit: 42 confirmed findings (`docs/notes/audit-2026-10-22.md`); 4 repo-level ones done (LF, CI matrix).
+## Done
+- 0.3.0 on `main`, CI green; the marketplace serves it. The release page is still not published (see Blocked).
+- 0.4.0-dev on the branch: heartbeat, receipts by model, A/B runner, Windows (all five hook suites green on the laptop and on the Windows CI runner), and **audit batch one** (until-done gate now holds until done; hooks read stdin as UTF-8; widened bash-guard rules; state dir keyed by full path; skills on the hooks' state-dir API; 3 eval cases; `hooks/tests/all.sh`): `run 94 · ledger 28 · until-done 32 · file-guard 10 · heartbeat 66 · ab 36`.
+- **A/B run 3** (5 bench asks × 3 dials, Opus pinned): median cost −24 % on both routed dials over 4 asks; agent output not lower; 11 of 12 runs green; one aggressive run left 3 failing tests. In README with the caveats. Post #3 material.
+- Audit fix-check: 13 findings verified fixed; 2 open → being fixed (legacy state dir must be display-only; Python 3.9 CI leg added).
 
 ## In progress
-- Three audit-fix workers in isolated worktrees: hooks core (gate holds until done; check runner on Windows; state dir by full path; UTF-8 stdin) · guards (sudo/pipe/force-push/credential rules widened; file-guard case-insensitive) · skills+docs (`$ARGUMENTS`, hand-off to run-plan, living-docs receipt, eval cases, counts). Merged after the A/B run so the plugin stays stable for it.
-- A/B run 3: 5 asks × 3 dials, Opus pinned (≈ $28), running (ask 2 of 5).
-- Laptop: re-run of the one bench test after the CRLF fix — waiting on YK to allow the command in his terminal.
+- Worker: legacy 0.3.0 state dir becomes read-only for `/smartuse:receipts`; every write and the gate use the keyed dir.
+- Fix-check re-run for the three lenses that hit the old model's usage limit (docs, skills, first-run).
+- CI on the dev branch: three OSes + the new Python 3.9 leg.
 
 ## Blocked on YK
-- The one-time paste (settings + CLAUDE.md delegation + publish) from my earlier message. Until then: each release and each laptop command needs his keyboard, and the cloud brain cannot tell the laptop to publish.
-- LinkedIn post #2: his one line + "post" (Friday 13:00 MYT; wake-up armed).
+- The release page for v0.3.0 (and later 0.4.0): the harness will not let the Brain publish, and the laptop needs YK to allow `gh`. One paste in the laptop terminal ends this (my message of 2026-10-22 08:00 UTC).
+- LinkedIn post #2: his one line + "post", Friday 23 Oct 13:00 MYT (wake-up armed).
 
 ## Next (mine)
-- Merge the three batches, run the full suite, cut 0.4.0 notes; A/B table into README when run 3 is in; re-run the audit's verify stage on the fixed branch.
+- Merge the state-dir fix, full suite, CI green on all legs → 0.4.0 release notes final → merge to `main`.
