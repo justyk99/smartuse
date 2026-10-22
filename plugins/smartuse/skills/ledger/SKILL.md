@@ -9,6 +9,6 @@ allowed-tools: Bash(bash *)
 
 !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --report $ARGUMENTS || true`
 
-Explain the table in ≤ 5 lines: what one row is (one skill run, tokens summed from the session transcript since the skill was invoked, input = fresh + cache read + cache written), what the medians say, and which row is the outlier if any. Numbers come from `~/.claude/smartuse/ledger.jsonl`; a row is written by the Stop hook when a skill left `~/.claude/smartuse/projects/<key>/pending.json` (`<key>` is derived from the repo's full path; older runs: the folder name). No row for a run means the skill ended without its hand-off step.
+Explain the table in ≤ 5 lines: what one row is (one skill run, tokens summed from the session transcript since the skill was invoked, input = fresh + cache read + cache written), what the medians say, and which row is the outlier if any. Numbers come from `~/.claude/smartuse/ledger.jsonl`; a row is written by the Stop hook when a skill left `~/.claude/smartuse/projects/<key>/pending.json` (`<key>` is derived from the repo's full path). No row for a run means the skill ended without its hand-off step.
 
 When the tool prints `ledger: empty` (no ledger file yet, or no line in it): quote that line, then say in one line that a row is written by the Stop hook from `pending.json` when a make-prompt, run-plan or living-docs run finishes its hand-off — the first such run creates the first row. No table, no numbers, nothing estimated.
