@@ -13,8 +13,9 @@ allowing on it would push exactly once per user prompt. The loop is bounded by `
 State dir: ~/.claude/smartuse/projects/<key>/ (shared with heartbeat.py and ledger.py). <key> is the repo's full resolved
 path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-" dropped (/home/u/proj -> home-u-proj,
 C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/, so two repos that share a folder name no
-longer share routing.json. 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist and
-projects/<folder name>/ does, that old dir is used (read and written), so a run started before the change keeps working.
+longer share routing.json. The gate reads and writes routing.json in that keyed dir only. 0.3.0 keyed the dir by the folder
+name alone: projects/<folder name>/ is shared by every repo of that name, so it is never read here and never written — a
+0.3.0 run that was in progress at the upgrade is not gated (the gate fails open, its rule for anything it cannot trust).
 The check command is NEVER taken from routing.json (the model writes that file). It comes only from the human-authored
 adapter `.claude/smartuse.local.md` (`check:`), is screened by the bash-guard rules, must be one of a few exact shapes
 (`npm test`, `pytest`, `make test`, `cargo test`, `go test ./...`, `dotnet test`, …) or a `bash <script>` the human pinned by
@@ -72,17 +73,11 @@ def project_key(project):
     return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
 
 
-def state_dir(project, create=False):
+def state_dir(project):
     """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (same rule as heartbeat.py
-    and ledger.py). 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist and projects/<folder
-    name>/ does, that old dir is used (read and written), so state recorded before the change stays visible."""
-    base = HOME / ".claude" / "smartuse" / "projects"
-    d = base / project_key(project)
-    if not d.is_dir() and project.name and project.name != d.name and (base / project.name).is_dir():
-        d = base / project.name
-    if create:
-        d.mkdir(parents=True, exist_ok=True)
-    return d
+    and ledger.py). The only dir the gate reads routing.json from, whether or not it exists: there is no fallback to the 0.3.0
+    folder-name dir (shared by every repo of that name). The gate never creates it."""
+    return HOME / ".claude" / "smartuse" / "projects" / project_key(project)
 
 
 def stdin_json():
