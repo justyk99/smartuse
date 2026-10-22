@@ -15,7 +15,7 @@ Quote that line verbatim as your first line, then explain it in ≤ 4 lines:
 - `stalled? · no activity 6m10s` = a working state with no hook event for 5 minutes (`SMARTUSE_STALL_MIN` changes it): a long model think and a hung tool look the same from outside, hence the question mark — you decide whether to interrupt.
 - `· step 2/5 build·opus "…"` / `· loop block 1/6` = the run-plan unit running now and the until-done gate's block count; `session ended` = SessionEnd fired; `no activity recorded` = the hooks have not fired for this repo yet (restart Claude Code after installing the plugin).
 
-Data: `~/.claude/smartuse/projects/<repo>/status.json`, written by the heartbeat hook on every event (0 tokens, ~40 ms per event). Limit: **one status file per repo, the last session that wrote wins** — two sessions in the same repo overwrite each other's line (`--json` shows the `session_id`). Scripts: `bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --json` (the file plus the derived `state` and `line`).
+Data: `~/.claude/smartuse/projects/<repo>/status.json`, written by the heartbeat hook on every event (0 tokens, ~60 ms per event on macOS/Linux — `py.sh` probes the interpreter first — more on Windows, where it also has to skip the Store stub). Limit: **one status file per repo, the last session that wrote wins** — two sessions in the same repo overwrite each other's line (`--json` shows the `session_id`). Scripts: `bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --json` (the file plus the derived `state` and `line`).
 
 ## install — only when `$ARGUMENTS` contains `install`
 
