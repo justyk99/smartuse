@@ -10,13 +10,14 @@
 - [x] Windows round 2: all five hook suites pass on the laptop (Git Bash, Python 3.13), confirmed 2026-10-22
 - [x] A/B runner: pinned `--model`, "no work done" rows out of the deltas, exact per-model split, no jq
 - [x] A/B re-run (1 ask × 3 dials, Opus pinned): clean; row in README with the n=1 caveat
-- [ ] Release 0.4.0 (laptop publishes; notes in `docs/releases/0.4.0.md`)
+- [x] 0.4.0 on `main` (5b3dbed, 2026-10-22); a fresh `claude plugin install smartuse@smartuse` gets 0.4.0 · [ ] release page + tag (YK: the harness blocks the Brain; notes in `docs/releases/0.4.0.md`)
 
 ## 0.5.0 — measured
 - [x] The routed-vs-not A/B over the 5 bench asks × 3 dials (run 3: −24 % median cost, n=4) · [ ] at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"
 - [ ] `claude plugin eval` for all 8 cases in CI (needs an API key secret: YK) — until then, run locally before each release (0.4.0: 8 of 8, +0.88 over no plugin, 2026-10-22)
 - [ ] The subagentStatusLine verified live on the laptop (runtime loading of plugin settings)
 - [ ] until-done on Windows: `--trust` pin path without /etc (pins under a root-equivalent the user owns: documented, not faked)
+- [ ] bash-guard false positive: `curl … | python3 -c '…'` is denied as pipe-to-shell, though `-c` (or a script file) makes stdin data — apply the heredoc rule's "what reads stdin as code" test to pipes (found 2026-10-22)
 - [ ] Sandbox mode: the skills' state writes are refused (sandboxed Bash cannot write `~/.claude`); move the skill → hook hand-off off the filesystem (the hooks read it from the transcript), so it works sandboxed and prompt-free
 
 ## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches
