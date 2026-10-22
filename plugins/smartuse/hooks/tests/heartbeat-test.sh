@@ -72,13 +72,13 @@ ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Ba
 py - "$S" "$(ago 72)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["updated"]=t; s["last_tool"]["at"]=t; json.dump(s,open(p,"w"))
 PY
-expect "duration format m:ss" "last Bash 1m12s · 1 call this turn"
+l=$(line); case "$l" in *"last Bash 1m1"[23]"s · 1 call this turn"*) echo "PASS duration format m:ss: $l";; *) echo "FAIL duration format m:ss: $l"; fail=1;; esac   # ±1 s: the stamp is whole seconds, the render is later
 py - "$S" "$(ago 600)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["updated"]=t; s["last_tool"]["at"]=t; json.dump(s,open(p,"w"))
 PY
-l=$(line); case "$l" in "stalled? smartuse · no activity 10m00s"*) echo "PASS stalled: $l";; *) echo "FAIL stalled: $l"; fail=1;; esac
+l=$(line); case "$l" in "stalled? smartuse · no activity 10m0"[01]"s"*) echo "PASS stalled: $l";; *) echo "FAIL stalled: $l"; fail=1;; esac
 js "d['state']=='stalled'" && echo "PASS --json state stalled" || { echo "FAIL state stalled"; fail=1; }
-l=$(SMARTUSE_STALL_MIN=15 line); case "$l" in "smartuse · working · last Bash 10m00s"*) echo "PASS SMARTUSE_STALL_MIN=15 -> not stalled: $l";; *) echo "FAIL stall threshold env: $l"; fail=1;; esac
+l=$(SMARTUSE_STALL_MIN=15 line); case "$l" in "smartuse · working · last Bash 10m0"[01]"s"*) echo "PASS SMARTUSE_STALL_MIN=15 -> not stalled: $l";; *) echo "FAIL stall threshold env: $l"; fail=1;; esac
 py - "$S" "$(ago 3723)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["updated"]=t; s["last_tool"]["at"]=t; s["tool_running"]={"name":"Bash","tool_use_id":"t9","since":t}; json.dump(s,open(p,"w"))
 PY
