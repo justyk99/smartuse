@@ -7,9 +7,9 @@
 - [x] Receipts by model, `--json`
 - [x] A/B runner with dry run in CI; first real run archived (found the run-plan blocker defect)
 - [x] Windows: interpreter launcher, HOME honoured (laptop-verified: run, until-done, file-guard pass)
-- [ ] Windows round 2: tests use Windows paths inside JSON, UTF-8 stdout, timing tolerance → all five suites green on the laptop
-- [ ] A/B runner: pinned `--model`, "no work done" rows out of the deltas, exact per-model split, no jq
-- [ ] A/B re-run (1 ask × 3 dials) with the run-plan fix; numbers into README only if the run is clean
+- [x] Windows round 2 on the branch (laptop confirmation pending)
+- [x] A/B runner: pinned `--model`, "no work done" rows out of the deltas, exact per-model split, no jq
+- [x] A/B re-run (1 ask × 3 dials, Opus pinned): clean; row in README with the n=1 caveat
 - [ ] Release 0.4.0 (laptop publishes; notes in `docs/releases/0.4.0.md`)
 
 ## 0.5.0 — measured
