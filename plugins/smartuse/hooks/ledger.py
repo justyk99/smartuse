@@ -12,21 +12,25 @@ SubagentStop: if ~/.claude/smartuse/projects/<key>/routing.json exists (written 
              and removes the run's receipt.*.done claim markers.
 State dir:   <key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
              dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/,
-             so two repos that share a folder name no longer share receipts (same dir as heartbeat.py and until-done.py). 0.3.0 keyed
-             the dir by the folder name alone: while the keyed dir does not exist and projects/<folder name>/ does, that old dir is
-             used (read and written), so --receipts still finds the runs archived before the change. Records keep "project" (the
-             folder name, for readability) and add "project_path" (the resolved path).
+             so two repos that share a folder name no longer share receipts (same dir as heartbeat.py and until-done.py). Stop and
+             SubagentStop read pending.json / routing.json and write receipts and archives in that keyed dir only. 0.3.0 keyed the dir
+             by the folder name alone: projects/<folder name>/ is shared by every repo of that name, so it is never migrated and never
+             written; only --receipts reads it, to list its archived runs after the keyed dir's, marked as shared (legacy_dir()).
+             Records keep "project" (the folder name, for readability) and add "project_path" (the resolved path).
 Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
              bash py.sh ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
                                                            from routing.json + runs/, plus a summary line with the agent-output share
-                                                           by model (used by /smartuse:receipts).
+                                                           by model (used by /smartuse:receipts). The keyed dir comes first; the 0.3.0
+                                                           folder-name dir's archived runs follow, each under a line saying the dir is
+                                                           shared by every repo of that name.
              bash py.sh ledger.py --receipts [task|all] --json -> the same run(s) as JSON for scripts: one object (a list for "all")
-                                                           with the steps verbatim and totals {input, output, by_model}.
-             bash py.sh ledger.py --state-dir [--create]  -> the state dir the hooks use for the current project (CLAUDE_PROJECT_DIR,
-                                                           else the cwd) by the rule above, with forward slashes, creating nothing;
-                                                           --create makes it (mkdir -p) first. The skills' live context runs it with
-                                                           --create, so a skill writes pending.json / routing.json where the hooks
-                                                           read them; bench/ab.sh runs it to find a run's archive.
+                                                           with the steps verbatim, totals {input, output, by_model} and "legacy"
+                                                           (true for a run from the 0.3.0 folder-name dir).
+             bash py.sh ledger.py --state-dir [--create]  -> the keyed state dir of the current project (CLAUDE_PROJECT_DIR, else the
+                                                           cwd), always, with forward slashes, creating nothing; --create makes it
+                                                           (mkdir -p) first. The skills' live context runs it with --create, so a skill
+                                                           writes pending.json / routing.json where the hooks read them; bench/ab.sh
+                                                           runs it to find a run's archive.
              (py.sh = the plugin's launcher: python3, else python, else py -3 — on stock Windows python3 is only the Store stub.)
 Windows:     Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the event
              JSON, so every path taken from the JSON goes through native_path() ("/c/Users/x" -> "C:/Users/x"); stdin is read as
@@ -38,6 +42,8 @@ import json, os, sys, re, time, datetime, pathlib, statistics
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 LEDGER = HOME / ".claude" / "smartuse" / "ledger.jsonl"
+PROJECTS = HOME / ".claude" / "smartuse" / "projects"
+LEGACY_NOTE = "(from the 0.3.0 folder-name dir ~/.claude/smartuse/projects/{name}/ — shared by every repo of that name)"
 
 
 def iso_now():
@@ -185,15 +191,30 @@ def project_key(project):
 
 def state_dir(project, create=False):
     """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (team repos stay clean; same
-    rule as heartbeat.py and until-done.py). 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist
-    and projects/<folder name>/ does, that old dir is used (read and written), so receipts recorded before the change stay visible."""
-    base = HOME / ".claude" / "smartuse" / "projects"
-    d = base / project_key(project)
-    if not d.is_dir() and project.name and project.name != d.name and (base / project.name).is_dir():
-        d = base / project.name
+    rule as heartbeat.py and until-done.py). The only dir the hooks read state from and write to, whether or not it exists yet:
+    there is no fallback to the 0.3.0 folder-name dir (see legacy_dir()). create=True makes it (mkdir -p)."""
+    d = PROJECTS / project_key(project)
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def legacy_dir(project):
+    """The 0.3.0 state dir projects/<folder name>/ when it exists and is not the keyed dir, else None. 0.3.0 keyed the dir by
+    the folder name alone, so it is shared by every repo of that name and its runs cannot be attributed to one of them: it is
+    never migrated and never written. Display only — --receipts lists its archived runs, marked as shared. Never raises."""
+    try:
+        name = pathlib.Path(project).name
+        if name in ("", ".", ".."):
+            return None
+        d, keyed = PROJECTS / name, state_dir(project)
+        if not d.is_dir() or d.name == keyed.name:   # no old dir, or a repo at the file system root (its key is its folder name)
+            return None
+        if keyed.is_dir() and os.path.samefile(d, keyed):   # the same dir under two spellings (a case-insensitive file system)
+            return None
+        return d
+    except Exception:
+        return None
 
 
 def stdin_json():
@@ -431,37 +452,78 @@ def summary_line(r, units, totals, del_out):
     return line
 
 
+def read_run(path):
+    """A routing.json / archived run as a dict, else None (missing, unreadable, not an object)."""
+    try:
+        r = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return r if isinstance(r, dict) else None
+
+
+def archive_name(r):
+    """The file name archive_run() gives a run under runs/: <started_at>_<task>.json."""
+    return f"{safe_name(r.get('started_at'))}_{safe_name(r.get('task'))}.json"
+
+
+def legacy_runs(ldir):
+    """The 0.3.0 folder-name dir's runs as [(archive name, path)], newest first: runs/*.json, plus routing.json when that run
+    is closed ("active" false) and not archived under runs/ already (run-plan's close leaves both). An active routing.json
+    there is a run the upgrade cut off: no hook reads it any more, and it is not listed. Read only; any error -> [] (a broken
+    old dir never hides the keyed runs)."""
+    try:
+        runs = {p.name: p for p in (ldir / "runs").glob("*.json")} if (ldir / "runs").is_dir() else {}
+        r = read_run(ldir / "routing.json")
+        if r is not None and not r.get("active") and archive_name(r) not in runs:
+            runs[archive_name(r)] = ldir / "routing.json"
+        return [(n, runs[n]) for n in sorted(runs, reverse=True)]
+    except Exception:
+        return []
+
+
 def pick_runs(which):
     """which: None -> the latest run (routing.json, else newest archived run); a task name -> the newest archived run whose
-    task contains it (else the active run); "all" -> every archived run, newest first."""
+    file name (<started_at>_<task>) contains it (else the active run); "all" -> every archived run, newest first.
+    The keyed dir comes first. The 0.3.0 folder-name dir (legacy_dir) only adds its runs after it: for None when the keyed
+    dir holds no run, for a task name when nothing in the keyed dir matches it, for "all" after the keyed runs.
+    -> project, keyed dir, [(path, legacy)]."""
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-    sdir = state_dir(project)
+    sdir, ldir = state_dir(project), legacy_dir(project)
+    routing = sdir / "routing.json"
     runs = sorted((sdir / "runs").glob("*.json"), reverse=True) if (sdir / "runs").is_dir() else []
+    old = legacy_runs(ldir) if ldir else []
     if which == "all":
-        picks = runs
+        picks = [(p, False) for p in runs] + [(p, True) for _, p in old]
     elif which:
-        picks = [p for p in runs if which.lower() in p.name.lower()][:1]
-        if not picks and (sdir / "routing.json").exists():
-            picks = [sdir / "routing.json"]
+        w, cur = which.lower(), read_run(routing)
+        picks = [(p, False) for p in runs if w in p.name.lower()][:1]
+        if not picks and cur is not None and w in archive_name(cur).lower():
+            picks = [(routing, False)]   # the keyed run in progress, named
+        if not picks:
+            picks = [(p, True) for n, p in old if w in n.lower()][:1]
+        if not picks and routing.exists():
+            picks = [(routing, False)]
+    elif routing.exists():
+        picks = [(routing, False)]
     else:
-        picks = [sdir / "routing.json"] if (sdir / "routing.json").exists() else runs[:1]
+        picks = [(p, False) for p in runs[:1]] or [(p, True) for _, p in old[:1]]
     return project, sdir, picks
 
 
 def receipts(which=None, as_json=False):
     """One row per plan step plus a summary line (markdown), or with as_json the run(s) as JSON: one object for a single run,
-    a list for "all" — {"task","dial","started_at","closed_at","active","needs_human","path","steps":[units verbatim],
-    "totals":{"input","output","by_model":{model:{calls,input,output}}}}. Nothing else is printed in JSON mode."""
+    a list for "all" — {"task","dial","started_at","closed_at","active","needs_human","path","legacy","steps":[units verbatim],
+    "totals":{"input","output","by_model":{model:{calls,input,output}}}}. Nothing else is printed in JSON mode. A run from the
+    0.3.0 folder-name dir has "legacy": true, and in markdown a LEGACY_NOTE line under its header."""
     project, sdir, picks = pick_runs(which)
     if not picks:
         if as_json:
             print(json.dumps([] if which == "all" else None)); return
         print(f"receipts: no run-plan run recorded for {project.name} ({sdir})"); return
     out = []
-    for path in picks:
-        try:
-            r = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+    for path, legacy in picks:
+        r = read_run(path)
+        if r is None:
             if not as_json:
                 print(f"receipts: cannot read {path}")
             continue
@@ -469,10 +531,13 @@ def receipts(which=None, as_json=False):
         totals, del_out = run_totals(units)
         if as_json:
             out.append({"task": r.get("task"), "dial": r.get("dial"), "started_at": r.get("started_at"), "closed_at": r.get("closed_at"),
-                        "active": bool(r.get("active")), "needs_human": r.get("needs_human"), "path": str(path), "steps": units, "totals": totals})
+                        "active": bool(r.get("active")), "needs_human": r.get("needs_human"), "path": str(path), "legacy": legacy,
+                        "steps": units, "totals": totals})
             continue
         state = "active" if r.get("active") else "closed"
         print(f"receipts: {r.get('task')} · dial {r.get('dial')} · started {r.get('started_at')} · {state} · {len(units)} steps  ({path})")
+        if legacy:
+            print(LEGACY_NOTE.format(name=project.name))
         print("| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |")
         print("|---|---|---|---|---|---|---|---|---|---|---|---|")
         for u in units:
@@ -515,10 +580,10 @@ def recompute():
 
 
 def print_state_dir(create=False):
-    """--state-dir [--create]: print the state dir the hooks use for the current project (CLAUDE_PROJECT_DIR, else the cwd) by
-    the rule in state_dir(): the keyed dir, or the 0.3.0 basename dir while only that one exists. Nothing is created unless
-    --create (mkdir -p). Forward slashes also on Windows (as_posix): the readers are bash — the skills' `!` lines, bench/ab.sh —
-    and Git Bash takes C:/Users/... everywhere, while a backslash path needs quoting."""
+    """--state-dir [--create]: print the state dir the hooks use for the current project (CLAUDE_PROJECT_DIR, else the cwd):
+    always the keyed dir of state_dir(), never the 0.3.0 folder-name dir, even when only that one exists. Nothing is created
+    unless --create (mkdir -p). Forward slashes also on Windows (as_posix): the readers are bash — the skills' `!` lines,
+    bench/ab.sh — and Git Bash takes C:/Users/... everywhere, while a backslash path needs quoting."""
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     print(state_dir(project, create=create).as_posix())
 

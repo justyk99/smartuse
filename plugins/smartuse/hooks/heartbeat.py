@@ -8,8 +8,9 @@ SubagentStart · SubagentStop · Notification (idle_prompt | permission_prompt) 
 Windows the replace is retried 5 x 20 ms while another reader holds the file, then the tmp file is dropped, never an error).
 <key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
 dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/, so
-two repos that share a folder name no longer share one status file. 0.3.0 keyed the dir by the folder name alone: while the
-keyed dir does not exist and projects/<folder name>/ does, that old dir is used (read and written). The file holds:
+two repos that share a folder name no longer share one status file. status.json is read and written, and routing.json (for
+the line and the Stop rule below) read, in that keyed dir only: the 0.3.0 dir keyed by the folder name alone, projects/<folder
+name>/, is shared by every repo of that name and is never used, even while the keyed dir does not exist. The file holds:
   session_id · started (first event of the session) · updated (every event) · source (SessionStart's source) ·
   turn (UserPromptSubmit count) · turn_ended (Stop sets it; UserPromptSubmit / PreToolUse / PostToolUse clear it) ·
   waiting_since (when the wait on the human began: Stop, idle_prompt or permission_prompt; cleared when work resumes) ·
@@ -127,12 +128,9 @@ def project_key(project):
 
 def state_dir(project, create=False):
     """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (same rule as ledger.py and
-    until-done.py). 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist and projects/<folder
-    name>/ does, that old dir is used (read and written), so state recorded before the change stays visible."""
-    base = HOME / ".claude" / "smartuse" / "projects"
-    d = base / project_key(project)
-    if not d.is_dir() and project.name and project.name != d.name and (base / project.name).is_dir():
-        d = base / project.name
+    until-done.py). The only dir the heartbeat reads and writes, whether or not it exists yet: there is no fallback to the
+    0.3.0 folder-name dir (shared by every repo of that name). create=True makes it (mkdir -p)."""
+    d = HOME / ".claude" / "smartuse" / "projects" / project_key(project)
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
