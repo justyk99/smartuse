@@ -13,6 +13,7 @@
 # The JSON work goes through python 3 and nothing else, found the way the hooks find it (plugins/smartuse/hooks/py.sh:
 # python3, python or py -3, so Git Bash on Windows works).
 set -u
+export PYTHONUTF8=1   # every python below (and the hooks inside the nested claude runs) prints UTF-8, also on Windows pipes
 HERE=$(cd "$(dirname "$0")" && pwd)
 PLUGIN_DIR=$(cd "$HERE/../plugins/smartuse" 2>/dev/null && pwd || true)
 PY="$HERE/../plugins/smartuse/hooks/py.sh"
