@@ -1,0 +1,81 @@
+{
+  "active": false,
+  "task": "orders-csv-export",
+  "dial": "safe",
+  "until_done": true,
+  "started_at": "2026-10-22T06:45:44Z",
+  "needs_human": "Row shape: one CSV row per order (id,userId,status,itemCount,total — assumed) or one row per line item (sku,qty,price)? (task.md § 7 Q1; also Q2: may the export live as sibling file src/routes/orders-export.js without touching orders.js?)",
+  "units": [
+    {
+      "id": 1,
+      "title": "Decision line in decisions.md (route, file, columns)",
+      "tier": "judgment",
+      "model": "session (opus)",
+      "why": "design decision the user must see; depends on row shape",
+      "budget_turns": 0,
+      "check": "user has seen the assumed list",
+      "blocked_by": "§7 Q1 row shape (unanswered)",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 2,
+      "title": "Route src/routes/orders-export.js + mount in server.js above /orders",
+      "tier": "build",
+      "model": "opus (safe)",
+      "why": "well-specified change with curl + lint check; columns depend on Q1",
+      "budget_turns": 15,
+      "check": "npm start; curl -D - localhost:3000/orders/export; npm run lint",
+      "blocked_by": "§7 Q1 row shape (unanswered); unit 1",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 3,
+      "title": "Tests tests/orders-export.test.js (happy, totals, quoting, shadowing)",
+      "tier": "build",
+      "model": "opus (safe)",
+      "why": "runnable check; asserted columns depend on Q1",
+      "budget_turns": 15,
+      "check": "npm test",
+      "blocked_by": "§7 Q1 row shape (unanswered); unit 2",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 4,
+      "title": "Docs DEV.md + USER.md + README 'Try' line",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "doc update from a finished diff",
+      "budget_turns": 15,
+      "check": "operator finds URL from USER.md alone",
+      "blocked_by": "§7 Q1 row shape (unanswered); units 2-3",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 5,
+      "title": "Close: commit, move to COMPLETED, /living-docs",
+      "tier": "judgment",
+      "model": "session (opus)",
+      "why": "commit is the user's procedure; run-plan never commits",
+      "budget_turns": 0,
+      "check": "git log shows commit",
+      "blocked_by": "rule: run-plan never commits; units 1-4",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    }
+  ],
+  "closed_at": "2026-10-22T06:46:32Z"
+}

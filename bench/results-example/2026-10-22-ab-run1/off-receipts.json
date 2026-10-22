@@ -1,0 +1,80 @@
+{
+ "active": false,
+ "task": "orders-csv-export",
+ "dial": "off",
+ "started_at": "2026-10-22T06:44:49Z",
+ "until_done": true,
+ "needs_human": "Kickoff \u00a7 7 Q1: CSV row shape \u2014 one row per order (id,userId,status,itemCount,total; assumed) or one row per line item (sku,qty,price)? Also Q2: may the export live in a new sibling file src/routes/orders-export.js (no edit to the other developer's orders.js)?",
+ "units": [
+  {
+   "id": 1,
+   "title": "Decision line in decisions.md",
+   "tier": "judgment",
+   "model": "opus",
+   "why": "plan/design decision; gate is user sign-off",
+   "budget_turns": 15,
+   "check": "user has seen assumed list",
+   "blocked_by": "\u00a77 Q1 row shape unanswered",
+   "status": "blocked",
+   "override": null,
+   "escalated": false,
+   "verify": null
+  },
+  {
+   "id": 2,
+   "title": "Route orders-export.js + mount in server.js",
+   "tier": "build",
+   "model": "opus",
+   "why": "specified change with runnable check",
+   "budget_turns": 15,
+   "check": "npm run lint + curl /orders/export",
+   "blocked_by": "\u00a77 Q1 row shape unanswered (columns depend on it)",
+   "status": "blocked",
+   "override": null,
+   "escalated": false,
+   "verify": null
+  },
+  {
+   "id": 3,
+   "title": "Tests tests/orders-export.test.js",
+   "tier": "build",
+   "model": "opus",
+   "why": "specified change with runnable check",
+   "budget_turns": 15,
+   "check": "npm test",
+   "blocked_by": "\u00a77 Q1 row shape unanswered; needs unit 2",
+   "status": "blocked",
+   "override": null,
+   "escalated": false,
+   "verify": null
+  },
+  {
+   "id": 4,
+   "title": "Docs DEV.md/USER.md + README line",
+   "tier": "build",
+   "model": "opus",
+   "why": "routing off: session model; documents the row shape",
+   "budget_turns": 15,
+   "check": "USER.md shows URL + columns",
+   "blocked_by": "\u00a77 Q1 row shape unanswered; needs unit 2",
+   "status": "blocked",
+   "override": null,
+   "escalated": false,
+   "verify": null
+  },
+  {
+   "id": 5,
+   "title": "Close: commit, move folder, /living-docs",
+   "tier": "judgment",
+   "model": "opus",
+   "why": "commit = user's procedure; run-plan never commits",
+   "budget_turns": 15,
+   "check": "git log shows commit",
+   "blocked_by": "needs human: run-plan never commits; needs units 1-4",
+   "status": "blocked",
+   "override": null,
+   "escalated": false,
+   "verify": null
+  }
+ ]
+}
