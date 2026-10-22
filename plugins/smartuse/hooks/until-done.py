@@ -82,6 +82,8 @@ def sha256_of(path):
 def pins_are_trustworthy():
     """The pin file counts only if root owns it and its directory, and neither is writable by anyone else.
     The agent runs as the user: it cannot create, replace or edit such a file (sudo is denied to it), so a pin there is a human act."""
+    if os.name == "nt":
+        return False   # Windows reports st_uid 0 for every file, so ownership proves nothing: no `bash <script>` pins there, only the fixed shapes
     try:
         f = TRUSTED.stat(); d = TRUSTED.parent.stat()
     except Exception:

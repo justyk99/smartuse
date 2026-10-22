@@ -38,4 +38,13 @@ echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"bl
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}]}' > "$R"; expect block "pending again (counts a block)"
 py -c "import json,sys; r=json.load(open(sys.argv[1])); assert r.get('blocks')==1, r" "$R" 2>/dev/null && echo "PASS block counter persisted" || { echo "FAIL block counter"; fail=1; }
 out=$(echo "${IN/false/true}" | CLAUDE_PROJECT_DIR="$PW" py "$H/until-done.py"); [ -z "$out" ] && echo "PASS allow: stop_hook_active" || { echo "FAIL stop_hook_active"; fail=1; }
+# Windows: st_uid is 0 for every file, so a pin file can never prove a human wrote it -> pins are never trusted there
+out=$(cd "$D/proj" && py - "$H/until-done.py" <<'PY'
+import os, sys
+src = open(sys.argv[1], encoding="utf-8").read().replace("\ntry:\n    main()\nexcept SystemExit:\n    raise\nexcept Exception:\n    allow()\n", "\n")
+ns = {}; exec(compile(src, "until-done", "exec"), ns)
+os.name = "nt"
+print("nt-false" if ns["pins_are_trustworthy"]() is False else "nt-true")
+PY
+) 2>/dev/null; [ "$out" = "nt-false" ] && echo "PASS pins are never trusted on Windows (st_uid is meaningless there)" || { echo "FAIL Windows pin check: $out"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
