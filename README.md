@@ -4,7 +4,7 @@
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img alt="Claude Code 2.1.300+" src="https://img.shields.io/badge/Claude%20Code-2.1.300%2B-black">
 <img alt="plugin evals 4/4 (0.2.0)" src="https://img.shields.io/badge/plugin%20evals-4%2F4%20%280.2.0%29-brightgreen">
-<img alt="tests 230 hook + 36 bench cases" src="https://img.shields.io/badge/tests-148%20hook%20%2B%2033%20bench-brightgreen">
+<img alt="tests 230 hook + 36 bench cases" src="https://img.shields.io/badge/tests-230%20hook%20%2B%2036%20bench-brightgreen">
 <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/justyk99/smartuse/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
