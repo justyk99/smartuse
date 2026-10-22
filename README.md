@@ -85,7 +85,7 @@ plugins/smartuse/      the plugin: skills/ (7: make-prompt · run-plan · living
                        hooks/ (5: bash-guard · file-guard · ledger · until-done · heartbeat; tests/ with all.sh) · evals/ (8 cases) · docs/
 bench/                 reproducible mini-benchmark: sample repo + 5 asks + runner
 docs/research/         the reading behind the design (reply styles, security profiles, the routing landscape)
-docs/notes/            6: design notes with test logs (make-prompt, living-docs, receipts, heartbeat) · the 1.0 audit (audit-2026-10-22) · relay guards (a proposal, not built)
+docs/notes/            7: design notes with test logs (make-prompt, living-docs, receipts, heartbeat) · the 1.0 audit (audit-2026-10-22) · two proposals, not built: one session that delegates, relay guards
 docs/releases/         release notes per version
 scripts/               2: term-scan.py — private-term scan before a public push · render-demo.py — the demo gif from a captured run
 ```
@@ -93,7 +93,8 @@ scripts/               2: term-scan.py — private-term scan before a public pus
 ## Roadmap
 - **0.2**: make-prompt · run-plan · living-docs · reply-style · ledger · bash-guard · evals · bench.
 - **0.3** (released 2026-10-22): a receipt per plan step with the user-override field, `/smartuse:receipts` per task, `run-plan --until-done` with its deterministic Stop gate, `file-guard`.
-- **0.4** (released 2026-10-22): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model · state writes without a permission prompt · Windows. Then: real-repo A/B runs, "30 days of receipts", the measured post. Proposed: relay guards (`docs/notes/relay-design.md`).
+- **0.4** (released 2026-10-22): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model · state writes without a permission prompt · Windows.
+- **0.5** (next): one session that delegates as the main pattern — the session where your files and tools are keeps the judgment and hands the mechanical work to background tasks and cheaper subagents, and a watcher plus a wait gate make sure a session that hands work to another one is woken when it is done (`docs/notes/one-session-design.md`). Then: real-repo A/B runs, "30 days of receipts", the measured post. Proposed: relay guards for second-machine setups (`docs/notes/relay-design.md`).
 
 ## Contributing
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Every change to a hook needs its test (`plugins/smartuse/hooks/tests/`; `bash plugins/smartuse/hooks/tests/all.sh` runs every suite). Security reports: [SECURITY.md](SECURITY.md).
