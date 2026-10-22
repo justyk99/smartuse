@@ -5,9 +5,11 @@
 # (the shim stops it on NEEDS YOU before any step) marked "no work done", kept out of the deltas and the medians. Run B (no
 # --model, 1 ask): the shim drifts between the stages the way A/B run 1 did and the report flags it. Run C: the report over a
 # copy of run A's files with agent_by_model stripped (an archive from before hooks 0.4.0) falls back to the even split marked ~.
+# Run A also checks the state dirs: each run dir's state dir is the one `ledger.py --state-dir` names for it (keyed by the full
+# path, not the basename) and is gone once its receipts were copied; fake-claude.sh is run on its own to show it archives there.
 # Python runs through the plugin's launcher (plugins/smartuse/hooks/py.sh), like the hooks and ab.sh. Exit 1 on failure.
 set -u
-B="$(cd "$(dirname "$0")/.." && pwd)"; PY="$B/../plugins/smartuse/hooks/py.sh"; D=$(mktemp -d); export HOME="$D/home"; mkdir -p "$HOME"; OUT="$D/out"; fail=0
+B="$(cd "$(dirname "$0")/.." && pwd)"; PLUG="$B/../plugins/smartuse"; PY="$PLUG/hooks/py.sh"; LEDGER="$PLUG/hooks/ledger.py"; D=$(mktemp -d); export HOME="$D/home"; mkdir -p "$HOME"; OUT="$D/out"; fail=0
 ok() { echo "PASS $1"; }; ko() { echo "FAIL $1"; fail=1; }
 py() { bash "$PY" "$@"; }
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $PY"; exit 1; }
@@ -68,7 +70,30 @@ assert r2o[12] == "no work done — stopped on NEEDS YOU before any step", r2o[1
 assert r2s[8] == "8.0k" and r2s[12] == "", r2s
 PY
 grep -q 'agent_by_model' "$R" && grep -q 'split EVENLY' "$R" && ok "footnote explains the exact split and the ~ fallback" || ko "footnote missing agent_by_model / split EVENLY"
-[ -z "$(ls -d "$HOME"/.claude/smartuse/projects/ab-* 2>/dev/null)" ] && ok "per-run state dirs removed after their receipts were copied" || ko "state dirs left under HOME"
+# the per-run state dirs follow the hooks' own rule (ledger.py --state-dir: keyed by the run dir's full path, not its basename);
+# ab.sh located each one the same way and removed it after copying the receipts. The run dirs were $work/ab-<n>-<dial>-<ts>
+# (work from the header line, ts = run.json started_at), so compute their state dirs back and check none is left.
+WORKD=$(sed -n 's/.* · work: //p' "$D/log.txt" | head -1); TS=$(py -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["started_at"])' "$OUT/run.json")
+[ -n "$WORKD" ] && [ -n "$TS" ] && ok "header names the work dir, run.json the timestamp (the run dirs were \$work/ab-<n>-<dial>-<ts>)" || ko "cannot rebuild the run dir paths (work: '$WORKD', ts: '$TS')"
+chk=$(for n in 1 2; do for d in kickoff off safe aggressive; do
+  printf '%s\t%s\n' "ab-$n-$d-$TS" "$(CLAUDE_PROJECT_DIR="$WORKD/ab-$n-$d-$TS" py "$LEDGER" --state-dir)"; done; done | py -c '
+import os, pathlib, sys
+base = (pathlib.Path(os.environ["HOME"]) / ".claude" / "smartuse" / "projects").resolve()
+bad = []
+for l in sys.stdin.read().splitlines():
+    name, sd = l.split("\t", 1); p = pathlib.Path(sd)
+    if not sd: bad.append(name + ": --state-dir printed nothing")
+    elif p.resolve().parent != base: bad.append(name + ": " + sd + " is not directly under " + str(base))
+    elif p.name == name: bad.append(name + ": keyed by the basename, not the full path")
+    elif p.exists(): bad.append(name + ": state dir left behind: " + sd)
+print("; ".join(bad))')
+[ -z "$chk" ] && ok "per-run state dirs: keyed under projects/ by the full path (8 of 8, ledger.py --state-dir) and removed after their receipts were copied" || ko "state dirs: $chk"
+[ -z "$(ls -d "$HOME"/.claude/smartuse/projects/ab-* 2>/dev/null)" ] && ok "no projects/<basename> dirs either (nothing fell back to the 0.3.0 rule)" || ko "basename-keyed state dirs left under HOME"
+# fake-claude.sh on its own: the archive lands in the dir ledger.py --state-dir prints for its cwd, not under projects/<basename>
+X="$D/x/ab-9-safe-T"; mkdir -p "$X"; printf '# task\n' > "$X/task.md"
+( cd "$X" && env -u CLAUDE_PROJECT_DIR bash "$B/fake-claude.sh" --plugin-dir "$PLUG" -p "/smartuse:run-plan task.md --until-done --routing safe" ) > /dev/null 2>&1
+sd=$(cd "$X" && env -u CLAUDE_PROJECT_DIR bash "$PY" "$LEDGER" --state-dir)
+[ -f "$sd/runs/2026-01-01T00-00-00Z_csv-export.json" ] && [ ! -d "$HOME/.claude/smartuse/projects/ab-9-safe-T" ] && ok "fake-claude.sh archives into the keyed state dir (ledger.py --state-dir), not projects/<basename>" || ko "fake-claude.sh archive not in $sd/runs/ (basename dir exists: $([ -d "$HOME/.claude/smartuse/projects/ab-9-safe-T" ] && echo yes || echo no))"
 [ -z "$(cd "$B/.." && git status --short -- bench/sample-repo 2>/dev/null)" ] && ok "fixture bench/sample-repo untouched" || ko "fixture modified"
 
 # --- run B: no --model: the shim drifts between the stages (kickoff fable-5-1, run-plan opus-5-5) and the report says so

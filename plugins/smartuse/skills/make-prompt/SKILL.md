@@ -3,7 +3,7 @@ name: make-prompt
 description: Turn a rough one-line ask into a top-tier kickoff prompt with the LEAST effort from the user — Claude greps the ground first (repo, memory, past tasks, owners, constraints), asks a few BASIC questions with clickable options (option 1 = Claude's best guess, "I don't know" always allowed), writes the prompt + task folder + a 5-line human summary, then WAITS for "go". Modes — `/make-prompt <ask>` (interview, ~3 min of the user's time) · `/make-prompt quick <ask>` (no questions, every slot assumed and marked) · add `dry` (scratch folder only). Not for one-file fixes, questions, or chat.
 when_to_use: the user types /make-prompt, says "make me a prompt", "write the prompt", "kickoff", "brief me", pastes a thin one-line ask for work that takes more than a day, or starts a feature / bug hunt / design question from one line — OFFER it in one line ("want /make-prompt?"), never force it.
 argument-hint: "[quick] [dry] <one-line ask>"
-allowed-tools: Bash(date *), Bash(pwd), Bash(git *), Bash(svn info *), Bash(svn status *), Bash(ls *), Bash(command -v *), Bash(node -v*), Bash(grep *), Bash(cut *), Bash(tr *), Bash(wc *), Bash(head *), Read, Grep, Glob, Agent, AskUserQuestion, Write
+allowed-tools: Bash(bash *), Bash(date *), Bash(pwd), Bash(git *), Bash(svn info *), Bash(svn status *), Bash(ls *), Bash(command -v *), Bash(node -v*), Bash(grep *), Bash(cut *), Bash(tr *), Bash(wc *), Bash(head *), Read, Grep, Glob, Agent, AskUserQuestion, Write
 ---
 
 
@@ -38,6 +38,7 @@ Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (
 - Recent commits: !`{ git log --oneline -6 2>/dev/null || echo "(svn: run svn log -q -l 6 with the trust flags if needed)"; } | cut -c1-70 | tr '\n' ';' || true`
 - On this PC: cloudflared=!`command -v cloudflared >/dev/null 2>&1 && echo yes || echo no` pnpm=!`command -v pnpm >/dev/null 2>&1 && echo yes || echo no` node=!`node -v 2>/dev/null || echo no`
 - Arguments: `$ARGUMENTS` — leading words `quick` and/or `dry` are modes; the rest is the ask.
+- State dir (where pending.json / routing.json / receipts.jsonl go): !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create || true`
 
 ## 0. Size check (one line, no tools)
 The diff fits in one sentence, or it is a question → reply "no kickoff prompt needed — just do it?" and stop. Otherwise pick the **task type** from the ask: `feature` · `bug` · `design` (research / decision). Unclear → it becomes question 1 of the interview.
@@ -75,7 +76,7 @@ Fill `templates/kickoff.md` (sections: where things are · people / scope / date
 - `dry` mode → `~/.claude/tmp/make-prompt/<task>/` only, nothing in the repo. If that path cannot be written (sandbox, permission denied), try `${TMPDIR:-/tmp}/smartuse/make-prompt/<task>/`; if that is refused too, **print the whole kickoff in the reply under `## Kickoff (unsaved)`** so nothing is lost — never answer with only the summary.
 
 ## 5. Self-check — the quality gate, shown with the hand-off
-Score the saved prompt, ✓ / ✗ per line; fix every ✗ with one more question (interview) or an explicit `unknown → who` (quick) before handing off:
+Score the saved prompt, ✓ / ✗ per line (14 lines — the receipt says `<n>/14`); fix every ✗ with one more question (interview) or an explicit `unknown → who` (quick) before handing off:
 `≤ 1,200 words (overflow in research.md) · right repo · paths verified · owner named per file to touch · dates absolute · appetite stated · non-goals listed · deliverables ordered with a gate each · acceptance check for "done" · end-to-end verification step · open questions each with an owner · past incidents turned into gates · attachments read · nothing pasted that a path could reference`.
 
 ## 6. Hand-off (then WAIT — never start the work)
@@ -83,9 +84,9 @@ Print, in this order:
 1. `Prompt saved: <path>` and the self-check line (✓ count, the ✗ items).
 2. **Human summary, 5 lines** (what · who · when · done · not) — ready to paste to the team or Jira.
 3. The `assumed:` list (quick mode) or the open questions (interview).
-4. Next step, one line: small task → `say "go" — I start deliverable 1 in plan mode here`; big task → `/clear, then "continue <task folder>" (fresh context beats this one)`; when "done" is a checkable condition → `set it as /goal <condition> so the session cannot stop early`; design-heavy → "This needs a design pass — switch to your strongest model".
+4. Next step, paste-ready, in this order: (a) `/smartuse:run-plan <the saved task.md path> --routing safe` — add `--until-done` for the loop (no "go" between batches); this is where the receipt per plan step comes from. run-plan is manual-only: print the line for the user to type, never call it. (b) The no-receipts alternative: small task → `say "go" — I start deliverable 1 in plan mode here`; big task → `/clear, then "continue <task folder>" (fresh context beats this one)`. (c) When "done" is a checkable condition → `set it as /goal <condition> so the session cannot stop early`; design-heavy → "This needs a design pass — switch to your strongest model". (d) Always: `after your commit: /smartuse:living-docs <task folder> <commit>`.
 
-7. **Receipt.** Write `~/.claude/smartuse/projects/<repo folder name>/pending.json` (create the folder; never inside the repo) with: `{"skill":"make-prompt","task":"<feature name>","mode":"interview|quick","started_at":"<Invoked at, from the live context>","self_check":"<n>/13","corrections":<how many answers the user changed>,"notes":"<one line>"}`. The Stop hook turns it into one ledger line (tokens, minutes) when this turn ends — say `receipt: pending → ledger` in the report. `dry` mode: still write it (the ledger is how the skill proves its cost).
+7. **Receipt.** Write `pending.json` in the state dir from the live context (never inside the repo; if that line is empty, run its command yourself — it prints the dir and creates it) with: `{"skill":"make-prompt","task":"<feature name>","mode":"interview|quick","started_at":"<Invoked at, from the live context>","self_check":"<n>/14","corrections":<how many answers the user changed>,"notes":"<one line>"}`. The Stop hook turns it into one ledger line (tokens, minutes) when this turn ends — say `receipt: pending → ledger` in the report. `dry` mode: still write it (the ledger is how the skill proves its cost).
 
 ## Rules
 - Ground check before questions. Memory and grep answer before the user does.

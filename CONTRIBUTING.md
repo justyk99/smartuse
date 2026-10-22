@@ -4,7 +4,7 @@ Thanks for looking. smartuse stays small on purpose: native Claude Code mechanis
 
 ## Before you open a PR
 1. `claude plugin validate --strict plugins/smartuse` prints `✔ Validation passed`.
-2. `bash plugins/smartuse/hooks/tests/run.sh` and `bash plugins/smartuse/hooks/tests/ledger-test.sh` print `ALL PASS`.
+2. `bash plugins/smartuse/hooks/tests/all.sh` runs every suite — bash-guard (`run.sh`), file-guard, ledger + receipts, until-done, heartbeat and the bench A/B dry run (`bench/tests/ab-test.sh`) — each prints `ALL PASS` and the script ends with `run N · ledger N · until-done N · file-guard N · heartbeat N · ab N`; quote that line when you change a count.
 3. A hook change comes with a new test case. A skill change comes with an eval case or an updated one (`plugins/smartuse/evals/`).
 4. No vendor names in skill names, no colleague names, emails or internal hosts anywhere.
 

@@ -3,7 +3,8 @@
 # git-initialised copy of sample-repo/, a snapshot of that kickoff, then /smartuse:run-plan --until-done ONCE PER DIAL
 # (off / safe / aggressive) on an identical restore of the snapshot, so the dials differ only in the routing.
 # Collected per (ask, dial) under <out>/: claude's JSON (cost, turns, minutes, modelUsage), the per-step receipts the Stop hook
-# archived (routing.json -> runs/, read straight from ~/.claude/smartuse/projects/<run dir basename>/) and the `npm test` result.
+# archived (routing.json -> runs/ in the run dir's state dir, ~/.claude/smartuse/projects/<key>/ — found with the hooks' own rule,
+# `ledger.py --state-dir` run inside the run dir, never guessed from its basename) and the `npm test` result.
 # --model <id or alias> pins the session model of EVERY session (stage 1 and 2; passed to claude as --model, recorded in
 # run.json). Without it claude's default decides per session, and A/B run 1 showed it can differ between the kickoff and the
 # run-plan sessions, which makes the dials incomparable: pin it for a real run.
@@ -62,6 +63,7 @@ case "$CLAUDE_BIN" in */*) CLAUDE_BIN=$(cd "$(dirname "$CLAUDE_BIN")" && pwd)/$(
 [ -f "$ASKS_FILE" ] || { echo "asks file not found: $ASKS_FILE" >&2; exit 2; }
 ASKS=()
 while IFS= read -r line || [ -n "$line" ]; do
+  line=${line%$'\r'}            # a CRLF checkout (Windows) must not leak "\r" into the meta JSON and the report
   [ -z "$line" ] && continue
   ASKS+=("$line")
 done < "$ASKS_FILE"
@@ -82,8 +84,9 @@ else
   echo "      Hard cap for this run: $N ask(s) x (\$$S1_BUDGET + $M x \$$S2_BUDGET) = \$$((N * (S1_BUDGET + M * S2_BUDGET))). Ctrl-C stops between sessions; --dry-run spends nothing."
   [ -n "$MODEL" ] || echo "      model: NOT pinned. claude's default decides per session and can differ between sessions (A/B run 1: kickoff on one model, run-plan on another); pass --model to pin it."
 fi
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT   # the repo copies: $WORK/ab-<n>-<kickoff|dial>-<ts>, each removed after its session
 MSHOW="claude's default (not pinned)"; [ -n "$MODEL" ] && MSHOW=$MODEL
-echo "asks: $N · dials: $DIALS · model: $MSHOW · plugin: $PLUGIN_DIR · claude: $CLAUDE_BIN ($VER) · out: $OUT"
+echo "asks: $N · dials: $DIALS · model: $MSHOW · plugin: $PLUGIN_DIR · claude: $CLAUDE_BIN ($VER) · out: $OUT · work: $WORK"
 py -c '
 import json, sys
 a = sys.argv[1:]
@@ -93,9 +96,19 @@ json.dump({"started_at": a[0], "dry_run": a[1] == "1", "asks": int(a[2]), "dials
                     "stage2": {"max_turns": int(a[10]), "max_budget_usd": int(a[11])}}}, sys.stdout, indent=2, ensure_ascii=False)
 print()' "$TS" "$DRY" "$N" "$DIALS" "$MODEL" "$PLUGIN_DIR" "$CLAUDE_BIN" "$VER" "$S1_TURNS" "$S1_BUDGET" "$S2_TURNS" "$S2_BUDGET" > "$OUT/run.json"
 
-WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 CACHE="$HERE/.cache/node_modules"
 STATE="$HOME/.claude/smartuse/projects"
+state_dir_of() { # $1 = a repo copy -> the state dir the hooks used for it, by their own rule: ledger.py --state-dir of the plugin
+  # under test, run inside the copy with CLAUDE_PROJECT_DIR unset (the way the nested claude ran). Keyed by the copy's full path
+  # since hooks 0.4.0; the 0.3.0 basename dir only when the plugin cannot answer (an older plugin dir).
+  local d; d=$(cd "$1" 2>/dev/null && env -u CLAUDE_PROJECT_DIR bash "$PLUGIN_DIR/hooks/py.sh" "$PLUGIN_DIR/hooks/ledger.py" --state-dir </dev/null 2>/dev/null)
+  [ -n "$d" ] && echo "$d" || echo "$STATE/$(basename "$1")"
+}
+drop_state() { # $1 = a state dir from state_dir_of -> remove it; never anything outside $HOME/.claude/smartuse/projects/
+  local d base; [ -d "$1" ] || return 0
+  d=$(cd "$1" && pwd -P) && base=$(cd "$STATE" && pwd -P) || return 0
+  case "$d/" in "$base/"?*) rm -rf "$d" ;; *) echo "  not removing $1: outside $STATE" >&2 ;; esac
+}
 
 summ() { # one line from a claude JSON file: $cost · turns · min · the models that ran (the keys of modelUsage)
   local s; s=$(py -c '
@@ -142,7 +155,7 @@ for ask in "${ASKS[@]}"; do
   # (b) stage 1: the kickoff, ONCE per ask
   claude_run "$REPO" "/smartuse:make-prompt quick $ask" "$S1_TURNS" "$S1_BUDGET" > "$OUT/$n-stage1.json" 2> "$OUT/$n-stage1.err"
   echo "  stage 1 make-prompt quick: $(summ "$OUT/$n-stage1.json")"
-  [ -d "$STATE/$KICK" ] && rm -rf "$STATE/$KICK"          # the kickoff's receipt state (its ledger line is already written)
+  drop_state "$(state_dir_of "$REPO")"                     # the kickoff's receipt state (its ledger line is already written)
   TASK=$(cd "$REPO" && ls .task/ACTIVE/*/task.md 2>/dev/null | head -1)
   if [ -z "$TASK" ]; then
     echo "  no kickoff: stage 1 left no .task/ACTIVE/*/task.md; ask skipped (row: no kickoff)"
@@ -152,16 +165,16 @@ for ask in "${ASKS[@]}"; do
   meta_json "$n" "$ask" "$TASK" "" > "$OUT/$n-meta.json"
   # (c) snapshot the kickoff so every dial starts from the same task.md
   SNAP="$WORK/ask-$n.tar"; tar -cf "$SNAP" -C "$REPO" . ; rm -rf "$REPO"
-  # (d) stage 2: run-plan --until-done once per dial, each in a new dir whose basename is the receipt state key
+  # (d) stage 2: run-plan --until-done once per dial, each in a new dir of its own (its full path keys the receipt state the hooks write)
   for dial in "${DIAL_LIST[@]}"; do
     KEY="ab-$n-$dial-$TS"; D="$WORK/$KEY"; mkdir -p "$D"; tar -xf "$SNAP" -C "$D"
     claude_run "$D" "/smartuse:run-plan $TASK --until-done --routing $dial" "$S2_TURNS" "$S2_BUDGET" > "$OUT/$n-$dial.json" 2> "$OUT/$n-$dial.err"
-    SD="$STATE/$KEY"; got=""
+    SD=$(state_dir_of "$D"); got=""                         # where the hooks archived the run (asked, not guessed)
     newest=$(ls -t "$SD/runs"/*.json 2>/dev/null | head -1)
     if [ -n "$newest" ]; then cp "$newest" "$OUT/$n-$dial-receipts.json"; got="receipts: runs/$(basename "$newest")"
     elif [ -f "$SD/routing.json" ]; then cp "$SD/routing.json" "$OUT/$n-$dial-receipts.json"; got="receipts: routing.json (run not closed)"
     fi
-    if [ -n "$got" ]; then rm -rf "$SD"; else got="no receipts (nothing in $SD)"; fi
+    if [ -n "$got" ]; then drop_state "$SD"; else got="no receipts (nothing in $SD)"; fi
     nt="npm test skipped (dry run)"
     if [ "$DRY" = 0 ]; then
       ( cd "$D" && npm test ) > "$OUT/$n-$dial-npmtest.txt" 2>&1; code=$?

@@ -1,24 +1,37 @@
 #!/usr/bin/env python3
 """ledger.py — smartuse receipts. Runs as a Stop hook (and SubagentStop). Deterministic, 0 model tokens.
 
-Stop:        if ~/.claude/smartuse/projects/<project-dir-name>/pending.json exists (written by a skill at hand-off), sum the token usage
+Stop:        if ~/.claude/smartuse/projects/<key>/pending.json exists (written by a skill at hand-off), sum the token usage
              in this session's transcript since pending.started_at, append one line to ~/.claude/smartuse/ledger.jsonl,
              delete pending.json. No pending file -> do nothing.
-SubagentStop: if ~/.claude/smartuse/projects/<project-dir-name>/routing.json exists (written by run-plan), append one receipt line per
-             finished agent to that folder's receipts.jsonl with its model and tokens, and attach those tokens to the plan step
+SubagentStop: if ~/.claude/smartuse/projects/<key>/routing.json exists (written by run-plan) and is active, append one receipt line
+             per finished agent to that folder's receipts.jsonl with its model and tokens, and attach those tokens to the plan step
              that is "running" in routing.json (one receipt per plan step: tier, model, why, override, outcome, verify, tokens,
-             tokens by model).
-             When run-plan closes (pending.json skill == run-plan), the Stop hook archives routing.json to runs/<started_at>_<task>.json.
+             tokens by model). A closed run (routing.json "active": false) gets no receipt and no receipt.<agent>.done marker.
+             When run-plan closes (pending.json skill == run-plan), the Stop hook archives routing.json to runs/<started_at>_<task>.json
+             and removes the run's receipt.*.done claim markers.
+State dir:   <key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
+             dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/,
+             so two repos that share a folder name no longer share receipts (same dir as heartbeat.py and until-done.py). 0.3.0 keyed
+             the dir by the folder name alone: while the keyed dir does not exist and projects/<folder name>/ does, that old dir is
+             used (read and written), so --receipts still finds the runs archived before the change. Records keep "project" (the
+             folder name, for readability) and add "project_path" (the resolved path).
 Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
              bash py.sh ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
                                                            from routing.json + runs/, plus a summary line with the agent-output share
                                                            by model (used by /smartuse:receipts).
              bash py.sh ledger.py --receipts [task|all] --json -> the same run(s) as JSON for scripts: one object (a list for "all")
                                                            with the steps verbatim and totals {input, output, by_model}.
+             bash py.sh ledger.py --state-dir [--create]  -> the state dir the hooks use for the current project (CLAUDE_PROJECT_DIR,
+                                                           else the cwd) by the rule above, with forward slashes, creating nothing;
+                                                           --create makes it (mkdir -p) first. The skills' live context runs it with
+                                                           --create, so a skill writes pending.json / routing.json where the hooks
+                                                           read them; bench/ab.sh runs it to find a run's archive.
              (py.sh = the plugin's launcher: python3, else python, else py -3 — on stock Windows python3 is only the Store stub.)
 Windows:     Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the event
-             JSON, so every path taken from the JSON goes through native_path() ("/c/Users/x" -> "C:/Users/x"); the reports print
-             UTF-8 whatever the console code page (stdout is reconfigured in main()).
+             JSON, so every path taken from the JSON goes through native_path() ("/c/Users/x" -> "C:/Users/x"); stdin is read as
+             bytes and decoded as UTF-8 (Windows Python would decode a pipe in the ANSI code page and raise on the first non-ASCII
+             byte, losing the receipt); the reports print UTF-8 whatever the console code page (stdout is reconfigured in main()).
 Never blocks a turn. Any error -> exit 0 silently (a receipt must never stop the work).
 """
 import json, os, sys, re, time, datetime, pathlib, statistics
@@ -119,9 +132,25 @@ def append(path, obj):
 
 
 def write_json(path, obj):
+    """Atomic: tmp file + os.replace. On Windows the replace raises PermissionError while another hook or the status line has
+    the file open: retry 5 times, 20 ms apart; still failing -> drop the tmp file and give up. Never raises."""
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return True
+            except OSError:
+                if attempt < 4:
+                    time.sleep(0.02)
+    except Exception:
+        pass
+    try:
+        tmp.unlink()
+    except Exception:
+        pass
+    return False
 
 
 def safe_name(s):
@@ -140,18 +169,44 @@ def archive_run(sdir, p):
     runs = sdir / "runs"; runs.mkdir(exist_ok=True)
     r.setdefault("closed_at", iso_now()); r["active"] = False
     write_json(runs / f"{safe_name(r.get('started_at') or p.get('started_at'))}_{safe_name(r.get('task') or p.get('task'))}.json", r)
+    for marker in sdir.glob("receipt.*.done"):   # the run's per-agent claim markers go with it
+        try:
+            marker.unlink()
+        except Exception:
+            pass
 
 
-def state_dir(project):
-    """Per-project receipt state lives under the user's home, never inside the repo (team repos stay clean)."""
-    d = HOME / ".claude" / "smartuse" / "projects" / project.name
-    d.mkdir(parents=True, exist_ok=True)
+def project_key(project):
+    """The state-dir name of a project: its full resolved path with every character outside [A-Za-z0-9._-] replaced by "-"
+    and a leading "-" dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys
+    ~/.claude/projects/. Two repos that share a folder name get two state dirs."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
+
+
+def state_dir(project, create=False):
+    """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (team repos stay clean; same
+    rule as heartbeat.py and until-done.py). 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist
+    and projects/<folder name>/ does, that old dir is used (read and written), so receipts recorded before the change stay visible."""
+    base = HOME / ".claude" / "smartuse" / "projects"
+    d = base / project_key(project)
+    if not d.is_dir() and project.name and project.name != d.name and (base / project.name).is_dir():
+        d = base / project.name
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def stdin_json():
+    """stdin as JSON, read as bytes and decoded as UTF-8: Windows Python decodes a piped stdin in the ANSI code page, where a
+    non-ASCII byte (an agent name, a path) raises and the receipt would be lost; a bad byte becomes U+FFFD instead."""
+    raw = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8", "replace")
+    return json.loads(raw.decode("utf-8", "replace"))
 
 
 def on_stop(data):
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
-    pending = state_dir(project) / "pending.json"
+    sdir = state_dir(project)
+    pending = sdir / "pending.json"
     if not pending.exists():
         return
     # Two Stop hooks may run at once (a user-level copy and the plugin's): claim the file atomically so only one writes.
@@ -192,6 +247,7 @@ def on_stop(data):
     rec = {
         "ts": iso_now(),
         "project": project.name,
+        "project_path": str(project.resolve()),
         "session_id": data.get("session_id"),
         "skill": p.get("skill"),
         "task": p.get("task"),
@@ -217,7 +273,7 @@ def on_stop(data):
     append(LEDGER, rec)
     pending.unlink(missing_ok=True)
     try:
-        archive_run(state_dir(project), p)
+        archive_run(sdir, p)
     except Exception:
         pass
 
@@ -254,13 +310,20 @@ def attach_to_step(sdir, rec):
 
 def on_subagent_stop(data):
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
-    routing = state_dir(project) / "routing.json"
+    sdir = state_dir(project)
+    routing = sdir / "routing.json"
     if not routing.exists():
         return
+    try:
+        r = json.loads(routing.read_text(encoding="utf-8"))
+    except Exception:
+        r = None
+    if isinstance(r, dict) and not r.get("active"):
+        return   # the run closed (run-plan set "active": false): a late agent gets no receipt and no marker
     tp = native_path(data.get("agent_transcript_path") or data.get("transcript_path") or "")
     # Two SubagentStop hooks may run (a user-level copy and the plugin's): claim this agent once, atomically.
     aid = data.get("agent_id") or pathlib.Path(tp).stem
-    marker = state_dir(project) / f"receipt.{aid}.done"
+    marker = sdir / f"receipt.{aid}.done"
     try:
         fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
@@ -273,6 +336,7 @@ def on_subagent_stop(data):
     rec = {
         "ts": iso_now(),
         "project": project.name,
+        "project_path": str(project.resolve()),
         "session_id": data.get("session_id"),
         "agent_id": data.get("agent_id"),
         "agent_name": data.get("agent_name") or data.get("agent_type"),
@@ -283,10 +347,10 @@ def on_subagent_stop(data):
         "by_model": by_model(totals),
     }
     try:
-        rec["unit"] = attach_to_step(state_dir(project), rec)
+        rec["unit"] = attach_to_step(sdir, rec)
     except Exception:
         rec["unit"] = None
-    append(state_dir(project) / "receipts.jsonl", rec)
+    append(sdir / "receipts.jsonl", rec)
 
 
 def report(n=10):
@@ -371,7 +435,7 @@ def pick_runs(which):
     """which: None -> the latest run (routing.json, else newest archived run); a task name -> the newest archived run whose
     task contains it (else the active run); "all" -> every archived run, newest first."""
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-    sdir = HOME / ".claude" / "smartuse" / "projects" / project.name
+    sdir = state_dir(project)
     runs = sorted((sdir / "runs").glob("*.json"), reverse=True) if (sdir / "runs").is_dir() else []
     if which == "all":
         picks = runs
@@ -450,12 +514,23 @@ def recompute():
     print(f"ledger: recomputed {changed} of {len(rows)} lines")
 
 
+def print_state_dir(create=False):
+    """--state-dir [--create]: print the state dir the hooks use for the current project (CLAUDE_PROJECT_DIR, else the cwd) by
+    the rule in state_dir(): the keyed dir, or the 0.3.0 basename dir while only that one exists. Nothing is created unless
+    --create (mkdir -p). Forward slashes also on Windows (as_posix): the readers are bash — the skills' `!` lines, bench/ab.sh —
+    and Git Bash takes C:/Users/... everywhere, while a backslash path needs quoting."""
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    print(state_dir(project, create=create).as_posix())
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):   # the renderers print "·": on Windows a pipe defaults to cp1252, which the reader shows as mojibake
         try:
             stream.reconfigure(encoding="utf-8")
         except Exception:
             pass
+    if len(sys.argv) > 1 and sys.argv[1] == "--state-dir":
+        print_state_dir(create="--create" in sys.argv[2:]); return
     if len(sys.argv) > 1 and sys.argv[1] == "--recompute":
         recompute(); return
     if len(sys.argv) > 1 and sys.argv[1] == "--receipts":
@@ -465,8 +540,10 @@ def main():
         report(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
         return
     try:
-        data = json.load(sys.stdin)
+        data = stdin_json()
     except Exception:
+        return
+    if not isinstance(data, dict):
         return
     ev = data.get("hook_event_name") or ""
     try:

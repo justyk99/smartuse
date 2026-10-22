@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Self-contained test for hooks/ledger.py: synthetic transcript + pending.json -> one ledger line; SubagentStop -> one receipt
-# (tokens by model on the line and on the running plan step); --receipts summary with the agent-output share by model; --json.
-set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj" "$HOME/.claude/smartuse/projects/proj"
+# (tokens by model on the line and on the running plan step), none once the run is closed; --receipts summary with the
+# agent-output share by model; --json; the state dir keyed by the full path (+ the 0.3.0 basename fallback); --state-dir [--create];
+# non-ASCII under cp1252.
+set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
+key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-" (~/.claude/smartuse/projects/<key>/)
 T="$D/t.jsonl"; TW=$(wp "$T"); PW=$(wp "$D/proj")   # TW / PW go into the event JSON and CLAUDE_PROJECT_DIR; T and $D/proj stay for the shell itself
+K=$(key "$PW"); P="$HOME/.claude/smartuse/projects/$K"; mkdir -p "$P"   # the state dir: keyed by the full path, not the folder name
 printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:10Z","message":{"model":"m-a","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":10}}}' \
  '{"type":"assistant","timestamp":"2026-01-01T00:00:20Z","message":{"model":"m-a","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":0}}}' \
  '{"type":"assistant","timestamp":"2025-12-31T23:00:00Z","message":{"model":"m-b","usage":{"input_tokens":999,"output_tokens":999}}}' \
@@ -14,35 +18,38 @@ printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:10Z","message":
  '{"type":"assistant","timestamp":"2026-01-01T00:00:40Z","message":{"id":"grow","model":"m-a","usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":100}}}' \
  '{"type":"assistant","timestamp":"2026-01-01T00:00:41Z","message":{"id":"grow","model":"m-a","usage":{"input_tokens":2,"output_tokens":900,"cache_read_input_tokens":100}}}' > "$T"
 mkdir -p "$D/t/subagents"; printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:50Z","message":{"id":"sub1","model":"m-fork","usage":{"input_tokens":7,"output_tokens":70}}}' '{"type":"assistant","timestamp":"2025-12-31T00:00:00Z","message":{"id":"old","model":"m-fork","usage":{"input_tokens":1,"output_tokens":1}}}' > "$D/t/subagents/agent-x.jsonl"
-echo '{"skill":"make-prompt","task":"t","mode":"quick","started_at":"2026-01-01T00:00:00Z","self_check":"13/13"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
+echo '{"skill":"make-prompt","task":"t","mode":"quick","started_at":"2026-01-01T00:00:00Z","self_check":"13/13"}' > "$P/pending.json"
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 L="$HOME/.claude/smartuse/ledger.jsonl"; [ -f "$L" ] || { echo "FAIL no ledger"; exit 1; }
 py - "$L" <<'PY'
 import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1])
 assert r["total_output"]==100+5+900+70, r; assert r["total_input"]==100+100+2000+10+5+2+100+7, r; assert sorted(r["tokens"])==["m-a","m-fork"], r; assert r["assistant_calls"]==5
-print("PASS stop: main + forked-subagent usage after started_at summed; earlier records ignored; shared id -> max")
+assert r["project"]=="proj" and r["project_path"].endswith("proj") and len(r["project_path"]) > len("proj"), r
+print("PASS stop: main + forked-subagent usage after started_at summed; earlier records ignored; shared id -> max; project + project_path recorded")
 PY
-[ -f "$HOME/.claude/smartuse/projects/proj/pending.json" ] && { echo "FAIL pending not removed"; exit 1; } || echo "PASS pending removed"
-echo '{"active":true}' > "$HOME/.claude/smartuse/projects/proj/routing.json"
+[ -f "$P/pending.json" ] && { echo "FAIL pending not removed"; exit 1; } || echo "PASS pending removed"
+echo '{"active":true}' > "$P/routing.json"
 echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
-grep -q '"agent_id": "a1"' "$HOME/.claude/smartuse/projects/proj/receipts.jsonl" && echo "PASS subagent receipt written" || { echo "FAIL receipt"; exit 1; }
+grep -q '"agent_id": "a1"' "$P/receipts.jsonl" && echo "PASS subagent receipt written" || { echo "FAIL receipt"; exit 1; }
 echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
-[ "$(grep -c '"agent_id": "a1"' "$HOME/.claude/smartuse/projects/proj/receipts.jsonl")" = 1 ] && echo "PASS second SubagentStop for the same agent -> no duplicate" || { echo "FAIL duplicate receipt"; exit 1; }
+[ "$(grep -c '"agent_id": "a1"' "$P/receipts.jsonl")" = 1 ] && echo "PASS second SubagentStop for the same agent -> no duplicate" || { echo "FAIL duplicate receipt"; exit 1; }
+# non-ASCII in the event: Windows Python would decode a piped stdin as cp1252 (Á = C3 81, 0x81 undefined -> error, receipt lost); the hook reads bytes and decodes UTF-8
+printf '%s' "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a2\",\"agent_name\":\"Á中文\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
+grep -q '"agent_name": "Á中文"' "$P/receipts.jsonl" && echo "PASS receipt with Á / 中文 recorded under PYTHONIOENCODING=cp1252 (stdin read as bytes, decoded as UTF-8)" || { echo "FAIL non-ASCII receipt lost"; exit 1; }
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 [ "$(wc -l < "$L" | tr -d ' ')" = 1 ] && echo "PASS no pending -> no new line" || { echo "FAIL wrote without pending"; exit 1; }
-echo '{"skill":"living-docs","task":"future","mode":"update","started_at":"2099-01-01T00:00:00Z"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
+echo '{"skill":"living-docs","task":"future","mode":"update","started_at":"2099-01-01T00:00:00Z"}' > "$P/pending.json"
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s3\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 py - "$L" <<'PY'
 import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1]); assert r["task"]=="future" and 840 <= r["duration_s"] <= 960 and "future" in (r.get("notes") or ""), r
 print("PASS future started_at -> 15-minute window, note added")
 PY
 # two Stop hooks at once (user-level + plugin copy) must produce ONE line
-echo '{"skill":"make-prompt","task":"race","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
+echo '{"skill":"make-prompt","task":"race","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' > "$P/pending.json"
 IN="{\"hook_event_name\":\"Stop\",\"session_id\":\"s2\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}"
 ( echo "$IN" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" ) & ( echo "$IN" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" ) & wait
 [ "$(grep -c '"task": "race"' "$L")" = 1 ] && echo "PASS concurrent hooks -> one line" || { echo "FAIL duplicate line from concurrent hooks"; exit 1; }
 # --- receipt per plan step: the agent's tokens land on the unit that is "running" in routing.json
-P="$HOME/.claude/smartuse/projects/proj"
 echo '{"active":true,"task":"csv-export","dial":"safe","started_at":"2026-01-01T00:00:00Z","until_done":true,"units":[{"id":1,"title":"decide","tier":"judgment","model":"session","status":"pass"},{"id":2,"title":"build route","tier":"build","model":"opus","why":"has a test","status":"running","check":"npm test"},{"id":3,"title":"tests","tier":"build","model":"opus","status":"pending"}]}' > "$P/routing.json"
 echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"b1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 py - "$P" <<'PY'
@@ -84,6 +91,14 @@ echo "$OUT" | grep -q "agent tokens in 6.6k / out 4.0k · agent out by model: m-
 echo '{"skill":"run-plan","task":"csv-export","mode":"safe","started_at":"2026-01-01T00:00:00Z","self_check":"2/3"}' > "$P/pending.json"
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s4\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 ls "$P/runs/" | grep -q "2026-01-01T00-00-00Z_csv-export.json" && grep -q '"closed_at"' "$P/runs/"*csv-export.json && echo "PASS run-plan close -> run archived under runs/" || { echo "FAIL run archive"; ls -R "$P"; exit 1; }
+[ -z "$(ls "$P" | grep '^receipt\..*\.done$')" ] && echo "PASS archive removes the receipt.<agent>.done markers" || { echo "FAIL markers left after archive: $(ls "$P")"; exit 1; }
+# the run is closed (routing.json active: false): a late SubagentStop writes neither a receipt nor a marker
+N=$(wc -l < "$P/receipts.jsonl" | tr -d ' ')
+py - "$P" <<'PY'
+import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); r=json.load(open(P/"routing.json")); r["active"]=False; json.dump(r,open(P/"routing.json","w"))
+PY
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"late1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
+[ "$(wc -l < "$P/receipts.jsonl" | tr -d ' ')" = "$N" ] && [ ! -f "$P/receipt.late1.done" ] && echo "PASS inactive routing.json (run closed) -> no receipt, no marker" || { echo "FAIL receipt or marker written after the run closed"; exit 1; }
 rm "$P/routing.json"
 OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts csv-export)
 echo "$OUT" | grep -q "receipts: csv-export · dial safe" && echo "$OUT" | grep -q "closed · 3 steps" && echo "PASS --receipts <task> reads the archived run" || { echo "FAIL --receipts <task>:"; echo "$OUT"; exit 1; }
@@ -109,6 +124,30 @@ PY
 OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts old-run)
 echo "$OUT" | grep -q "agent tokens in 6.6k / out 4.0k · delegated out 4.0k (100% of agent output) on m-a, m-b" && ! echo "$OUT" | grep -q "agent out by model" && echo "PASS archive without agent_by_model (0.3.0 run) -> old delegated-share line, no crash" || { echo "FAIL old-archive fallback:"; echo "$OUT"; exit 1; }
 ( cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts old-run --json ) | py -c "import json,sys; r=json.load(sys.stdin); assert r['task']=='old-run' and r['totals']['by_model']=={} and r['totals']['output']==4008, r" && echo "PASS old archive --json: by_model empty, totals still summed" || { echo "FAIL old-archive --json"; exit 1; }
+# the state dir is keyed by the full path: a second repo named "proj" elsewhere does not see this one's runs; a 0.3.0 dir keyed by the
+# folder name alone (projects/proj) is still read while that repo has no keyed dir, so runs archived before the change stay visible
+mkdir -p "$D/legacy/proj" "$HOME/.claude/smartuse/projects/proj/runs"; PW3=$(wp "$D/legacy/proj"); K3=$(key "$PW3")
+[ "$K3" != "$K" ] || { echo "FAIL two repos named proj got the same key $K"; exit 1; }
+cp "$P/runs/"*_csv-export.json "$HOME/.claude/smartuse/projects/proj/runs/2025-11-01T00-00-00Z_legacy-run.json"
+OUT=$(cd "$D/legacy/proj" && CLAUDE_PROJECT_DIR="$PW3" py "$H/ledger.py" --receipts legacy-run)
+echo "$OUT" | grep -q "closed · 3 steps" && echo "$OUT" | grep -q "legacy-run.json" && echo "PASS --receipts reads the 0.3.0 basename dir as the fallback (no keyed dir for that repo yet)" || { echo "FAIL basename fallback:"; echo "$OUT"; exit 1; }
+[ ! -d "$HOME/.claude/smartuse/projects/$K3" ] && echo "PASS the fallback created no keyed dir" || { echo "FAIL keyed dir created on read"; exit 1; }
+OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts legacy-run)
+echo "$OUT" | grep -q "receipts: no run-plan run recorded for proj" && echo "PASS the keyed repo does not see the other proj's runs" || { echo "FAIL same-named repos share runs:"; echo "$OUT"; exit 1; }
+# --state-dir prints the dir the hooks will use for CLAUDE_PROJECT_DIR (else the cwd) by the same rule, as a path bash can use,
+# and creates nothing; --create makes it (the skills' live context runs that, so a skill writes where the hooks read); with only
+# the 0.3.0 basename dir present it prints that one
+same() { py -c 'import sys,pathlib; sys.exit(0 if pathlib.Path(sys.argv[1]).resolve()==pathlib.Path(sys.argv[2]).resolve() else 1)' "$1" "$2"; }   # path equality whatever the slashes (Windows python prints C:/..., cygpath -m too)
+mkdir -p "$D/sd/fresh"; PW4=$(wp "$D/sd/fresh"); K4=$(key "$PW4"); E4="$HOME/.claude/smartuse/projects/$K4"   # "fresh": no projects/fresh dir exists (projects/proj does, from the fallback case above)
+OUT=$(cd "$D/sd/fresh" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" --state-dir)
+same "$OUT" "$(wp "$E4")" && [ ! -e "$E4" ] && echo "PASS --state-dir: prints the keyed dir for the cwd (not projects/fresh), creates nothing" || { echo "FAIL --state-dir: printed '$OUT', expected '$E4' (exists: $([ -e "$E4" ] && echo yes || echo no))"; exit 1; }
+OUT=$(cd "$D" && CLAUDE_PROJECT_DIR="$PW4" py "$H/ledger.py" --state-dir)
+same "$OUT" "$(wp "$E4")" && [ ! -e "$E4" ] && echo "PASS --state-dir: CLAUDE_PROJECT_DIR wins over the cwd, still nothing created" || { echo "FAIL --state-dir with CLAUDE_PROJECT_DIR: printed '$OUT', expected '$E4'"; exit 1; }
+OUT=$(cd "$D/sd/fresh" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" --state-dir --create)
+same "$OUT" "$(wp "$E4")" && [ -d "$E4" ] && echo "PASS --state-dir --create: creates the keyed dir and prints it" || { echo "FAIL --state-dir --create: printed '$OUT', dir exists: $([ -d "$E4" ] && echo yes || echo no)"; exit 1; }
+mkdir -p "$D/sd2/old" "$HOME/.claude/smartuse/projects/old"; PW5=$(wp "$D/sd2/old"); K5=$(key "$PW5")
+OUT=$(cd "$D/sd2/old" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" --state-dir)
+same "$OUT" "$(wp "$HOME/.claude/smartuse/projects/old")" && [ ! -e "$HOME/.claude/smartuse/projects/$K5" ] && echo "PASS --state-dir: only the 0.3.0 basename dir exists -> prints that one, no keyed dir made" || { echo "FAIL --state-dir basename fallback: printed '$OUT', keyed dir exists: $([ -e "$HOME/.claude/smartuse/projects/$K5" ] && echo yes || echo no)"; exit 1; }
 # the hook reads the MSYS path form too: on Windows "/c/Users/x/t.jsonl" inside the event JSON (Git Bash converts arguments and
 # environment variables, not JSON strings) is opened as "C:/Users/x/t.jsonl"; "/tmp/..." and "C:/..." are left alone, elsewhere nothing changes
 py - "$H/ledger.py" <<'PY'

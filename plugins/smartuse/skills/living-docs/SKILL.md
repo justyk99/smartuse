@@ -3,6 +3,7 @@ name: living-docs
 description: Update a feature's DEV.md (developers) + USER.md (operators) after a commit landed — called after a commit lands (wire it into your commit procedure), or by the user as `/living-docs <task-folder>`, `/living-docs fix "<correction>"`, `/living-docs publish <feature>`. Reads task.md + the commit diff only, rewrites AUTO-MANAGED sections only, never records behaviour that is not in the committed diff. Opt-in per repo (needs a docs root). Invoke it (Skill tool, args `<task-folder> <commit id>`) right after a commit lands and the task folder is closed — it forks to a cheap model, so do not wait on it.
 context: fork
 model: sonnet
+allowed-tools: Read, Grep, Glob, Edit, Write, Bash(bash *), Bash(date *), Bash(git show *), Bash(git log *), Bash(git diff *), Bash(svn diff *), Bash(svn log *)
 ---
 
 # living-docs — keep the DEV + USER doc of a feature current (v1.0, 2026-10-15)
@@ -28,6 +29,7 @@ Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (
 
 ## Live context
 - Invoked at: !`date -u +%FT%TZ || true` (use this exact value as `started_at` in the receipt — never your own clock)
+- State dir (where pending.json / routing.json / receipts.jsonl go): !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create || true`
 
 ## Inputs (arguments)
 
@@ -60,9 +62,8 @@ Never draft DEV.md or USER.md content for a feature you could not find; a missin
    - user-visible behaviour (new button, new column, new filter, new report, changed rule) → USER `steps` / `see` / `faq`
    - always: append one line to DEV `history` and USER `changes` (version + id + date + what)
 5. **Index.** Add or update the feature's line in `<docs-root>/../INDEX.md` (`| feature | DEV | USER | last version | date |`), create INDEX.md from the one-line header if missing.
-6. **Report, one line per file, then stop:** `docs updated: DEV.md (flow, objects, +1 decision) · USER.md (+1 step, +1 change) · INDEX.md`. If a section needed a fact you could not find in the diff or the repo, say `unknown: <what>` instead of guessing.
-
-7. **Receipt.** Write `~/.claude/smartuse/projects/<repo folder name>/pending.json` with `{"skill":"living-docs","task":"<feature>","mode":"update|fix|publish","started_at":"<Invoked at, from the live context>","self_check":"<sections updated>/<sections>","notes":"<one line>"}`; the Stop hook appends the ledger line.
+6. **Receipt — before the report, never after it.** Write `pending.json` in the state dir from the live context (never inside the repo; if that line is empty, run its command yourself — it prints the dir and creates it) with `{"skill":"living-docs","task":"<feature>","mode":"update|fix|publish","started_at":"<Invoked at, from the live context>","self_check":"<sections updated>/<sections>","notes":"<one line>"}`; the Stop hook turns it into the ledger line when this turn ends. A reply that stops before this step leaves no ledger row.
+7. **Report, one line per file, then stop:** `docs updated: DEV.md (flow, objects, +1 decision) · USER.md (+1 step, +1 change) · INDEX.md · receipt: pending → ledger`. If a section needed a fact you could not find in the diff or the repo, say `unknown: <what>` instead of guessing.
 
 ## Guardrails (restated — you do not inherit the project rules)
 
@@ -76,8 +77,8 @@ Never draft DEV.md or USER.md content for a feature you could not find; a missin
 
 ## `fix "<correction>"`
 
-Locate the section the correction belongs to (by the words the user used), apply the smallest edit inside its markers, add nothing else, report `fixed: <file> § <section>`.
+Locate the section the correction belongs to (by the words the user used), apply the smallest edit inside its markers, add nothing else, write the receipt (step 6, mode `fix`), report `fixed: <file> § <section> · receipt: pending → ledger`.
 
 ## `publish <feature>`
 
-Read USER.md, strip the marker comments, push the body as the page content. Report the page URL. Never publish DEV.md unless asked by name.
+Read USER.md, strip the marker comments, push the body as the page content. Write the receipt (step 6, mode `publish`), report the page URL and `receipt: pending → ledger`. Never publish DEV.md unless asked by name.

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # fake-claude.sh — the dry-run shim for bench/ab.sh. Stands in for the `claude` binary (CLAUDE_BIN=bench/fake-claude.sh):
-# parses `-p "<prompt>"` and `--model`, leaves behind what the real skills would (a task.md for make-prompt, an archived run
-# JSON under ~/.claude/smartuse/projects/<basename of cwd>/runs/ for run-plan) and prints the ONE JSON object `claude -p
-# --output-format json` prints, including `modelUsage` (keyed by the models that "ran" in the session) and `subagent_stats`.
+# parses `-p "<prompt>"`, `--model` and `--plugin-dir`, leaves behind what the real skills would (a task.md for make-prompt; for
+# run-plan an archived run JSON under <state dir>/runs/, where <state dir> is what the plugin's own `hooks/ledger.py --state-dir`
+# prints for the cwd — ~/.claude/smartuse/projects/<key>/, keyed by the cwd's full path — and projects/<basename of cwd>/ only if
+# that command fails) and prints the ONE JSON object `claude -p --output-format json` prints, including `modelUsage` (keyed by the
+# models that "ran" in the session) and `subagent_stats`.
 # Deterministic, no model, nothing spent. The numbers are fixtures, not measurements:
 #   off = everything on the session model (9k agent out, $3.70) · safe = build on the session model + verify on sonnet,
 #   mechanical on haiku (8k, $3.40) · aggressive = build on sonnet, mechanical on haiku (6k, $2.10); 4 steps, one blocked.
@@ -13,13 +15,14 @@
 #   Session model: `--model X` is echoed back as the model of every session. Without --model the shim drifts the way A/B run 1
 #   did (kickoff on claude-fable-5-1, run-plan sessions on claude-opus-5-5), so the report's "models differ" flag is exercised.
 set -u
-PROMPT=""; MODEL=""
+PROMPT=""; MODEL=""; PLUGIN_DIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -p|--print) if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then PROMPT=$2; shift 2; else shift; fi ;;
     --version) echo "fake-claude 0.0.0 (bench/fake-claude.sh dry-run shim)"; exit 0 ;;
     --model) MODEL=${2:-}; shift 2 ;;
-    --plugin-dir|--permission-mode|--output-format|--max-turns|--max-budget-usd) shift 2 ;;
+    --plugin-dir) PLUGIN_DIR=${2:-}; shift 2 ;;
+    --permission-mode|--output-format|--max-turns|--max-budget-usd) shift 2 ;;
     -*) shift ;;
     *) [ -z "$PROMPT" ] && PROMPT=$1; shift ;;
   esac
@@ -61,7 +64,12 @@ MD
       *"--routing off"*)        DIAL=off ;;
       *)                        DIAL=safe ;;
     esac
-    SD="$HOME/.claude/smartuse/projects/$(basename "$PWD")"; mkdir -p "$SD/runs"
+    # the archive goes where the hooks put theirs: the state dir ledger.py --state-dir prints for this cwd (CLAUDE_PROJECT_DIR
+    # unset, the way ab.sh runs claude); the 0.3.0 basename dir only when the plugin cannot answer
+    SD=""
+    [ -n "$PLUGIN_DIR" ] && [ -f "$PLUGIN_DIR/hooks/ledger.py" ] && SD=$(env -u CLAUDE_PROJECT_DIR bash "$PLUGIN_DIR/hooks/py.sh" "$PLUGIN_DIR/hooks/ledger.py" --state-dir </dev/null 2>/dev/null)
+    [ -n "$SD" ] || SD="$HOME/.claude/smartuse/projects/$(basename "$PWD")"
+    mkdir -p "$SD/runs"
     case "$(basename "$PWD")" in
       ab-2-off-*)   # no work: NEEDS YOU before any step, every unit blocked, no agent ran (A/B run 1's off and safe rows)
         cat > "$SD/runs/2026-01-01T00-00-00Z_csv-export.json" <<JSON
