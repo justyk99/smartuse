@@ -56,7 +56,8 @@ flowchart LR
 | `run-plan` first real unit | tiered to Haiku (7 calls, 24k output tokens), reported **blocked** by a read-only database rule instead of working around it |
 | `run-plan --until-done`, bench repo, one line in | kickoff 14/14 → endpoint + 4 tests built (11/11 pass) → verified end to end → stopped with a precise human question (pre-existing lint gap). $1.30, 5.6 min, 19 turns. `bench/results-example/` |
 | **0.3.0 run (2026-10-21, 2.1.306), same ask, headless** | kickoff 14/14 ($1.57, 2.4 min) → 6 steps, no "go" in between: router + mount + 4 tests (6/6), live curl, three fresh-agent reviews "no gaps", docs on haiku, step 6 blocked by rule (never commits). **A receipt per step with hook-attached tokens**: agent out 10.0k (fable 40% · haiku 45% · sonnet 13%). $3.72, 6.4 min, 22 turns. `bench/results-example/2026-10-21-csv-export/` |
-| bash-guard · file-guard · ledger + receipts · until-done hooks | 44 / 44 · 4 / 4 · 13 / 13 · 23 / 23 regression cases |
+| **A/B, routed vs not, 2026-10-22, model pinned to Opus, 1 ask (n=1)** | same kickoff, then `run-plan --until-done` per dial: `off` 4 steps · 26/26 tests · $2.08 · 16.5k agent out · `safe` 5 · 12/12 · **$1.72 (−17 %)** · 16.9k · `aggressive` 5 · 10/10 · **$1.44 (−31 %)** · 17.3k. One ask, one run: a data point, not a claim. `bench/results-example/2026-10-22-ab-run2/` |
+| bash-guard · file-guard · ledger + receipts · until-done · heartbeat hooks | 48 / 48 · 4 / 4 · 17 / 17 · 24 / 24 · 55 / 55 regression cases |
 
 Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tools "Bash,Read,Grep,Glob,Agent,Write,Skill"` (Linux needs `bubblewrap` + `socat` for the sandbox) and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks).
 
@@ -64,7 +65,7 @@ Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tool
 - Skills and styles are instructions. The hook is the only enforcement.
 - `make-prompt quick` reads a lot: budget 1–8 minutes and real plan usage per kickoff. It refuses one-file fixes.
 - Subagents cannot ask you questions. Unknowns come back as `unknown: … → who`.
-- Token savings from `run-plan` routing are **not yet measured**; the A/B on 20 real tasks is on the roadmap. The ledger exists so that the number, when published, has a line of evidence per task.
+- Token savings from `run-plan` routing are measured on **one** bench ask so far (cost −17 % / −31 %, agent output flat); the 5-ask bench run and the real-repo runs are on the roadmap. The per-step receipts exist so that every published number has a line of evidence per step.
 
 ## Windows
 The hooks run through `plugins/smartuse/hooks/py.sh`, which picks `python3`, `python` or `py -3` (on a stock Windows install `python3` is the Microsoft Store stub). Git Bash is required: Claude Code runs hook commands through it on Windows. `HOME` from Git Bash is honoured; state lives under `~/.claude/smartuse/`.

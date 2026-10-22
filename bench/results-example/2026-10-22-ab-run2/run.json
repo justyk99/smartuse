@@ -1,0 +1,24 @@
+{
+  "started_at": "2026-10-22T07-13-59Z",
+  "dry_run": false,
+  "asks": 1,
+  "dials": [
+    "off",
+    "safe",
+    "aggressive"
+  ],
+  "model": "opus",
+  "plugin_dir": "/home/user/smartuse/plugins/smartuse",
+  "claude_bin": "claude",
+  "claude_version": "2.1.308 (Claude Code)",
+  "caps": {
+    "stage1": {
+      "max_turns": 60,
+      "max_budget_usd": 4
+    },
+    "stage2": {
+      "max_turns": 40,
+      "max_budget_usd": 5
+    }
+  }
+}
