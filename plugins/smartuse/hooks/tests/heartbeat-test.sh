@@ -196,6 +196,23 @@ printf '#!/bin/sh\necho "Python was not found; run without arguments to install 
 printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL" > "$D/real/python"; chmod +x "$D/stub/python3" "$D/real/python"
 OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_use_id\":\"t\",\"session_id\":\"s\",$C}" | PATH="$D/stub:$D/real:$PATH" HOME="$D/home2" bash "$H/py.sh" "$H/heartbeat.py"; echo "rc=$?")
 [ "$OUT" = "rc=0" ] && [ -f "$D/home2/.claude/smartuse/projects/$K/status.json" ] && echo "PASS launcher skips the Store stub: python3 = stub first on PATH, the hook still wrote status.json via python" || { echo "FAIL launcher skips the Store stub: $OUT"; fail=1; }
-OUT=$(printf '{}' | PATH="$D/stub" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
+mkdir -p "$D/home4"   # a HOME with no remembered interpreter: the probe is the only way to find one
+OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
 [ "$OUT" = "rc=0" ] && echo "PASS launcher with no usable interpreter: prints nothing, exit 0 (a hook never blocks)" || { echo "FAIL launcher without an interpreter: $OUT"; fail=1; }
+# --- the launcher remembers the interpreter it proved (~/.claude/smartuse/interpreter): one start per event instead of a probe +
+# a start (+ the stub's own start on stock Windows, 2 s per event on the author's laptop). Remembered only once ~/.claude/smartuse
+# exists; a path that is gone, or not named python*, is never run.
+CF="$D/home5/.claude/smartuse/interpreter"; mkdir -p "${CF%/*}"
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" bash "$H/py.sh" -c "print('ran')" 2>&1)
+P5=""; [ -f "$CF" ] && read -r P5 < "$CF"
+[ "$OUT" = ran ] && [ -n "$P5" ] && [ -x "$P5" ] && case "${P5##*/}" in [Pp]ython*) true;; *) false;; esac && echo "PASS launcher remembers the interpreter the probe proved: $P5" || { echo "FAIL launcher cache: out '$OUT', cached '$P5'"; fail=1; }
+mkdir -p "$D/stub2"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub2" > "$D/stub2/python3"; chmod +x "$D/stub2/python3"
+OUT=$(PATH="$D/stub2" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1)
+[ "$OUT" = ran ] && [ ! -e "$D/stub2/called" ] && echo "PASS the remembered interpreter runs with no python on PATH, and the stub is never started" || { echo "FAIL remembered interpreter: out '$OUT', stub called: $([ -e "$D/stub2/called" ] && echo yes || echo no)"; fail=1; }
+printf '%s\n' "$D/gone/python3" > "$CF"
+OUT=$(HOME="$D/home5" bash "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
+[ "$OUT" = ran ] && [ -x "$P5" ] && echo "PASS a remembered path that is gone is probed again and replaced: $P5" || { echo "FAIL stale cache: out '$OUT', cached '$P5'"; fail=1; }
+printf '#!/bin/sh\necho EVIL\n' > "$D/evil"; chmod +x "$D/evil"; printf '%s\n' "$D/evil" > "$CF"
+OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home5" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
+[ "$OUT" = "rc=0" ] && echo "PASS a remembered path not named python* is never run (no interpreter left: nothing, exit 0)" || { echo "FAIL launcher ran a non-python remembered path: $OUT"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
