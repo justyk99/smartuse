@@ -1,0 +1,132 @@
+{
+  "active": false,
+  "task": "orders-csv-export",
+  "dial": "off",
+  "until_done": true,
+  "started_at": "2026-10-22T07:15:13Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Short plan: route, columns, escaping rule",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design + settling §7 open questions; session model in conversation",
+      "budget_turns": 0,
+      "check": "plan recorded in decisions.md (user to confirm)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/orders-csv-export/decisions.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "tests/exports.test.js written first (red)",
+      "tier": "build",
+      "model": "opus",
+      "why": "routing off: session model; well-specified tests with runnable check",
+      "budget_turns": 15,
+      "check": "red as intended: Cannot find module '../src/routes/exports'",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 7,
+      "agent_input": 176168,
+      "agent_output": 6348,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "a15bc3ec35ae6d396",
+        "a7fb6b436efac56ff"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 7,
+          "input": 176168,
+          "output": 6348
+        }
+      },
+      "files": [
+        "tests/exports.test.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "src/routes/exports.js + mount in server.js",
+      "tier": "build",
+      "model": "opus",
+      "why": "routing off: session model; change with runnable check",
+      "budget_turns": 20,
+      "check": "Tests: 26 passed, 26 total; lint ok; orders.js/db.js unchanged",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps open",
+      "agent_calls": 15,
+      "agent_input": 367557,
+      "agent_output": 9804,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "a40996469b15ca32a",
+        "a35464389842740f3",
+        "a6a8c7700d5274c10",
+        "aef94fee792fe927d"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 15,
+          "input": 367557,
+          "output": 9804
+        }
+      },
+      "files": [
+        "src/routes/exports.js",
+        "src/server.js",
+        "tests/exports.test.js"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Docs: README line (DEV/USER via /living-docs after commit)",
+      "tier": "mechanical",
+      "model": "opus",
+      "why": "routing off: session model; one doc line",
+      "budget_turns": 8,
+      "check": "5:...or `GET /exports/orders.csv` to download every order as a CSV file.",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 2,
+      "agent_input": 41443,
+      "agent_output": 360,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "ab1c5ddb8c59c303d"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 2,
+          "input": 41443,
+          "output": 360
+        }
+      },
+      "files": [
+        "README.md"
+      ]
+    }
+  ],
+  "closed_at": "2026-10-22T07:21:24Z"
+}

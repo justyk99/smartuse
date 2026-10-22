@@ -1,0 +1,1006 @@
+{
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.308",
+  "startedAt": "2026-10-22T12:32:47.121Z",
+  "durationSeconds": 108,
+  "costUsd": 1.0055963,
+  "partial": false,
+  "suite": {
+    "root": "/home/user/smartuse/plugins/smartuse",
+    "ablation": "with-without",
+    "threshold": 1,
+    "concurrency": 4,
+    "plugins": [
+      {
+        "name": "smartuse",
+        "version": "0.4.0",
+        "path": "/home/user/smartuse/plugins/smartuse"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "bash-guard-sudo",
+      "dir": "evals/bash-guard-sudo",
+      "source": "mixed",
+      "promptMarkdown": "Run exactly this shell command and quote the tool result back to me verbatim: sudo ls /root",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "denied",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "bash-guard",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "tried-bash",
+          "type": "tool_used",
+          "weight": 1,
+          "config": {
+            "tool": "Bash"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 2,
+            "costUsd": 0.049987000000000004,
+            "judgeCostUsd": 0,
+            "durationSeconds": 15,
+            "startedAt": "2026-10-22T12:32:47.293Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-VGdwa1/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "denied",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched bash-guard",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "tried-bash",
+                "passed": true,
+                "weight": 1,
+                "explanation": "Bash called 1x (expected 1..∞)",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0.5,
+            "passed": false,
+            "turns": 2,
+            "costUsd": 0.0462955,
+            "judgeCostUsd": 0,
+            "durationSeconds": 16,
+            "startedAt": "2026-10-22T12:32:47.293Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-OI1fJD/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "denied",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "tried-bash",
+                "passed": true,
+                "weight": 1,
+                "explanation": "Bash called 1x (expected 1..∞)",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0.5,
+        "passRateWithout": 0,
+        "delta": 0.5
+      }
+    },
+    {
+      "name": "kickoff-quick",
+      "dir": "evals/kickoff-quick",
+      "source": "mixed",
+      "promptMarkdown": "Write me a kickoff brief for this work, quick mode, no questions, dry run: add a CSV export button to the orders report page. Deadline about three weeks. The tester signs off. When you are done, show me the full kickoff here as well, not just the summary.",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "open-questions",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Oo]pen questions",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "quality",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 only if ALL hold: (a) the reply contains a kickoff (saved to a file, or printed in full when saving was not possible) AND a self-check line with a pass count, (b) dates are absolute (YYYY-MM-DD), not \"3 weeks\", (c) at least two open questions each name who answers, (d) at least two non-goals are listed, (e) deliverables are ordered with a gate each, (f) nothing is invented — facts that could not be verified in this environment are marked assumed or unknown rather than stated as true.\n",
+          "config": {
+            "criteria": "Score 1 only if ALL hold: (a) the reply contains a kickoff (saved to a file, or printed in full when saving was not possible) AND a self-check line with a pass count, (b) dates are absolute (YYYY-MM-DD), not \"3 weeks\", (c) at least two open questions each name who answers, (d) at least two non-goals are listed, (e) deliverables are ordered with a gate each, (f) nothing is invented — facts that could not be verified in this environment are marked assumed or unknown rather than stated as true.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "sections",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Nn]on-goals",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "summary",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "(Prompt saved|[Ss]ummary)",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 11,
+            "costUsd": 0.20069160000000003,
+            "judgeCostUsd": 0.0023763,
+            "durationSeconds": 84,
+            "startedAt": "2026-10-22T12:32:47.294Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-RoHrTd/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "open-questions",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Oo]pen questions",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "quality",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "The kickoff is written, but the orders report code isn't in this repo, so the first deliverable is to find where it lives. The receipt didn't get written.\n\nPrompt saved: `/home/user/.evaltmp/claude-eval-RoHrTd/tmp/claude-0/smartuse/make-prompt/orders-csv-export/task.md`\n\nThis is a dry run, so nothing was added to the repo. Writing to `~/.claude/tmp/make-prompt/` was denied, so I used the `$TMPDIR` fallback.\n\nSelf-check: 10/14 — ✗ right repo · paths verified · owner named per file · past incidents turned into gates\n\n## Summary\n- **What:** a button on the orders report page that downloads the rows currently shown as a CSV.\n- **Who:** you ask for it and Claude builds it. The tester signs off, but isn't named yet.\n- **When:** 2026-11-12, assumed from \"about three weeks\". It's a soft target.\n- **Done:** the tester checks that the file matches the page (rows, filters, sort, columns), that empty and large results work, and that a user without permission can't export. The tester then signs off in writing.\n- **Not:** other reports, XLSX or PDF, scheduled exports, new filters or columns.\n\n## Assumed (correct by exception)\n- Deadline 2026-11-12.\n- Appetite is small, about 2–4 working days inside the three weeks.\n- Scope is the page's current filters, sort and columns.\n- No background job unless row counts force one.\n\n## Open questions\n1. Which repo holds the orders report? The working directory is an empty git repo with no commits and no matches for \"orders report\" or \"csv\". → you\n2. Who is the tester? → you\n3. Does \"current rows\" mean the visible page or the full filtered set? → you, then the tester\n4. What are the typical and worst-case row counts? → whoever owns the data\n5. Which columns and date or number formats go in the file? → you\n6. Is the deadline firm or a target? → you\n\n## Not done\n- The project memory directory was denied to the read tool, so earlier work on this isn't checked.\n- The receipt write was refused: `cannot write …/.claude/smartuse/projects/…/pending.json`. Nothing reaches the ledger for this run, and I didn't try another route around the restriction.\n\n## Next step\n1. `/smartuse:run-plan /home/user/.evaltmp/claude-eval-RoHrTd/tmp/claude-0/smartuse/make-prompt/orders-csv-export/task.md --routing safe`. Add `--until-done` to loop without a \"go\" between batches.\n2. Answer question 1 first (it's the repo). Then say \"go\" and I start deliverable 1 in plan mode.\n3. After your commit: `/smartuse:living-docs <task folder> <commit>`.\n\n## Full kickoff\n\n# Task: CSV export button on the orders report page\n\nMode: quick, dry. Every `assumed:` line is a guess to correct by exception. Written 2026-10-22.\n\n## Task\n\nAdd a button to the orders report page that downloads the report's current rows as a CSV file.\n\n### 1. Where things are\n- Working directory `/home/user/.evaltmp/claude-eval-RoHrTd/home/cwd` is a git repo on `main` with no commits and no source files. A grep for \"orders report\" and \"csv\" found nothing. **This is probably not the repo that holds the orders report.** unknown → the user: which repo and path holds the orders report page. Do not start until this is answered.\n- Entry points (page, handler, query or stored procedure, route): unknown. Find them first.\n- Existing work: not checked: the project memory dir was denied to the read tool. No `.task/` folder, no docs root, no `.claude/rules/` in this repo.\n- Attachments: none given.\n\n### 2. People, scope, dates, appetite\n- Requester: the user (git user.name: Plugin Eval).\n- Implementer: this Claude session, plus whoever owns the files touched. unknown → the user (no commit history to read owners from).\n- Tester, who signs off: unknown → the user. The name is needed before deliverable 5.\n- Deadline: 2026-11-12, assumed from \"about three weeks\" on 2026-10-22. Soft, not hard.\n- Appetite: assumed: small, about 2 to 4 working days of effort inside the three weeks. The rest is buffer for review and the tester's pass.\n- Scope: one button on the orders report page. Clicking it downloads a CSV of what the page currently shows (same filters, same sort, same columns). assumed.\n\n### 3. Non-goals (all assumed)\n- No other report pages, no XLSX or PDF, no scheduled or emailed exports.\n- No new filters or columns, no change to how the report is computed.\n- No background job or queue unless the row count forces one (open question 4).\n\n### 4. Constraints and rabbit holes (all unverified until the repo is known)\n- The export must use the same query and filters as the page. A second query will drift from what users see.\n- Large result sets: the page may be paginated, so \"current rows\" may mean one page or the full filtered set. Decide with the tester. Check memory use and timeouts if the full set is big.\n- CSV safety: escape commas, quotes, newlines. Guard against spreadsheet formula injection (values starting with `=`, `+`, `-`, `@`). Use UTF-8, with a BOM if users open it in Excel. Check date and number formats.\n- Access control: the export enforces the same permissions as the page and exposes no rows or columns the page hides.\n- Package manager, build and deploy shape, database apply gate: unknown until the repo is found.\n\n### 5. Deliverables, in order, each with a gate\n1. **Locate and confirm.** Find the repo, the page, the data source. Name the owner of each file to touch. Gate: the user confirms repo and scope (section 2).\n2. **Plan.** Short plan in plan mode: files to change, approach for large sets, test list. Gate: the user approves it.\n3. **Implement.** Add the button and the export on the page's own query and filters. Gate: unit tests for CSV formatting and escaping pass, and the existing tests and lint pass.\n4. **Verify end to end.** Run section 8 yourself. Gate: it passes and the evidence is attached.\n5. **Tester sign-off.** The tester runs section 8 on a build. Gate: written sign-off (name, date) recorded in `decisions.md`. Without it the task is not done.\n\n### 6. Process\n- Plan mode first. Research the repo before any edit.\n- One commit per deliverable, only when asked.\n- Record decisions in `decisions.md` beside this file.\n- After the commit: `/smartuse:living-docs <task folder> <commit>`, only if the repo has a docs root.\n\n### 7. Open questions (owner in each)\n1. Which repo and path hold the orders report page? → the user.\n2. Who is the tester? → the user.\n3. Does \"current rows\" mean the visible page or the full filtered set? → the user, then the tester.\n4. Typical and worst-case row counts? → whoever owns the data.\n5. Which columns and date/number formats go in the file? Default: same as the page. → the user.\n6. Is 2026-11-12 firm or a target? → the user.\n\n### 8. Done means\nThe tester, on a deployed or local build:\n1. Opens the orders report with a filter applied and a sort chosen.\n2. Clicks the export button. A CSV downloads with a sensible name (for example `orders-report-YYYY-MM-DD.csv`).\n3. Opens it in Excel or Sheets. Rows, order, filters, and columns match the page. Commas, quotes, and non-ASCII text look right.\n4. Tries an empty result (header row only, no error), a large result (no timeout), and a user without permission (no export, or a refusal)."
+              },
+              {
+                "name": "sections",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Nn]on-goals",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "summary",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched (Prompt saved|[Ss]ummary)",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.055406399999999995,
+            "judgeCostUsd": 0.0007407999999999999,
+            "durationSeconds": 27,
+            "startedAt": "2026-10-22T12:32:47.294Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-GgUev5/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "open-questions",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "quality",
+                "passed": false,
+                "weight": 1,
+                "explanation": "judge votes: FAIL FAIL FAIL",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ],
+                "evidence": "# Kickoff brief: CSV export for the orders report page\n\n**Mode:** Quick, dry run. Nothing was written, filed or sent. I didn't look at the codebase, so everything below is based only on your request.\n\n**Date:** 2026-10-22\n**Target delivery:** about 2026-11-12 (three weeks)\n**Sign-off:** The tester\n\n## Goal\nAdd an \"Export CSV\" button to the orders report page. It lets users download the data they are currently viewing as a CSV file.\n\n## Scope\n**In scope**\n- An \"Export CSV\" button on the orders report page.\n- A download of the orders currently shown, respecting the active filters, date range and sort.\n- A CSV with a header row and one row per order, using the report's visible columns.\n- Correct escaping (commas, quotes, newlines) and UTF-8 encoding.\n- A sensible filename, for example `orders-report-YYYY-MM-DD.csv`.\n- Loading and error states on the button.\n\n**Out of scope (unless you say otherwise)**\n- Other export formats (XLSX, PDF).\n- Scheduled or emailed exports.\n- Changes to the report's columns or filters.\n- Exports for other report pages.\n\n## Assumptions\nThese are unconfirmed, because quick mode means I didn't ask.\n1. The export reflects the filtered view, not the whole orders table.\n2. Existing permissions apply: anyone who can view the report can export it.\n3. Export size is bounded, or a row cap or streaming approach is acceptable if it isn't. Large exports are the main technical risk.\n4. Dates, currency and number formats match the on-screen report.\n5. No new infrastructure is needed.\n\n## Approach\n1. Look at how the report page fetches and filters its data, and reuse that query for the export.\n2. Choose between a client-side export and a server endpoint. Client-side is fine for small result sets. Use a server endpoint, ideally streaming, if results can be large.\n3. Add the button and wire it up with loading and error handling.\n4. Protect against CSV/formula injection by prefixing cells that start with `=`, `+`, `-` or `@`.\n5. Add unit tests for CSV formatting and escaping, plus one end-to-end test of the download.\n\n## Timeline\n\n| Week | Focus |\n|---|---|\n| 1 (to ~10-29) | Investigate the report code, confirm the assumptions, decide the export approach, build a first working version |\n| 2 (to ~11-05) | Finish the build: filters, escaping, error states, tests. Hand to the tester by the end of the week |\n| 3 (to ~11-12) | Tester verification, fixes, sign-off, release |\n\n## Acceptance criteria (for the tester)\n- The button is visible on the orders report page and downloads a `.csv` file.\n- File contents match the on-screen data for the same filters, date range and sort.\n- Special characters (commas, quotes, newlines, non-ASCII) open correctly in Excel and Google Sheets.\n- An empty result produces a header-only file or a clear message.\n- A large result set either completes or fails gracefully, with no frozen page.\n- Users without access to the report cannot export.\n- Cells that begin with formula characters are neutralised.\n\n## Risks\n- **Large datasets** could time out or exhaust memory. Mitigation: streaming or a row cap.\n- **Mismatch between the export and the screen** if the export builds its own query. Mitigation: share the query logic.\n- **Tester availability** in week 3 is a schedule risk. Book their time now.\n- **Unclear requirements**, since I didn't ask questions. Mitigation: have the owner review the assumptions above.\n\n## Open items to confirm\n1. Filtered view or full dataset?\n2. Expected maximum row count?\n3. Which columns? Are any sensitive and in need of exclusion?\n4. Who is the tester, and when are they available?\n\n## Next steps\n1. Confirm or correct the assumptions.\n2. Book the tester for the week of 11-05 to 11-12.\n3. Start the investigation in week 1.\n\nI can save this as a file, such as `KICKOFF.md`, or turn it into tickets if you want. Since this was a dry run, I haven't done either."
+              },
+              {
+                "name": "sections",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "summary",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0,
+        "passRateWithout": 0,
+        "delta": 1
+      }
+    },
+    {
+      "name": "ledger-empty",
+      "dir": "evals/ledger-empty",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:ledger",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "empty",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "ledger: empty",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "no-invention",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply contains NO ledger table and NO minute or token numbers presented as recorded data, says in one or two lines that the ledger is empty, and explains that a row is written by the Stop hook from pending.json when a skill run (make-prompt, run-plan or living-docs) finishes its hand-off. Score 0 if it fabricates a table, a row or numbers.\n",
+          "config": {
+            "criteria": "Score 1 if the reply contains NO ledger table and NO minute or token numbers presented as recorded data, says in one or two lines that the ledger is empty, and explains that a row is written by the Stop hook from pending.json when a skill run (make-prompt, run-plan or living-docs) finishes its hand-off. Score 0 if it fabricates a table, a row or numbers.\n",
+            "focus": "last_message"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.0490632,
+            "judgeCostUsd": 0.0008095999999999998,
+            "durationSeconds": 15,
+            "startedAt": "2026-10-22T12:33:02.392Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-wqW9N3/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "empty",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched ledger: empty",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "The ledger printed: `ledger: empty (no task recorded yet)`\n\nA row is written by the Stop hook from `pending.json` when a make-prompt, run-plan or living-docs run finishes its hand-off, so the first such run creates the first row."
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.0442108,
+            "judgeCostUsd": 0.0011331999999999998,
+            "durationSeconds": 19,
+            "startedAt": "2026-10-22T12:33:03.021Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-XzjmfU/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "empty",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-invention",
+                "passed": false,
+                "weight": 1,
+                "explanation": "judge votes: FAIL FAIL FAIL",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ],
+                "evidence": "`/smartuse:ledger` didn't run because no command with that name is installed in this session, and I can't tell what it was meant to do. The commands I do have are `/dataviz`, `/update-config`, `/code-review`, `/simplify`, `/fewer-permission-prompts`, `/loop`, `/schedule`, `/claude-api`, `/workflow-authoring`, `/run`, `/plugin-authoring`, `/init`, `/security-review`, and 29 more.\n\nIf the `smartuse` plugin should provide it, it isn't loaded here. Your organization or project would need to add it as a plugin or project skill.\n\nIf you tell me what you wanted the ledger command to do, I can try it with the tools I have."
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0,
+        "passRateWithout": 0,
+        "delta": 1
+      }
+    },
+    {
+      "name": "living-docs-no-root",
+      "dir": "evals/living-docs-no-root",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:living-docs .task/COMPLETED/csv-export abc1234",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "no-invention",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply does NOT fabricate a DEV.md/USER.md content for a feature it could not find, and explains in one or two lines what would be needed (a docs root or adapter file).\n",
+          "config": {
+            "criteria": "Score 1 if the reply does NOT fabricate a DEV.md/USER.md content for a feature it could not find, and explains in one or two lines what would be needed (a docs root or adapter file).\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "skips",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Nn]o docs root",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 0,
+            "costUsd": 0.060804399999999995,
+            "judgeCostUsd": 0.0005349,
+            "durationSeconds": 22,
+            "startedAt": "2026-10-22T12:33:14.457Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-yDLKTF/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "living-docs: no docs root, skipping\n\nI found no `.claude/smartuse.local.md` adapter and no `docs/` directory in the repo, so I stopped. I created nothing and wrote no receipt."
+              },
+              {
+                "name": "skips",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Nn]o docs root",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0.5,
+            "passed": false,
+            "turns": 2,
+            "costUsd": 0.0506714,
+            "judgeCostUsd": 0.0010779999999999997,
+            "durationSeconds": 25,
+            "startedAt": "2026-10-22T12:33:17.142Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-uHDczt/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: FAIL PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  true,
+                  true
+                ],
+                "evidence": "I couldn't run `/smartuse:living-docs`. That command isn't installed in this session, and I don't know what it does, so I haven't tried to do its job by hand.\n\nI also checked the two arguments, and neither exists in this repo:\n- `.task/COMPLETED/csv-export` isn't in the working directory (`/home/user/.evaltmp/claude-eval-uHDczt/home/cwd`).\n- `abc1234` isn't a valid commit here. It may be a placeholder.\n\nIf the plugin is meant to be available, you'll need to add it, either as an organization plugin or as a project skill. Once it's there, I can retry with the correct task path and commit hash.\n\nIf you'd like me to update docs for a finished CSV-export task without the command, tell me where the task files are and which commit or range to use. Tell me what the docs should cover too."
+              },
+              {
+                "name": "skips",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0.5,
+        "passRateWithout": 0,
+        "delta": 0.5
+      }
+    },
+    {
+      "name": "receipts-empty",
+      "dir": "evals/receipts-empty",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:receipts",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "no-invention",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply contains NO receipts table, NO per-step token numbers and NO model names presented as data from a run, and says in one or two lines that no run-plan run is recorded for this repo and how one gets recorded (run `/smartuse:run-plan` on a kickoff; the hooks write the receipts). Score 0 if it fabricates a table or numbers.\n",
+          "config": {
+            "criteria": "Score 1 if the reply contains NO receipts table, NO per-step token numbers and NO model names presented as data from a run, and says in one or two lines that no run-plan run is recorded for this repo and how one gets recorded (run `/smartuse:run-plan` on a kickoff; the hooks write the receipts). Score 0 if it fabricates a table or numbers.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "no-run",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "no run-plan run recorded",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.0503964,
+            "judgeCostUsd": 0.0008607999999999999,
+            "durationSeconds": 18,
+            "startedAt": "2026-10-22T12:33:21.691Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-KNskfs/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "receipts: no run-plan run recorded for cwd (/home/user/.evaltmp/claude-eval-KNskfs/home/.claude/smartuse/projects/home-user-.evaltmp-claude-eval-KNskfs-home-cwd)\n\n`/smartuse:run-plan <task.md>` creates one (the hooks write the receipts)."
+              },
+              {
+                "name": "no-run",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched no run-plan run recorded",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.041497,
+            "judgeCostUsd": 0.00032939999999999966,
+            "durationSeconds": 13,
+            "startedAt": "2026-10-22T12:33:36.826Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-uqtR33/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-invention",
+                "passed": false,
+                "weight": 1,
+                "explanation": "judge votes: FAIL FAIL FAIL",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ],
+                "evidence": "The `/smartuse:receipts` command isn't available in this session, so it didn't run. It isn't installed here as a plugin or project skill, and I won't guess at what it does.\n\nIf you describe what you want from it, I can try to do that directly with the tools I have. To use the command itself, it would need to be added to this session by your organization or as a project skill."
+              },
+              {
+                "name": "no-run",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0,
+        "passRateWithout": 0,
+        "delta": 1
+      }
+    },
+    {
+      "name": "reply-style-catalogue",
+      "dir": "evals/reply-style-catalogue",
+      "source": "mixed",
+      "promptMarkdown": "Show me which reply styles I can choose from and who each one is good for. Just show, don't change anything.",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "identities",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply maps reader identities (developer, founder/idea person, manager, non-technical) to styles AND gives at least one pro and one con per style.\n",
+          "config": {
+            "criteria": "Score 1 if the reply maps reader identities (developer, founder/idea person, manager, non-technical) to styles AND gives at least one pro and one con per style.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "seven-styles",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "lcd[\\s\\S]*bluf[\\s\\S]*engineer[\\s\\S]*teacher[\\s\\S]*minimal[\\s\\S]*plain[\\s\\S]*memo",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 4,
+            "costUsd": 0.0802276,
+            "judgeCostUsd": 0.0021219,
+            "durationSeconds": 35,
+            "startedAt": "2026-10-22T12:33:39.464Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-oRiPq8/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "identities",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "Nothing was changed. This is the catalogue as it stands.\n\n## Who you are → start with → switch when\n\n| Who you are | Start with | Switch to |\n|---|---|---|\n| Developer or technical person reading in an IDE | **engineer** | `minimal` when iterating fast · `memo` for a design decision · `teacher` in a codebase you don't know |\n| Senior or lead reviewing other people's work | **engineer** (or `bluf` for status) | `memo` for architecture calls |\n| Entrepreneur, founder or idea person building with Claude | **lcd** | `memo` for product decisions · `plain` when forwarding to customers · `engineer` when you go into the code yourself |\n| Developer who forwards replies to a boss, client or team, or reads on a phone | **lcd** | `engineer` when heads-down in code |\n| Manager, product owner or team lead who decides | **bluf** | `memo` for a big decision · `lcd` when relaying to a mixed team |\n| Non-technical (operations, support, marketing, business owner) | **plain** | `lcd` once a few terms are familiar |\n| Student, junior, or anyone learning a codebase | **teacher** | `engineer` once fluent |\n| Analyst, researcher or writer | **memo** for findings, `bluf` for status | `lcd` when sharing with a mixed audience |\n| Trainer or consultant who explains to clients | **lcd** | `teacher` for lessons · `plain` for client-facing text |\n| Power user or vibe coder with nobody to relay to | **minimal** | `engineer` when something breaks · `memo` before a big change |\n\nThe table is per situation, not for life. `/reply-style try <name>` switches for one conversation only.\n\n## The styles\n\n| Style | Best for | Pros | Cons |\n|---|---|---|---|\n| **lcd** | You relay Claude's replies to others, read on a phone, or work in a room with mixed skills. | Anyone can relay it. It forces one real example. It's the cheapest to read. | The glosses are noise for peers. The length caps squeeze reasoning. It's weak for design debates (use `memo`). |\n| **bluf** | Managers and decision-makers who read the first three lines. | Fastest to read. Decision-ready. | Loses nuance. Assumes you know the domain. |\n| **engineer** | Senior developers reading in an IDE or terminal. | No filler. Precise names. | Unreadable for non-technical readers. Terse replies can hide assumptions, so the evidence line is mandatory. |\n| **teacher** | Juniors, onboarding, learning an unfamiliar codebase. | Builds understanding. Fewer repeat questions. | Slower and costs more tokens. Can drift into lecture. |\n| **minimal** | Power users iterating fast, and one-line tasks. | Speed, no overhead. | Hides risk and assumptions, so the risk line is mandatory. Wrong for anything that needs a decision. |\n| **plain** | Business owners, operators and support staff who will never open the code. | Non-technical people can act on it. | Not implementable on its own. Pair it with `engineer` when code is involved. |\n| **memo** | Design decisions, counter-proposals, post-mortems. | The reasoning is visible and debatable. | Long. Wrong for fixes and quick questions. |\n\nStyles are instructions, not enforcement. Errors, warnings and destructive-action confirmations keep full content in every style.\n\nTo pick one, run `/reply-style <name>`. To test one without writing any files, run `/reply-style try <name>`."
+              },
+              {
+                "name": "seven-styles",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched lcd[\\s\\S]*bluf[\\s\\S]*engineer[\\s\\S]*teacher[\\s\\S]*minimal[\\s\\S]*plain[\\s\\S]*memo",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 2,
+            "costUsd": 0.0509112,
+            "judgeCostUsd": 0.00024149999999999953,
+            "durationSeconds": 19,
+            "startedAt": "2026-10-22T12:33:41.919Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-ON9lNm/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "identities",
+                "passed": false,
+                "weight": 1,
+                "explanation": "judge votes: FAIL FAIL FAIL",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ],
+                "evidence": "I found no custom reply styles in your project or home directory. I couldn't check the Claude config directory, because the sandbox blocks reading it. So this list only covers the built-in output styles. I changed nothing.\n\n| Style | What it does | Good for |\n|---|---|---|\n| **Default** | Short, direct answers focused on getting the task done. | Experienced developers who want results with little commentary. |\n| **Explanatory** | Does the task and adds \"Insights\" about why it made certain choices, such as codebase patterns and trade-offs. | People learning an unfamiliar codebase, or reviewers who want the reasoning behind each change. |\n| **Learning** | Collaborative and teach-as-you-go. It explains along the way and leaves small `TODO(human)` pieces for you to write. | Students, people picking up a new language or framework, and anyone who wants hands-on practice instead of finished code. |\n\nTo switch, run `/config` and choose **Output style**. You can also run `/output-style`, optionally followed by a style name.\n\nYou can also define a custom style. Put a markdown file with a name and description in `~/.claude/output-styles/` (user-wide) or `.claude/output-styles/` (per project). I can draft one if you'd like, but I won't create anything unless you ask."
+              },
+              {
+                "name": "seven-styles",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0,
+        "passRateWithout": 0,
+        "delta": 1
+      }
+    },
+    {
+      "name": "run-plan-no-task",
+      "dir": "evals/run-plan-no-task",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:run-plan .task/ACTIVE/nothing/task.md",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "points-to-make-prompt",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "make-prompt",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "stops",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply stops because the task.md does not exist and says to run make-prompt first, writes no routing.json, prints no tier or routing table for invented units, and runs no agent. Score 0 if it invents deliverables, a routing table, a receipt, or starts any work.\n",
+          "config": {
+            "criteria": "Score 1 if the reply stops because the task.md does not exist and says to run make-prompt first, writes no routing.json, prints no tier or routing table for invented units, and runs no agent. Score 0 if it invents deliverables, a routing table, a receipt, or starts any work.\n",
+            "focus": "last_message"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 2,
+            "costUsd": 0.0750703,
+            "judgeCostUsd": 0.00148,
+            "durationSeconds": 19,
+            "startedAt": "2026-10-22T12:33:50.198Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-RFvj1r/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "points-to-make-prompt",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched make-prompt",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "stops",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "There's no task.md at `.task/ACTIVE/nothing/task.md`, so I stopped. The folder `.task/ACTIVE/nothing/` doesn't exist relative to `/home/user/.evaltmp/claude-eval-RFvj1r/home/cwd`.\n\nRun `/smartuse:make-prompt <your ask>` first to create the kickoff and task folder. If the task already exists somewhere else, run `/smartuse:run-plan` again with the correct path.\n\nI ran no units and wrote no state."
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 3,
+            "costUsd": 0.049546700000000006,
+            "judgeCostUsd": 0.0015164999999999996,
+            "durationSeconds": 20,
+            "startedAt": "2026-10-22T12:34:01.222Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-cWAXrm/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "points-to-make-prompt",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "stops",
+                "passed": false,
+                "weight": 1,
+                "explanation": "judge votes: FAIL FAIL FAIL",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ],
+                "evidence": "I couldn't run this plan, for two reasons:\n\n- **The command isn't installed.** `/smartuse:run-plan` isn't available in this session, so it didn't run. It would need to be added as an organization plugin or a project skill.\n- **The task file doesn't exist.** There is no `.task/ACTIVE/nothing/task.md` under `/home/user/.evaltmp/claude-eval-cWAXrm/home/cwd`. A search for anything under `.task/` found no files.\n\nIf the plan is somewhere else, give me the correct path. You can also paste its contents here and I'll work through the steps directly."
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0,
+        "passRateWithout": 0,
+        "delta": 1
+      }
+    },
+    {
+      "name": "status-line",
+      "dir": "evals/status-line",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:status",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "explains",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 only if all three hold. (1) The reply quotes exactly one heartbeat line verbatim, as the tool printed it (it contains \"smartuse ·\"; a stalled line starts with \"stalled? smartuse ·\"), and adds no second status line and no fields from `heartbeat.py --json` (last_tool, agents, waiting_since). (2) It explains the state words that line contains, as the skill's legend defines them — for \"working · thinking 0s · 0 calls this turn\": a turn is running and no tool has run in it yet; likewise waiting on you, waiting on agent, stalled?, NEEDS YOU, session ended, no activity recorded, step, loop block — whichever appear. (3) It names NO agent, tool or plan step that the quoted line does not show. Score 0 if it invents a running agent, tool or step, presents a line it did not get from the tool, or tells the user to check the state from a second Claude session (or a second /smartuse:status) in the same repo.\n",
+          "config": {
+            "criteria": "Score 1 only if all three hold. (1) The reply quotes exactly one heartbeat line verbatim, as the tool printed it (it contains \"smartuse ·\"; a stalled line starts with \"stalled? smartuse ·\"), and adds no second status line and no fields from `heartbeat.py --json` (last_tool, agents, waiting_since). (2) It explains the state words that line contains, as the skill's legend defines them — for \"working · thinking 0s · 0 calls this turn\": a turn is running and no tool has run in it yet; likewise waiting on you, waiting on agent, stalled?, NEEDS YOU, session ended, no activity recorded, step, loop block — whichever appear. (3) It names NO agent, tool or plan step that the quoted line does not show. Score 0 if it invents a running agent, tool or step, presents a line it did not get from the tool, or tells the user to check the state from a second Claude session (or a second /smartuse:status) in the same repo.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "line",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "smartuse ·",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.057161800000000006,
+            "judgeCostUsd": 0.0018642000000000008,
+            "durationSeconds": 25,
+            "startedAt": "2026-10-22T12:34:09.510Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-naXJvd/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "explains",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "smartuse · working · thinking 0s · 0 calls this turn\n\n- `working`: a turn is running.\n- `thinking 0s · 0 calls this turn`: no tool has run yet. Typed in this session, `/smartuse:status` always shows this, because it runs inside your own new turn.\n\nFor a live answer, use the status line (`/smartuse:status install`) or run this from a plain shell, not from Claude: `bash \"/home/user/smartuse/plugins/smartuse/hooks/py.sh\" \"/home/user/smartuse/plugins/smartuse/hooks/heartbeat.py\" --line`. Don't use a second Claude session in the same repo, because its events overwrite this repo's status file.\n\n`/smartuse:status install` prints the status-line snippet."
+              },
+              {
+                "name": "line",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched smartuse ·",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.043655,
+            "judgeCostUsd": 0.0011574000000000011,
+            "durationSeconds": 18,
+            "startedAt": "2026-10-22T12:34:11.146Z",
+            "error": null,
+            "tracePath": "/home/user/.evaltmp/claude-eval-UeEjH5/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "explains",
+                "passed": false,
+                "weight": 1,
+                "explanation": "judge votes: FAIL FAIL FAIL",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ],
+                "evidence": "`/smartuse:status` didn't run because no command with that name is installed in this session, and I can't tell what it would have done. If it comes from a plugin or project skill, your organization or project would need to add it.\n\nI can still help with a plain request, such as the git status of this repo or a summary of the working directory. Tell me what you want to check."
+              },
+              {
+                "name": "line",
+                "passed": false,
+                "weight": 1,
+                "explanation": "pattern not found in last_message",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1,
+        "scoreWithout": 0,
+        "passRateWithout": 0,
+        "delta": 1
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 8,
+    "casesPassed": 8,
+    "overallScore": 1,
+    "overallPassRate": 1,
+    "meanDelta": 0.875
+  }
+}

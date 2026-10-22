@@ -1,0 +1,146 @@
+{
+  "active": false,
+  "task": "orders-csv-export",
+  "dial": "safe",
+  "until_done": true,
+  "started_at": "2026-10-22T07:42:00Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Design note in decisions.md",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design choices + ownership/security gate reading; session model, no agent",
+      "budget_turns": 5,
+      "check": "5 dated decision lines",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/orders-csv-export/decisions.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "toCsv helper + Jest tests",
+      "tier": "build",
+      "model": "opus",
+      "why": "well-specified pure function with a Jest check; safe dial = session model",
+      "budget_turns": 15,
+      "check": "Tests: 16 passed, 16 total; lint clean",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps fixed",
+      "agent_calls": 11,
+      "agent_input": 242120,
+      "agent_output": 4667,
+      "agent_models": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "aefbc8fe7f4d92fba",
+        "a629c241e2840966f",
+        "aea01e7924dc81d1f",
+        "a1e034829f23c30bd"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 6,
+          "input": 132731,
+          "output": 3299
+        },
+        "claude-sonnet-5-5": {
+          "calls": 5,
+          "input": 109389,
+          "output": 1368
+        }
+      },
+      "files": [
+        "src/csv.js",
+        "tests/csv.test.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "GET /orders/export.csv route + mount + route test",
+      "tier": "build",
+      "model": "opus",
+      "why": "new router + server.js mount, checkable via fetch-on-ephemeral-port test",
+      "budget_turns": 20,
+      "check": "Tests: 18 passed, 18 total; lint clean",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 4,
+      "agent_input": 90277,
+      "agent_output": 3440,
+      "agent_models": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "aa6bdee7993a03859",
+        "a6cd869abec1c362c"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 3,
+          "input": 69624,
+          "output": 3141
+        },
+        "claude-sonnet-5-5": {
+          "calls": 1,
+          "input": 20653,
+          "output": 299
+        }
+      },
+      "files": [
+        "src/routes/orders-export.js",
+        "src/server.js",
+        "tests/orders-export.test.js"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "DEV.md / USER.md summary lines",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "doc lines from decided facts; checkable by grep",
+      "budget_turns": 8,
+      "check": "export.csv in both docs; AUTO-MANAGED 2/2; MANUAL 2",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 3,
+      "agent_input": 67648,
+      "agent_output": 2783,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "abb6f7821f4eb66a1"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 3,
+          "input": 67648,
+          "output": 2783
+        }
+      },
+      "files": [
+        "docs/features/orders-csv-export/DEV.md",
+        "docs/features/orders-csv-export/USER.md"
+      ]
+    }
+  ],
+  "closed_at": "2026-10-22T07:45:30Z"
+}

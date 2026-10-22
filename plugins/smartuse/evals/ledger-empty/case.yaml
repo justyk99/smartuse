@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: ledger-empty
+description: With no ledger line recorded, the ledger skill quotes the tool's empty line, invents no table or numbers, and says how a row gets written.
+tags: [ledger]
+runs: 1
+max_turns: 4
+allowed_tools: [Bash, Skill]

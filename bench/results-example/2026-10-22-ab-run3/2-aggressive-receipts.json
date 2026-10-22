@@ -1,0 +1,92 @@
+{
+  "active": false,
+  "task": "order-total-rounding",
+  "dial": "aggressive",
+  "started_at": "2026-10-22T07:57:37Z",
+  "until_done": true,
+  "needs_human": "Which rounding rule does the invoice service use: half-up or half-even, per line or on the total? And who owns src/routes/orders.js, and do they sign off on the computeTotal() change?",
+  "units": [
+    {
+      "id": 1,
+      "title": "Audit: failing-input table + invoice rounding rule",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "money path; the rule is the definition of correct and needs the invoice owner",
+      "budget_turns": 10,
+      "check": "audit table written (9 rows); rule NOT confirmed",
+      "blocked_by": null,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/order-total-rounding/audit.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Failing tests in tests/orders.test.js",
+      "tier": "build",
+      "model": "sonnet",
+      "why": "well-specified test-only change with a runnable check (new tests fail, old pass, lint clean)",
+      "budget_turns": 15,
+      "check": "Tests: 3 failed, 2 passed, 5 total (new fail as intended); lint clean",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 5,
+      "agent_input": 99576,
+      "agent_output": 2176,
+      "agent_models": [
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "a3af3e8ac3eebd675",
+        "a20ae4b6c75d4a246"
+      ],
+      "agent_by_model": {
+        "claude-sonnet-5-5": {
+          "calls": 5,
+          "input": 99576,
+          "output": 2176
+        }
+      },
+      "files": [
+        "tests/orders.test.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Fix computeTotal() with exact decimal math",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "money + src/routes/orders.js is owned by another developer + rule unknown",
+      "budget_turns": 10,
+      "check": "not run: rule gate (money + orders.js owned by another dev + rule unconfirmed)",
+      "blocked_by": "1 (rounding rule) + orders.js owner sign-off",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "decisions.md rule line + living-docs + move folder",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "doc update, but needs the rule and a commit first",
+      "budget_turns": 8,
+      "check": "not run: needs unit 3 + the user's commit",
+      "blocked_by": "3 + user's commit",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    }
+  ],
+  "closed_at": "2026-10-22T08:00:16Z"
+}

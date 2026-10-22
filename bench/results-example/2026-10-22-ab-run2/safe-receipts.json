@@ -1,0 +1,177 @@
+{
+  "active": false,
+  "task": "orders-csv-export",
+  "dial": "safe",
+  "started_at": "2026-10-22T07:21:31Z",
+  "until_done": true,
+  "units": [
+    {
+      "id": 1,
+      "title": "Plan: route, columns, escaping rule; settle §7 on assumed defaults",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design + open questions; session model in conversation",
+      "budget_turns": 0,
+      "check": "decisions.md: plan + 4 assumed-default lines written",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/orders-csv-export/decisions.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "tests/exports.test.js written first (toCsv + handler called directly, no supertest)",
+      "tier": "build",
+      "model": "opus",
+      "why": "spec'd change, runnable check; safe dial keeps build on session model",
+      "budget_turns": 15,
+      "check": "FAIL: Cannot find module '../src/routes/exports' (expected, test-first)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps fixed",
+      "agent_calls": 10,
+      "agent_input": 230536,
+      "agent_output": 6073,
+      "agent_models": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "a792eb901ed7e4996",
+        "ada34075ac189e00d",
+        "a1b803c957ccb7b20"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 8,
+          "input": 186005,
+          "output": 4559
+        },
+        "claude-sonnet-5-5": {
+          "calls": 2,
+          "input": 44531,
+          "output": 1514
+        }
+      },
+      "files": [
+        "tests/exports.test.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "src/routes/exports.js (toCsv + router) + one-line mount in src/server.js",
+      "tier": "build",
+      "model": "opus",
+      "why": "spec'd change, tests from unit 2 are the check",
+      "budget_turns": 20,
+      "check": "Tests: 12 passed, 12 total; lint 0; db.js/orders.js unchanged",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps fixed",
+      "agent_calls": 9,
+      "agent_input": 207400,
+      "agent_output": 5313,
+      "agent_models": [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "ad54abdcf88d1793b",
+        "a7f71f74b8d727314",
+        "a6820c33d52ac6ce0"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 6,
+          "input": 139667,
+          "output": 3741
+        },
+        "claude-sonnet-5-5": {
+          "calls": 3,
+          "input": 67733,
+          "output": 1572
+        }
+      },
+      "files": [
+        "src/routes/exports.js",
+        "src/server.js",
+        "tests/exports.test.js"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "README one-liner: Try GET /exports/orders.csv",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "one-line doc edit, grep-checkable",
+      "budget_turns": 5,
+      "check": "README.md:5 contains GET /exports/orders.csv",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 3,
+      "agent_input": 64119,
+      "agent_output": 1537,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "a6c9931bc47a45737"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 3,
+          "input": 64119,
+          "output": 1537
+        }
+      },
+      "files": [
+        "README.md"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "§8 end-to-end curl check (headers, body, formula-injection row) → decisions.md",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "scripted curl run with a pass/fail grep, no edits to code",
+      "budget_turns": 10,
+      "check": "PASS: text/csv; charset=utf-8 + attachment; row 3,\"'=TEST,\"\"X\"\"\",,open,1,1.00 CRLF",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 5,
+      "agent_input": 115113,
+      "agent_output": 4004,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "a32414907ca1a846b"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 5,
+          "input": 115113,
+          "output": 4004
+        }
+      },
+      "files": [
+        ".task/ACTIVE/orders-csv-export/decisions.md"
+      ]
+    }
+  ],
+  "closed_at": "2026-10-22T07:27:34Z"
+}

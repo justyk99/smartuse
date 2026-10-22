@@ -1,22 +1,78 @@
 #!/usr/bin/env python3
 """ledger.py — smartuse receipts. Runs as a Stop hook (and SubagentStop). Deterministic, 0 model tokens.
 
-Stop:        if ~/.claude/smartuse/projects/<project-dir-name>/pending.json exists (written by a skill at hand-off), sum the token usage
+Stop:        if ~/.claude/smartuse/projects/<key>/pending.json exists (written by a skill at hand-off), sum the token usage
              in this session's transcript since pending.started_at, append one line to ~/.claude/smartuse/ledger.jsonl,
              delete pending.json. No pending file -> do nothing.
-SubagentStop: if ~/.claude/smartuse/projects/<project-dir-name>/routing.json exists (written by run-plan), append one receipt line per
-             finished agent to that folder's receipts.jsonl with its model and tokens, and attach those tokens to the plan step
-             that is "running" in routing.json (one receipt per plan step: tier, model, why, override, outcome, verify, tokens).
-             When run-plan closes (pending.json skill == run-plan), the Stop hook archives routing.json to runs/<started_at>_<task>.json.
-Report:      python3 ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
-             python3 ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
-                                                        from routing.json + runs/ (used by /smartuse:receipts).
-Never blocks a turn. Any error -> exit 0 silently (a receipt must never stop the work).
+SubagentStop: if ~/.claude/smartuse/projects/<key>/routing.json exists (written by run-plan) and is active, append one receipt line
+             per finished agent to that folder's receipts.jsonl with its model and tokens, and attach those tokens to the plan step
+             that is "running" in routing.json (one receipt per plan step: tier, model, why, override, outcome, verify, tokens,
+             tokens by model). A closed run (routing.json "active": false) gets no receipt and no receipt.<agent>.done marker.
+             When run-plan closes (pending.json skill == run-plan), the Stop hook archives routing.json to runs/<started_at>_<task>.json
+             and removes the run's receipt.*.done claim markers.
+State dir:   <key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
+             dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/,
+             so two repos that share a folder name no longer share receipts (same dir as heartbeat.py and until-done.py). Stop and
+             SubagentStop read pending.json / routing.json and write receipts and archives in that keyed dir only. 0.3.0 keyed the dir
+             by the folder name alone: projects/<folder name>/ is shared by every repo of that name, so it is never migrated and never
+             written; only --receipts reads it, to list its archived runs after the keyed dir's, marked as shared (legacy_dir()).
+             Records keep "project" (the folder name, for readability) and add "project_path" (the resolved path).
+Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
+             bash py.sh ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
+                                                           from routing.json + runs/, plus a summary line with the agent-output share
+                                                           by model (used by /smartuse:receipts). The keyed dir comes first; the 0.3.0
+                                                           folder-name dir's archived runs follow, each under a line saying the dir is
+                                                           shared by every repo of that name.
+             bash py.sh ledger.py --receipts [task|all] --json -> the same run(s) as JSON for scripts: one object (a list for "all")
+                                                           with the steps verbatim, totals {input, output, by_model} and "legacy"
+                                                           (true for a run from the 0.3.0 folder-name dir).
+             bash py.sh ledger.py --state-dir [--create]  -> the keyed state dir of the current project (CLAUDE_PROJECT_DIR, else the
+                                                           cwd), always, with forward slashes, creating nothing; --create makes it
+                                                           (mkdir -p) first. The skills' live context runs it with --create, so a skill
+                                                           writes pending.json / routing.json where the hooks read them; bench/ab.sh
+                                                           runs it to find a run's archive.
+             (py.sh = the plugin's launcher: python3, else python, else py -3 — on stock Windows python3 is only the Store stub.)
+State:       the skills write pending.json / routing.json ONLY through these commands, never with the Write / Edit tools: the state
+             dir is under ~/.claude/, which Claude Code treats as a sensitive path (Write / Edit there prompt every time in default
+             and acceptEdits mode and are denied headless), while the skills' `Bash(bash *)` already runs this script. Each one
+             resolves the project like --state-dir (CLAUDE_PROJECT_DIR, else the cwd) and touches the keyed dir only.
+             bash py.sh ledger.py --put pending.json|routing.json '<one JSON object>'      (the skills' form)
+             bash py.sh ledger.py --put pending.json|routing.json < file / <<'JSON' … JSON   (scripts, a human)
+                 -> ONE JSON object, from the one argument after the name, else from stdin (read as bytes, decoded as UTF-8);
+                    written atomically into the keyed dir (created); prints `put <name> → <path>`. Bad JSON ->
+                    `put refused: <reason>`, exit 1, nothing written. The skills use the argument: Claude Code's Bash check
+                    refuses a command where an unquoted { is followed by a quote ("Contains brace with quote character"), which
+                    every JSON heredoc body is, and it masks a { inside quotes (bash-guard treats those quoted arguments as data).
+                    routing.json: when the file holds the SAME run (same task and started_at), the hook-owned per-step fields
+                    (UNIT_OWNED: agent_* and agents, from SubagentStop) and the gate-owned top-level fields (RUN_OWNED: blocks,
+                    last_block, check_error, from until-done.py) are kept unless the new JSON sets them. A new run (another
+                    task or started_at) starts clean: an old run's tokens and block count never leak into the next one.
+             bash py.sh ledger.py --unit <id> key=value [key=value …]
+                 -> merge the fields into that plan step of routing.json (a value that parses as JSON is stored as JSON —
+                    3, true, null, {"from": …}, ["a.js"] — anything else as the string), atomic write, prints the step's new
+                    status line. Unknown id, no routing.json, a hook- or gate-owned key -> `unit refused: …`, exit 1. The
+                    skills single-quote the WHOLE word ('override={"from":"a","to":"b"}'): Claude Code refuses a word that
+                    joins plain text to a quoted {…,…} (override='{…}') as brace expansion.
+             bash py.sh ledger.py --run key=value [key=value …]    -> the same for the run's top-level fields (active=false,
+                    until_done=true, needs_human="which rounding rule?"); prints the run's line. `units` is refused (that is
+                    --put routing.json, or --unit for one step), as are the gate-owned keys.
+             bash py.sh ledger.py --get pending.json|routing.json  -> the file as stored, or {} when there is none (creates nothing).
+Windows:     Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the event
+             JSON, so every path taken from the JSON goes through native_path() ("/c/Users/x" -> "C:/Users/x"); stdin is read as
+             bytes and decoded as UTF-8 (Windows Python would decode a pipe in the ANSI code page and raise on the first non-ASCII
+             byte, losing the receipt); the reports print UTF-8 whatever the console code page (stdout is reconfigured in main()).
+Never blocks a turn. As a hook, any error -> exit 0 silently (a receipt must never stop the work). The State commands are
+the exception: they are run by a skill, not by Claude Code, and a refusal exits 1 so the skill knows nothing was written.
 """
-import json, os, sys, time, datetime, pathlib, statistics
+import json, os, sys, re, time, datetime, pathlib, statistics
 
-HOME = pathlib.Path(os.path.expanduser("~"))
+HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 LEDGER = HOME / ".claude" / "smartuse" / "ledger.jsonl"
+PROJECTS = HOME / ".claude" / "smartuse" / "projects"
+LEGACY_NOTE = "(from the 0.3.0 folder-name dir ~/.claude/smartuse/projects/{name}/ — shared by every repo of that name)"
+STATE_FILES = ("pending.json", "routing.json")   # the files a skill writes, through --put / --unit / --run only
+UNIT_OWNED = ("agent_calls", "agent_input", "agent_output", "agent_models", "agent_by_model", "agents")   # per plan step, by SubagentStop (attach_to_step)
+RUN_OWNED = ("blocks", "last_block", "check_error")   # top level of routing.json, by the until-done gate
 
 
 def iso_now():
@@ -28,6 +84,22 @@ def parse_ts(s):
         return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def native_path(p):
+    """A path string from the event JSON as this interpreter can open it. On Windows the hook runs through Git Bash, which
+    converts POSIX paths in arguments and environment variables for a Windows program but not inside JSON strings: given
+    "/c/Users/x/t.jsonl", Windows Python looks under <current drive>:/c/Users/x/ and finds nothing. So when the string starts
+    with "/" and nothing exists there, the MSYS drive form "/c/..." becomes "C:/..."; "/tmp/..." has no drive letter and stays
+    as it is. Anything else, and everything on other platforms, comes back unchanged. Never raises."""
+    try:
+        s = str(p or "")
+        if os.name == "nt" and s.startswith("/") and not os.path.exists(s):
+            if len(s) >= 2 and "a" <= s[1].lower() <= "z" and (len(s) == 2 or s[2] == "/"):
+                return s[1].upper() + ":" + (s[2:] or "/")
+    except Exception:
+        pass
+    return p
 
 
 def sum_usage(transcript, since=None):
@@ -81,6 +153,13 @@ def flat(totals):
     return out
 
 
+def by_model(totals):
+    """{model: {calls, input, output}} from sum_usage totals; input = fresh + cache reads + cache creation, like total_input."""
+    return {m: {"calls": int(d.get("calls") or 0),
+                "input": int(d.get("input") or 0) + int(d.get("cache_read") or 0) + int(d.get("cache_create") or 0),
+                "output": int(d.get("output") or 0)} for m, d in totals.items()}
+
+
 def append(path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
@@ -88,9 +167,25 @@ def append(path, obj):
 
 
 def write_json(path, obj):
+    """Atomic: tmp file + os.replace. On Windows the replace raises PermissionError while another hook or the status line has
+    the file open: retry 5 times, 20 ms apart; still failing -> drop the tmp file and give up. Never raises."""
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return True
+            except OSError:
+                if attempt < 4:
+                    time.sleep(0.02)
+    except Exception:
+        pass
+    try:
+        tmp.unlink()
+    except Exception:
+        pass
+    return False
 
 
 def safe_name(s):
@@ -109,18 +204,59 @@ def archive_run(sdir, p):
     runs = sdir / "runs"; runs.mkdir(exist_ok=True)
     r.setdefault("closed_at", iso_now()); r["active"] = False
     write_json(runs / f"{safe_name(r.get('started_at') or p.get('started_at'))}_{safe_name(r.get('task') or p.get('task'))}.json", r)
+    for marker in sdir.glob("receipt.*.done"):   # the run's per-agent claim markers go with it
+        try:
+            marker.unlink()
+        except Exception:
+            pass
 
 
-def state_dir(project):
-    """Per-project receipt state lives under the user's home, never inside the repo (team repos stay clean)."""
-    d = HOME / ".claude" / "smartuse" / "projects" / project.name
-    d.mkdir(parents=True, exist_ok=True)
+def project_key(project):
+    """The state-dir name of a project: its full resolved path with every character outside [A-Za-z0-9._-] replaced by "-"
+    and a leading "-" dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys
+    ~/.claude/projects/. Two repos that share a folder name get two state dirs."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
+
+
+def state_dir(project, create=False):
+    """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (team repos stay clean; same
+    rule as heartbeat.py and until-done.py). The only dir the hooks read state from and write to, whether or not it exists yet:
+    there is no fallback to the 0.3.0 folder-name dir (see legacy_dir()). create=True makes it (mkdir -p)."""
+    d = PROJECTS / project_key(project)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
+def legacy_dir(project):
+    """The 0.3.0 state dir projects/<folder name>/ when it exists and is not the keyed dir, else None. 0.3.0 keyed the dir by
+    the folder name alone, so it is shared by every repo of that name and its runs cannot be attributed to one of them: it is
+    never migrated and never written. Display only — --receipts lists its archived runs, marked as shared. Never raises."""
+    try:
+        name = pathlib.Path(project).name
+        if name in ("", ".", ".."):
+            return None
+        d, keyed = PROJECTS / name, state_dir(project)
+        if not d.is_dir() or d.name == keyed.name:   # no old dir, or a repo at the file system root (its key is its folder name)
+            return None
+        if keyed.is_dir() and os.path.samefile(d, keyed):   # the same dir under two spellings (a case-insensitive file system)
+            return None
+        return d
+    except Exception:
+        return None
+
+
+def stdin_json():
+    """stdin as JSON, read as bytes and decoded as UTF-8: Windows Python decodes a piped stdin in the ANSI code page, where a
+    non-ASCII byte (an agent name, a path) raises and the receipt would be lost; a bad byte becomes U+FFFD instead."""
+    raw = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8", "replace")
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
 def on_stop(data):
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
-    pending = state_dir(project) / "pending.json"
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
+    sdir = state_dir(project)
+    pending = sdir / "pending.json"
     if not pending.exists():
         return
     # Two Stop hooks may run at once (a user-level copy and the plugin's): claim the file atomically so only one writes.
@@ -141,7 +277,7 @@ def on_stop(data):
         # a forked skill wrote a local-time clock labelled Z (future) -> count the last 15 minutes instead of nothing
         since = now0 - datetime.timedelta(minutes=15)
         p["notes"] = (p.get("notes") or "") + " [started_at was in the future; window = last 15 min]"
-    tp = data.get("transcript_path") or ""
+    tp = native_path(data.get("transcript_path") or "")
     totals, turns = sum_usage(tp, since)
     # A forked skill (context: fork) or a subagent spends its tokens in <session>/subagents/agent-*.jsonl, not in the
     # main transcript: add every subagent file of this session that has usage after started_at.
@@ -161,6 +297,7 @@ def on_stop(data):
     rec = {
         "ts": iso_now(),
         "project": project.name,
+        "project_path": str(project.resolve()),
         "session_id": data.get("session_id"),
         "skill": p.get("skill"),
         "task": p.get("task"),
@@ -186,7 +323,7 @@ def on_stop(data):
     append(LEDGER, rec)
     pending.unlink(missing_ok=True)
     try:
-        archive_run(state_dir(project), p)
+        archive_run(sdir, p)
     except Exception:
         pass
 
@@ -208,6 +345,12 @@ def attach_to_step(sdir, rec):
     u["agent_output"] = int(u.get("agent_output") or 0) + int(rec["total_output"])
     u["agent_models"] = sorted(set(u.get("agent_models") or []) | set(rec["models"]))
     u["agents"] = (u.get("agents") or []) + [rec["agent_id"]]
+    bm = u.get("agent_by_model") or {}
+    for model, d in (rec.get("by_model") or {}).items():
+        t = bm.setdefault(model, {"calls": 0, "input": 0, "output": 0})
+        for k in ("calls", "input", "output"):
+            t[k] = int(t.get(k) or 0) + int(d.get(k) or 0)
+    u["agent_by_model"] = bm
     try:
         write_json(routing, r)
     except Exception:
@@ -216,14 +359,21 @@ def attach_to_step(sdir, rec):
 
 
 def on_subagent_stop(data):
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
-    routing = state_dir(project) / "routing.json"
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
+    sdir = state_dir(project)
+    routing = sdir / "routing.json"
     if not routing.exists():
         return
-    tp = data.get("agent_transcript_path") or data.get("transcript_path") or ""
+    try:
+        r = json.loads(routing.read_text(encoding="utf-8"))
+    except Exception:
+        r = None
+    if isinstance(r, dict) and not r.get("active"):
+        return   # the run closed (run-plan set "active": false): a late agent gets no receipt and no marker
+    tp = native_path(data.get("agent_transcript_path") or data.get("transcript_path") or "")
     # Two SubagentStop hooks may run (a user-level copy and the plugin's): claim this agent once, atomically.
     aid = data.get("agent_id") or pathlib.Path(tp).stem
-    marker = state_dir(project) / f"receipt.{aid}.done"
+    marker = sdir / f"receipt.{aid}.done"
     try:
         fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
@@ -236,6 +386,7 @@ def on_subagent_stop(data):
     rec = {
         "ts": iso_now(),
         "project": project.name,
+        "project_path": str(project.resolve()),
         "session_id": data.get("session_id"),
         "agent_id": data.get("agent_id"),
         "agent_name": data.get("agent_name") or data.get("agent_type"),
@@ -243,12 +394,13 @@ def on_subagent_stop(data):
         "assistant_calls": turns,
         "total_input": f["input"] + f["cache_read"] + f["cache_create"],
         "total_output": f["output"],
+        "by_model": by_model(totals),
     }
     try:
-        rec["unit"] = attach_to_step(state_dir(project), rec)
+        rec["unit"] = attach_to_step(sdir, rec)
     except Exception:
         rec["unit"] = None
-    append(state_dir(project) / "receipts.jsonl", rec)
+    append(sdir / "receipts.jsonl", rec)
 
 
 def report(n=10):
@@ -279,52 +431,156 @@ def fmt_k(n):
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
 
-def receipts(which=None):
-    """One row per plan step. which: None -> the latest run (routing.json, else newest archived run); a task name -> the newest
-    archived run whose task contains it; "all" -> every archived run, newest first."""
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-    sdir = HOME / ".claude" / "smartuse" / "projects" / project.name
-    runs = sorted((sdir / "runs").glob("*.json"), reverse=True) if (sdir / "runs").is_dir() else []
-    picks = []
-    if which == "all":
-        picks = runs
-    elif which:
-        picks = [p for p in runs if which.lower() in p.name.lower()][:1]
-        if not picks and (sdir / "routing.json").exists():
-            picks = [sdir / "routing.json"]
+def short_model(m):
+    """claude-fable-5-1 -> fable (summary line only): drop the vendor prefix, a date stamp and the -N-N version."""
+    return re.sub(r"(-\d+){1,2}$", "", re.sub(r"-\d{8}$", "", re.sub(r"^claude-", "", str(m)))) or str(m)
+
+
+def short_models(models):
+    """Short names per model; if two would collide (sonnet-4-5 and sonnet-5-5) only the vendor prefix goes."""
+    s = {m: short_model(m) for m in models}
+    if len(set(s.values())) < len(s):
+        s = {m: re.sub(r"^claude-", "", str(m)) for m in models}
+    return s
+
+
+def run_totals(units):
+    """Agent tokens over the plan steps: total in/out, the per-model sum of the units' agent_by_model, and the delegated
+    (non-judgment) output for runs archived before agent_by_model existed."""
+    t = {"input": 0, "output": 0, "by_model": {}}
+    del_out = 0
+    for u in units:
+        ai, ao = int(u.get("agent_input") or 0), int(u.get("agent_output") or 0)
+        t["input"] += ai; t["output"] += ao
+        if u.get("tier") != "judgment":
+            del_out += ao
+        for model, d in (u.get("agent_by_model") or {}).items():
+            x = t["by_model"].setdefault(model, {"calls": 0, "input": 0, "output": 0})
+            for k in x:
+                x[k] += int(d.get(k) or 0)
+    return t, del_out
+
+
+def summary_line(r, units, totals, del_out):
+    n_done = sum(1 for u in units if u.get("status") in ("pass", "blocked"))
+    n_pass = sum(1 for u in units if u.get("status") == "pass")
+    line = (f"steps {n_pass} pass · {n_done - n_pass} blocked · {len(units) - n_done} open · "
+            f"agent tokens in {fmt_k(totals['input'])} / out {fmt_k(totals['output'])}")
+    bm, tot_out = totals["by_model"], totals["output"]
+    if bm:
+        names = short_models(bm)
+        line += " · agent out by model: " + " · ".join(f"{names[m]} {(100 * d['output'] // tot_out) if tot_out else 0}%"
+                                                        for m, d in sorted(bm.items(), key=lambda kv: (-kv[1]["output"], kv[0])))
     else:
-        picks = [sdir / "routing.json"] if (sdir / "routing.json").exists() else runs[:1]
+        # a run archived by 0.3.0 has agent_models but no agent_by_model: keep the old delegated-share line
+        models = sorted({m for u in units for m in (u.get("agent_models") or [])})
+        if models:
+            line += f" · delegated out {fmt_k(del_out)} ({(100 * del_out // tot_out) if tot_out else 0}% of agent output) on {', '.join(models)}"
+    if r.get("needs_human"):
+        line += f" · needs_human: {r['needs_human']}"
+    return line
+
+
+def read_run(path):
+    """A routing.json / archived run as a dict, else None (missing, unreadable, not an object)."""
+    try:
+        r = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return r if isinstance(r, dict) else None
+
+
+def archive_name(r):
+    """The file name archive_run() gives a run under runs/: <started_at>_<task>.json."""
+    return f"{safe_name(r.get('started_at'))}_{safe_name(r.get('task'))}.json"
+
+
+def legacy_runs(ldir):
+    """The 0.3.0 folder-name dir's runs as [(archive name, path)], newest first: runs/*.json, plus routing.json when that run
+    is closed ("active" false) and not archived under runs/ already (run-plan's close leaves both). An active routing.json
+    there is a run the upgrade cut off: no hook reads it any more, and it is not listed. Read only; any error -> [] (a broken
+    old dir never hides the keyed runs)."""
+    try:
+        runs = {p.name: p for p in (ldir / "runs").glob("*.json")} if (ldir / "runs").is_dir() else {}
+        r = read_run(ldir / "routing.json")
+        if r is not None and not r.get("active") and archive_name(r) not in runs:
+            runs[archive_name(r)] = ldir / "routing.json"
+        return [(n, runs[n]) for n in sorted(runs, reverse=True)]
+    except Exception:
+        return []
+
+
+def pick_runs(which):
+    """which: None -> the latest run (routing.json, else newest archived run); a task name -> the newest archived run whose
+    file name (<started_at>_<task>) contains it (else the active run); "all" -> every archived run, newest first.
+    The keyed dir comes first. The 0.3.0 folder-name dir (legacy_dir) only adds its runs after it: for None when the keyed
+    dir holds no run, for a task name when nothing in the keyed dir matches it, for "all" after the keyed runs.
+    -> project, keyed dir, [(path, legacy)]."""
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    sdir, ldir = state_dir(project), legacy_dir(project)
+    routing = sdir / "routing.json"
+    runs = sorted((sdir / "runs").glob("*.json"), reverse=True) if (sdir / "runs").is_dir() else []
+    old = legacy_runs(ldir) if ldir else []
+    if which == "all":
+        picks = [(p, False) for p in runs] + [(p, True) for _, p in old]
+    elif which:
+        w, cur = which.lower(), read_run(routing)
+        picks = [(p, False) for p in runs if w in p.name.lower()][:1]
+        if not picks and cur is not None and w in archive_name(cur).lower():
+            picks = [(routing, False)]   # the keyed run in progress, named
+        if not picks:
+            picks = [(p, True) for n, p in old if w in n.lower()][:1]
+        if not picks and routing.exists():
+            picks = [(routing, False)]
+    elif routing.exists():
+        picks = [(routing, False)]
+    else:
+        picks = [(p, False) for p in runs[:1]] or [(p, True) for _, p in old[:1]]
+    return project, sdir, picks
+
+
+def receipts(which=None, as_json=False):
+    """One row per plan step plus a summary line (markdown), or with as_json the run(s) as JSON: one object for a single run,
+    a list for "all" — {"task","dial","started_at","closed_at","active","needs_human","path","legacy","steps":[units verbatim],
+    "totals":{"input","output","by_model":{model:{calls,input,output}}}}. Nothing else is printed in JSON mode. A run from the
+    0.3.0 folder-name dir has "legacy": true, and in markdown a LEGACY_NOTE line under its header."""
+    project, sdir, picks = pick_runs(which)
     if not picks:
+        if as_json:
+            print(json.dumps([] if which == "all" else None)); return
         print(f"receipts: no run-plan run recorded for {project.name} ({sdir})"); return
-    for path in picks:
-        try:
-            r = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            print(f"receipts: cannot read {path}"); continue
+    out = []
+    for path, legacy in picks:
+        r = read_run(path)
+        if r is None:
+            if not as_json:
+                print(f"receipts: cannot read {path}")
+            continue
         units = r.get("units") or []
+        totals, del_out = run_totals(units)
+        if as_json:
+            out.append({"task": r.get("task"), "dial": r.get("dial"), "started_at": r.get("started_at"), "closed_at": r.get("closed_at"),
+                        "active": bool(r.get("active")), "needs_human": r.get("needs_human"), "path": str(path), "legacy": legacy,
+                        "steps": units, "totals": totals})
+            continue
         state = "active" if r.get("active") else "closed"
         print(f"receipts: {r.get('task')} · dial {r.get('dial')} · started {r.get('started_at')} · {state} · {len(units)} steps  ({path})")
+        if legacy:
+            print(LEGACY_NOTE.format(name=project.name))
         print("| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |")
         print("|---|---|---|---|---|---|---|---|---|---|---|---|")
-        tot_in = tot_out = del_in = del_out = 0
         for u in units:
             ov = u.get("override") or {}
             ov_s = f"{ov.get('from')}→{ov.get('to')}" if ov else ""
             ai, ao = int(u.get("agent_input") or 0), int(u.get("agent_output") or 0)
-            tot_in += ai; tot_out += ao
-            if u.get("tier") != "judgment":
-                del_in += ai; del_out += ao
             print(f"| {u.get('id')} | {str(u.get('title') or '')[:36]} | {u.get('tier') or ''} | {u.get('model') or ''} | {ov_s} | "
                   f"{u.get('status') or u.get('outcome') or 'pending'} | {'yes' if u.get('escalated') else ''} | {u.get('verify') or ''} | "
                   f"{u.get('agent_calls') or ''} | {fmt_k(ai) if ai else ''} | {fmt_k(ao) if ao else ''} | {str(u.get('check') or '')[:40]} |")
-        n_done = sum(1 for u in units if u.get("status") in ("pass", "blocked"))
-        n_pass = sum(1 for u in units if u.get("status") == "pass")
-        models = sorted({m for u in units for m in (u.get("agent_models") or [])})
-        print(f"steps {n_pass} pass · {n_done - n_pass} blocked · {len(units) - n_done} open · agent tokens in {fmt_k(tot_in)} / out {fmt_k(tot_out)}"
-              + (f" · delegated out {fmt_k(del_out)} ({(100 * del_out // tot_out) if tot_out else 0}% of agent output) on {', '.join(models)}" if models else "")
-              + (f" · needs_human: {r['needs_human']}" if r.get("needs_human") else ""))
+        print(summary_line(r, units, totals, del_out))
         if len(picks) > 1:
             print()
+    if as_json:
+        print(json.dumps(out if which == "all" else (out[0] if out else None), indent=2, ensure_ascii=False))
 
 
 def recompute():
@@ -352,17 +608,255 @@ def recompute():
     print(f"ledger: recomputed {changed} of {len(rows)} lines")
 
 
+def print_state_dir(create=False):
+    """--state-dir [--create]: print the state dir the hooks use for the current project (CLAUDE_PROJECT_DIR, else the cwd):
+    always the keyed dir of state_dir(), never the 0.3.0 folder-name dir, even when only that one exists. Nothing is created
+    unless --create (mkdir -p). Forward slashes also on Windows (as_posix): the readers are bash — the skills' `!` lines,
+    bench/ab.sh — and Git Bash takes C:/Users/... everywhere, while a backslash path needs quoting."""
+    print(state_dir(cli_project(), create=create).as_posix())
+
+
+def cli_project():
+    """The project of a command-line call (--state-dir, --put, --unit, --run, --get): CLAUDE_PROJECT_DIR, else the cwd."""
+    return pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def refuse(cmd, why):
+    """One line on stderr — `<cmd> refused: <why>` — and exit status 1 for the caller to return."""
+    print(f"{cmd} refused: {why}", file=sys.stderr)
+    return 1
+
+
+def strict_json(text):
+    """json.loads without NaN / Infinity (Python accepts them; they are not JSON and other readers choke on them)."""
+    def no_constant(c):
+        raise ValueError(f"{c} is not JSON")
+    return json.loads(text, parse_constant=no_constant)
+
+
+def json_or_text(v):
+    """A key=value value: the JSON value when it parses (3, 2.5, true, null, {"a": 1}, ["x"], "quoted"), else the text as is."""
+    try:
+        return strict_json(v)
+    except Exception:
+        return v
+
+
+def units_of(r):
+    """routing.json's plan steps that are objects (a malformed entry is skipped, never raised on)."""
+    units = r.get("units") if isinstance(r, dict) else None
+    return [u for u in units if isinstance(u, dict)] if isinstance(units, list) else []
+
+
+def oneline(s, n=60):
+    s = " ".join(str(s).split())
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def unit_line(u, n):
+    """unit 2/3 · build·opus · pass · verify no gaps · escalated · override mechanical→build · "build route" """
+    tm = "·".join(str(x) for x in (u.get("tier"), u.get("model")) if x)
+    bits = [f"unit {u.get('id')}/{n}"] + ([tm] if tm else []) + [str(u.get("status") or "pending")]
+    if u.get("verify"):
+        bits.append(f"verify {oneline(u['verify'], 40)}")
+    if u.get("escalated"):
+        bits.append("escalated")
+    ov = u.get("override")
+    if isinstance(ov, dict) and ov:
+        bits.append(f"override {ov.get('from')}→{ov.get('to')}")
+    if u.get("title"):
+        bits.append(f'"{oneline(u["title"], 40)}"')
+    return " · ".join(bits)
+
+
+def run_line(r):
+    """run csv-export · dial safe · active · until-done · steps 1 pass · 0 blocked · 2 open · needs_human: …"""
+    units = units_of(r)
+    n_pass = sum(1 for u in units if u.get("status") == "pass")
+    n_blocked = sum(1 for u in units if u.get("status") == "blocked")
+    bits = [f"run {r.get('task')}", f"dial {r.get('dial')}", "active" if r.get("active") else "closed"]
+    if r.get("until_done"):
+        bits.append("until-done")
+    bits.append(f"steps {n_pass} pass · {n_blocked} blocked · {len(units) - n_pass - n_blocked} open")
+    if r.get("needs_human"):
+        bits.append(f"needs_human: {oneline(r['needs_human'], 80)}")
+    return " · ".join(bits)
+
+
+def arg_text(a):
+    """A command-line argument as UTF-8 text: bytes the file-system decoding could not map come back as U+FFFD, never as lone
+    surrogates that would make the UTF-8 write fail."""
+    try:
+        return os.fsencode(a).decode("utf-8", "replace")
+    except Exception:
+        return a
+
+
+def put(args):
+    """--put <name> ['<json>']: one JSON object -> <keyed state dir>/<name>, atomic. The JSON is the one argument after the
+    name (the skills' form: Claude Code's Bash check refuses a command where an unquoted { is followed by a quote, which a
+    JSON heredoc body always is, and masks the { inside a single-quoted argument), else stdin. routing.json of the same run
+    keeps the hook-owned fields (see the module docstring, State)."""
+    name = args[0] if args else ""
+    if name not in STATE_FILES:
+        return refuse("put", f"{name or 'no file name'}: give one of {' / '.join(STATE_FILES)}")
+    if len(args) > 2:
+        return refuse("put", f"one JSON argument after {name}, got {len(args) - 1} — single-quote the whole object")
+    if len(args) == 2:
+        text = arg_text(args[1])
+    elif sys.stdin is None or sys.stdin.isatty():
+        return refuse("put", f"no JSON: give it as one single-quoted argument after {name}, or on stdin")
+    else:
+        raw = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8", "replace")
+        text = raw.decode("utf-8-sig", "replace")   # bytes -> UTF-8 whatever the console code page; a BOM is dropped
+    if not text.strip():
+        return refuse("put", f"no JSON: the argument or stdin is empty — give one JSON object {{…}}")
+    try:
+        obj = strict_json(text)
+    except Exception as e:
+        return refuse("put", f"not valid JSON: {e}")
+    if not isinstance(obj, dict):
+        return refuse("put", f"{name} must be one JSON object {{…}}, got {type(obj).__name__}")
+    path = state_dir(cli_project(), create=True) / name
+    if name == "routing.json":
+        units = obj.get("units", [])
+        if not isinstance(units, list) or not all(isinstance(u, dict) for u in units):
+            return refuse("put", '"units" must be a list of objects, one per plan step')
+        ids = [str(u.get("id")) for u in units if u.get("id") is not None]
+        dup = sorted({i for i in ids if ids.count(i) > 1})
+        if dup:
+            return refuse("put", f"unit id {', '.join(dup)} appears twice — --unit <id> must name one step")
+        old = read_run(path)
+        if old is not None and (old.get("task"), old.get("started_at")) == (obj.get("task"), obj.get("started_at")):
+            for k in RUN_OWNED:   # the same run: the gate's counters survive a re-put
+                if k in old and k not in obj:
+                    obj[k] = old[k]
+            by_id = {str(u.get("id")): u for u in units_of(old) if u.get("id") is not None}
+            for u in units:   # ... and so do the tokens SubagentStop attached to each step
+                o = by_id.get(str(u.get("id"))) if u.get("id") is not None else None
+                if o:
+                    for k in UNIT_OWNED:
+                        if k in o and k not in u:
+                            u[k] = o[k]
+    if not write_json(path, obj):
+        return refuse("put", f"cannot write {path.as_posix()}")
+    print(f"put {name} → {path.as_posix()}")
+    return 0
+
+
+def parse_pairs(cmd, pairs, owned):
+    """key=value words -> ({key: value}, None) or (None, exit status after a refusal). `owned` = {key: why it is refused}."""
+    fields = {}
+    for p in pairs:
+        k, eq, v = arg_text(p).partition("=")
+        k = k.strip()
+        if not eq or not k:
+            return None, refuse(cmd, f"{p!r} is not key=value (single-quote the whole word when the value has spaces: 'check=12 passing')")
+        if k in owned:
+            return None, refuse(cmd, f"{k}: {owned[k]}")
+        fields[k] = json_or_text(v)
+    if not fields:
+        return None, refuse(cmd, "nothing to set — give key=value …")
+    return fields, None
+
+
+def load_routing(cmd):
+    """-> (path, routing dict, None) or (None, None, exit status after a refusal)."""
+    path = state_dir(cli_project()) / "routing.json"
+    if not path.exists():
+        return None, None, refuse(cmd, f"no routing.json in {path.parent.as_posix()} — write the plan first: --put routing.json")
+    r = read_run(path)
+    if r is None:
+        return None, None, refuse(cmd, f"{path.as_posix()} is not a JSON object — write the plan again: --put routing.json")
+    return path, r, None
+
+
+def set_unit(args):
+    """--unit <id> key=value …: merge into that plan step of routing.json."""
+    if not args or "=" in args[0]:
+        return refuse("unit", "usage: --unit <id> key=value [key=value …] — the step id comes first")
+    uid = args[0]
+    fields, rc = parse_pairs("unit", args[1:], {k: "written by the SubagentStop hook (the agents' real tokens), never by a skill"
+                                                for k in UNIT_OWNED})
+    if fields is None:
+        return rc
+    path, r, rc = load_routing("unit")
+    if r is None:
+        return rc
+    units = units_of(r)
+    u = next((x for x in units if x.get("id") is not None and str(x.get("id")) == uid), None)
+    if u is None:
+        return refuse("unit", f"no unit {uid} in routing.json (units: {', '.join(str(x.get('id')) for x in units) or 'none'})")
+    u.update(fields)
+    if not write_json(path, r):
+        return refuse("unit", f"cannot write {path.as_posix()}")
+    print(unit_line(u, len(units)) + f"  (set {', '.join(fields)})")
+    return 0
+
+
+def set_run(args):
+    """--run key=value …: merge into the top level of routing.json."""
+    owned = {"units": "the plan goes in with --put routing.json, one step's fields with --unit <id> key=value",
+             **{k: "written by the until-done gate, never by a skill" for k in RUN_OWNED}}
+    fields, rc = parse_pairs("run", args, owned)
+    if fields is None:
+        return rc
+    path, r, rc = load_routing("run")
+    if r is None:
+        return rc
+    r.update(fields)
+    if not write_json(path, r):
+        return refuse("run", f"cannot write {path.as_posix()}")
+    print(run_line(r) + f"  (set {', '.join(fields)})")
+    return 0
+
+
+def get(args):
+    """--get <name>: the file as stored, or {} when there is none. Read only: no dir is created."""
+    name = args[0] if args else ""
+    if name not in STATE_FILES:
+        return refuse("get", f"{name or 'no file name'}: give one of {' / '.join(STATE_FILES)}")
+    path = state_dir(cli_project()) / name
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        text = "{}"
+    print(text.rstrip("\n"))
+    return 0
+
+
+def state_cli(cmd, args):
+    """--put / --unit / --run / --get -> exit status. Unlike the hooks these fail loudly: the skill must know the write
+    did not happen."""
+    try:
+        return {"--put": put, "--unit": set_unit, "--run": set_run, "--get": get}[cmd](args)
+    except Exception as e:
+        return refuse(cmd.lstrip("-"), f"{type(e).__name__}: {e}")
+
+
 def main():
+    for stream in (sys.stdout, sys.stderr):   # the renderers print "·": on Windows a pipe defaults to cp1252, which the reader shows as mojibake
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    if len(sys.argv) > 1 and sys.argv[1] == "--state-dir":
+        print_state_dir(create="--create" in sys.argv[2:]); return
+    if len(sys.argv) > 1 and sys.argv[1] in ("--put", "--unit", "--run", "--get"):
+        sys.exit(state_cli(sys.argv[1], sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "--recompute":
         recompute(); return
     if len(sys.argv) > 1 and sys.argv[1] == "--receipts":
-        receipts(sys.argv[2] if len(sys.argv) > 2 else None); return
+        args = sys.argv[2:]
+        receipts(next((a for a in args if a != "--json"), None), as_json="--json" in args); return
     if len(sys.argv) > 1 and sys.argv[1] == "--report":
         report(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
         return
     try:
-        data = json.load(sys.stdin)
+        data = stdin_json()
     except Exception:
+        return
+    if not isinstance(data, dict):
         return
     ev = data.get("hook_event_name") or ""
     try:

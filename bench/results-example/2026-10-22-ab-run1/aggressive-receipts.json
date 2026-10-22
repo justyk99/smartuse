@@ -1,0 +1,146 @@
+{
+  "active": false,
+  "task": "orders-csv-export",
+  "dial": "aggressive",
+  "until_done": true,
+  "started_at": "2026-10-22T06:46:41Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Decision line in decisions.md (route, file, columns)",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "writes/locks the plan; settles §7 Q1 from the §5 acceptance",
+      "budget_turns": 0,
+      "check": "decision line written",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/orders-csv-export/decisions.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Route src/routes/orders-export.js + mount in server.js",
+      "tier": "build",
+      "model": "sonnet",
+      "why": "well-specified new file + 1-line mount, curl/lint check",
+      "budget_turns": 20,
+      "check": "lint green; curl 200 text/csv, header+2 rows, totals 14.99/12.5 = GET /orders",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 3,
+      "agent_input": 63376,
+      "agent_output": 909,
+      "agent_models": [
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "ad134cda31311a991",
+        "a9b6dfdc8ee5bfcdc"
+      ],
+      "agent_by_model": {
+        "claude-sonnet-5-5": {
+          "calls": 3,
+          "input": 63376,
+          "output": 909
+        }
+      },
+      "files": [
+        "src/routes/orders-export.js",
+        "src/server.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Tests tests/orders-export.test.js",
+      "tier": "build",
+      "model": "sonnet",
+      "why": "specified test cases, npm test is the check",
+      "budget_turns": 20,
+      "check": "Tests: 6 passed, 6 total; lint green",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 4,
+      "agent_input": 87049,
+      "agent_output": 2794,
+      "agent_models": [
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "a8e370ac31f50e961",
+        "ab1bb98ac387db8cf"
+      ],
+      "agent_by_model": {
+        "claude-sonnet-5-5": {
+          "calls": 4,
+          "input": 87049,
+          "output": 2794
+        }
+      },
+      "files": [
+        "tests/orders-export.test.js"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Docs DEV.md + USER.md + README line",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "doc fill from a fixed spec, grep-checkable",
+      "budget_turns": 15,
+      "check": "grep /orders/export: DEV 4, README 1, USER 2",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 3,
+      "agent_input": 71979,
+      "agent_output": 6824,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "ac534b5bf2edfd356"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 3,
+          "input": 71979,
+          "output": 6824
+        }
+      },
+      "files": [
+        "docs/features/orders-csv-export/USER.md",
+        "docs/features/orders-csv-export/DEV.md",
+        "README.md"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Close: commit, move to COMPLETED, living-docs",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "run-plan never commits; reviewer unknown (§7 Q3)",
+      "budget_turns": 0,
+      "check": "not run: run-plan never commits",
+      "blocked_by": "rule: run-plan never commits; §7 Q3 reviewer unknown",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    }
+  ],
+  "needs_human": "Confirm one row per order (§7 Q1) and name the reviewer (§7 Q3), then commit, move the folder to .task/COMPLETED/ and run /living-docs.",
+  "closed_at": "2026-10-22T06:51:19Z"
+}

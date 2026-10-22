@@ -1,46 +1,44 @@
-# LinkedIn post #2 — "a receipt per plan step" (smartuse 0.3.0)
+# LinkedIn ship post, week 2 — Friday 23 Oct 2026, 13:00–15:00 MYT (smartuse 0.3.0 + the heartbeat)
 
-*Numbers and the table are from the 2026-10-21 bench run (`bench/results-example/2026-10-21-csv-export/`), the table verbatim from `/smartuse:receipts`. Attach `docs/media/demo.gif`. Link: the v0.3.0 release page. LinkedIn has no code formatting: paste the table as a screenshot of the gif's last frame (`docs/media/demo-last-frame.png`) and keep the text below it.*
+Written to YK's ship-post rules: 120–200 words, hook inside 49 characters, no link in the body, one real number, one thing that broke, YK's own line, two hashtags, no emojis. Not final until the `[YK: …]` line is replaced and YK says "post". Last-5-posts check: not done (no LinkedIn access from the brain session); the laptop session should glance at the activity page before posting.
 
 ---
 
-Last week I posted a plugin that turns one line into a planner-grade kickoff. The question I got most: "fine, but when Claude runs the plan, what actually happened in each step, and what did it cost?"
+## 1. The post
 
-Here is the answer. One receipt per plan step.
+My own plugin blocked my own brain session.
 
-I typed one line into the bench repo: "add a CSV export of orders, with a test. Deadline next week, I sign off."
+This week I let a Claude session run the smartuse release by itself. Branch, tests, merge, demo gif. I signed off.
 
-smartuse split it into 6 steps, ran them without me saying "go" between them, and when it finished I typed `/smartuse:receipts`:
+Shipped: one receipt per plan step. Claude splits a job into steps. After each step a small hook (a script that runs on its own) writes down which model did the work, whether a second agent checked it, and what it cost. Nothing guessed. The real run: 6 steps, 6 of 6 tests green, $3.72.
 
-```
-| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | Route decision confirmed (path, colu | judgment | fable |  | pass |  |  |  |  |  | decisions.md: decision line written 2026 |
-| 2 | src/routes/orders-export.js: toCsv() | build | fable |  | pass |  | no gaps | 5 | 110.7k | 2.7k | npm run lint: clean (exit 0); sanity row |
-| 3 | Mount export router in src/server.js | build | fable |  | pass |  | no gaps | 5 | 107.6k | 1.2k | curl export.csv: 200 text/csv, header +  |
-| 4 | tests/orders-export.test.js (unit +  | build | fable |  | pass |  | no gaps | 3 | 64.6k | 1.6k | npm test: Tests 6 passed, 6 total (2 sui |
-| 5 | Docs: DEV.md + USER.md + README line | mechanical | haiku |  | pass |  |  | 3 | 72.8k | 4.5k | grep 'orders/export.csv' README.md:5 hit |
-| 6 | Commit by path, move task folder, /l | judgment | fable |  | blocked |  |  |  |  |  | blocked: run-plan never commits; user's  |
-steps 5 pass · 1 blocked · 0 open · agent tokens in 355.8k / out 10.0k · delegated out 10.0k (100% of agent output) on claude-fable-5-1, claude-haiku-5-5, claude-sonnet-5-5
-```
+Built: a heartbeat. One line that says working, waiting on an agent, waiting on you, or stalled. Because from my phone I could not tell if the brain was busy or asleep.
 
-What each column means, in plain words:
-- tier / model: who did the step and why. Judgment stays with the session model. Build gets a fresh agent. Review gets a cheaper one.
-- override: if I had retiered a step by hand, it would show here as "mechanical→build". The receipt never hides my hand.
-- esc: the one allowed escalation. Twice-failed steps stop and ask, they do not loop.
-- verify: what a fresh agent said about the delegated work. Not the builder grading itself.
-- calls / in / out: the agent's real API calls and tokens, attached by a Stop hook that reads the agent transcript. Nothing estimated. When the hook cannot tell which step an agent belongs to, it leaves the receipt unattached rather than guess.
+Broke: the brain tried to read a web page in a way my guard treats as risky. My own guard said no. It does not know who is boss. Good.
 
-The run: $3.72, 6.4 min, 22 turns (plus $1.57 and 2.4 min for the kickoff). Five of six steps passed, 6 of 6 tests green, lint clean, three reviews found no gaps. Step 6 is blocked on purpose: run-plan never commits. The commit is mine, and so is the sign-off it asked for.
+[YK: one sentence in your own words — what annoyed you most this week]
 
-Why I built it this way: every "token saving" number in this space is self-reported, and every router hides its decisions. A receipt per step is the smallest unit of evidence I could find. When I publish a routed-vs-not comparison, every row will have one of these behind it.
+Next: the same job under three routing settings, side by side, to see if the cheap models save anything at all.
 
-What it is not: a router. It is a dial (off / safe / aggressive) with receipts. It is not a measured saving yet. It is the thing that makes a measured saving checkable.
+What's the first task you'd throw at it?
 
-Open source, MIT, native Claude Code mechanisms only (skills, hooks, output styles). Install:
+#ClaudeCode #BuildInPublic
 
-/plugin install smartuse --marketplace justyk99/smartuse
+## 2. First comment (post right after)
 
-Release notes and the full receipts of this run are in the repo. Tell me which column you would add.
+Install in Claude Code: /plugin install smartuse --marketplace justyk99/smartuse
+Code, receipts of the run, and the release notes: github.com/justyk99/smartuse/releases/tag/v0.3.0
 
-#ClaudeCode #AIAgents #DeveloperTools #BuildInPublic
+## 3. Visual
+
+`docs/media/demo-last-frame.png`: the terminal with the receipts table, one row per step, the tokens column filled by the hook. (Or `docs/media/demo.gif`, 22 s: one line typed, the plan runs, the table appears.)
+
+## 4. Demo script (60 s, five beats)
+
+1. Open: a terminal, `claude`, the smartuse prompt. "One line in."
+2. Input: the ask typed, `make-prompt quick`. "It writes the plan. 14 of 14 checks."
+3. Output: `run-plan --until-done` finishes, `/smartuse:receipts` shows the table. "Six steps. Each with its model, its check, its cost."
+4. The thing that broke: the bash-guard denial line on screen. "My own guard blocked my own brain. Kept it."
+5. Next week: `/smartuse:status` line in the status bar. "Working, waiting, or stalled. I'll know."
+
+Replace the [YK] line if present, then say "post".

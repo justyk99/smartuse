@@ -1,0 +1,88 @@
+{
+  "active": false,
+  "task": "order-total-rounding",
+  "dial": "safe",
+  "started_at": "2026-10-22T07:54:50Z",
+  "until_done": true,
+  "needs_human": "Which rounding rule does the invoice service use: half-up or half-even, per line or on the total? (and who owns src/routes/orders.js, so they can sign off the fix)",
+  "units": [
+    {
+      "id": 1,
+      "title": "Audit table of failing inputs under the 4 candidate rules",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "pure computation + a table, checkable by running the script",
+      "budget_turns": 15,
+      "check": "## Order total rounding audit (exit 0; 2 cases wrong under every rule, 5 rule-dependent)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps fixed",
+      "agent_calls": 6,
+      "agent_input": 169089,
+      "agent_output": 11805,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "ac70f648085cac74b"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 6,
+          "input": 169089,
+          "output": 11805
+        }
+      },
+      "files": [
+        ".task/ACTIVE/order-total-rounding/audit.js",
+        ".task/ACTIVE/order-total-rounding/audit.md"
+      ],
+      "note": "session model fixed the WRONG flag (spec said differs from ANY rule; agent flagged only ALL)"
+    },
+    {
+      "id": 2,
+      "title": "Failing tests in tests/orders.test.js",
+      "tier": "build",
+      "model": "opus",
+      "why": "expected cents depend on the money rule (1.005 is 1.01 half-up, 1.00 half-even)",
+      "budget_turns": 20,
+      "check": "npm test (new tests fail on current code)",
+      "blocked_by": "Q1 invoice rounding rule (money, no default)",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 3,
+      "title": "Fix computeTotal() with exact decimal math",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "money + src/routes/orders.js is owned by another developer",
+      "budget_turns": 0,
+      "check": "npm test && npm run lint",
+      "blocked_by": "Q1 rule + Q2 orders.js owner sign-off",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 4,
+      "title": "decisions.md line + living-docs after commit",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "records the rule chosen in unit 3; runs after the user's commit",
+      "budget_turns": 10,
+      "check": "line present in decisions.md",
+      "blocked_by": "unit 3 + commit",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    }
+  ],
+  "closed_at": "2026-10-22T07:57:30Z"
+}

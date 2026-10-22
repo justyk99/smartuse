@@ -4,6 +4,7 @@ node_modules/
 *.log
 plugins/smartuse/evals/results/*
 !plugins/smartuse/evals/results/2026-10-15-final/
+!plugins/smartuse/evals/results/2026-10-22-0.4.0/
 bench/results/
 .smartuse-terms.local
 __pycache__/
