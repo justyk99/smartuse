@@ -1,6 +1,6 @@
 {
   "name": "smartuse",
-  "description": "smartuse \u2014 use Claude Code smartly: kickoff specs from one line, living docs after every commit, switchable reply styles, a safety floor, a receipt for every run and every plan step, and a heartbeat (working, waiting on an agent, waiting on you, or stalled).",
+  "description": "smartuse \u2014 use Claude Code smartly: kickoff specs from one line, living docs when Claude calls them after a commit it makes or you run /smartuse:living-docs, switchable reply styles, a safety floor, an until-done Stop gate for the run-plan loop, a receipt for every run and every plan step, and a heartbeat (working, waiting on an agent, waiting on you, or stalled).",
   "owner": {
     "name": "JustYK",
     "url": "https://github.com/justyk99"
@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "smartuse",
-      "description": "Use Claude Code smartly: one line in, a planner-grade kickoff out; docs that stay current after every commit; a reply voice you choose; a deterministic safety floor; a receipt for every run and every plan step; and a heartbeat that says whether Claude is working, waiting on an agent, waiting on you, or stalled. make-prompt \u00b7 run-plan \u00b7 living-docs \u00b7 reply-style \u00b7 ledger \u00b7 receipts \u00b7 status \u00b7 bash-guard \u00b7 file-guard \u00b7 heartbeat.",
+      "description": "Use Claude Code smartly: one line in, a planner-grade kickoff out; feature docs updated from the diff when Claude calls living-docs after a commit it makes, or when you run /smartuse:living-docs; a reply voice you choose; a deterministic safety floor; an until-done Stop gate for the run-plan loop; a receipt for every run and every plan step; and a heartbeat that says whether Claude is working, waiting on an agent, waiting on you, or stalled. Skills: make-prompt \u00b7 run-plan \u00b7 living-docs \u00b7 reply-style \u00b7 ledger \u00b7 receipts \u00b7 status. Hooks: bash-guard \u00b7 file-guard \u00b7 ledger \u00b7 until-done (Stop gate) \u00b7 heartbeat.",
       "source": "./plugins/smartuse",
       "category": "productivity",
       "version": "0.4.0-dev",

@@ -10,7 +10,7 @@
 
 > gstack gives you roles. Ruflo gives you a swarm. **smartuse gives you a receipt.**
 
-A planner needs paths, owners, absolute dates, non-goals, gated deliverables and open questions with owners. Nobody types that by hand every time. Half of it is in your repo; the other half is in your head. `make-prompt` greps the first half and asks you a few multiple-choice questions for the second. The result is a spec a fresh session can execute. The other pieces keep the work honest afterwards: docs that update themselves after each commit, a reply voice you choose, a safety floor that fires even in bypass mode, a ledger that shows what every run — and every step of the plan — cost, and a heartbeat that says whether Claude is working, waiting on an agent, waiting on you, or stalled.
+A planner needs paths, owners, absolute dates, non-goals, gated deliverables and open questions with owners. Nobody types that by hand every time. Half of it is in your repo; the other half is in your head. `make-prompt` greps the first half and asks you a few multiple-choice questions for the second. The result is a spec a fresh session can execute. The other pieces keep the work honest afterwards: feature docs updated from the diff (Claude calls `living-docs` after a commit it makes; for your own commits, run `/smartuse:living-docs`), a reply voice you choose, a safety floor that fires even in bypass mode, a ledger that shows what every run — and every step of the plan — cost, and a heartbeat that says whether Claude is working, waiting on an agent, waiting on you, or stalled.
 
 ![demo: one line in, kickoff out, the receipts table](docs/media/demo.gif)
 <p align="center"><sub>Replay of the real 2026-10-21 bench run (<code>bench/results-example/2026-10-21-csv-export/</code>); rendered from the captured output by <code>scripts/render-demo.py</code>, nothing mocked.</sub></p>
@@ -52,7 +52,7 @@ flowchart LR
 
 | What | Result |
 |---|---|
-| `claude plugin eval`, 4 cases, with vs without the plugin (0.2.0, 2026-10-15) | **4 of 4 pass with it** (1.00 each); without: 0.00 / 0.00 / 0.50 / 0.00 · mean gain **+0.88** · $1.27 list price per full run. The 3 cases added in 0.4.0 (`ledger-empty`, `status-line`, `run-plan-no-task`) are not scored yet |
+| `claude plugin eval`, 4 cases, with vs without the plugin (0.2.0, 2026-10-15) | **4 of 4 pass with it** (1.00 each); without: 0.00 / 0.00 / 0.50 / 0.00 · mean gain **+0.88** · $1.27 list price per full run. The other 4 of the 8 cases (`receipts-empty`, added in 0.3.0; `ledger-empty`, `status-line`, `run-plan-no-task`, added in 0.4.0) are not scored yet |
 | `make-prompt quick` on three real asks (two production repos + the bench repo) | 0.9 – 1.8 min · 3.1k – 3.9k output tokens · 130k – 205k cached reads each · self-check 11/13 – 12/13 (the receipt's denominator at the time; the list has 14 lines and the receipt says /14 since 0.4.0) |
 | `run-plan` first real unit | tiered to Haiku (7 calls, 24k output tokens), reported **blocked** by a read-only database rule instead of working around it |
 | `run-plan --until-done`, bench repo, one line in | kickoff 14/14 → endpoint + 4 tests built (11/11 pass) → verified end to end → stopped with a precise human question (pre-existing lint gap). $1.30, 5.6 min, 19 turns. `bench/results-example/` |
@@ -72,15 +72,19 @@ Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tool
 The hooks run through `plugins/smartuse/hooks/py.sh`, which picks `python3`, `python` or `py -3` (on a stock Windows install `python3` is the Microsoft Store stub). Git Bash is required: Claude Code runs hook commands through it on Windows. `HOME` from Git Bash is honoured; state lives under `~/.claude/smartuse/`.
 
 ## Configure per repo (optional)
-`.claude/smartuse.local.md` with YAML frontmatter: `vcs`, `task_root`, `archive_root`, `docs_root`, `task_template`, `svn_flags`, `author`, `jira_cli`, `check` (the runnable check `run-plan --until-done` must pass, e.g. `npm test`). Without it the skills detect git/svn and the usual folders. Everything the hooks write lives under `~/.claude/smartuse/`, never inside your repo: `ledger.jsonl` (one line per run, all repos) and, per repo under `projects/<key>/`, `routing.json` (the active or latest run-plan run) · `receipts.jsonl` (one line per agent) · `runs/` (closed runs, archived) · `status.json` (the heartbeat) · `pending.json` (a skill's hand-off, consumed by the Stop hook). State lives under `~/.claude/smartuse/projects/<key>/`, where `<key>` comes from the repository's full path (so two folders with the same name never share it). 0.3.0 used the folder name; 0.4.0 never writes there, and `/smartuse:receipts` still shows those older runs, marked as shared. Delete `~/.claude/smartuse/projects/<folder name>/` when you no longer need them.
+`.claude/smartuse.local.md` with YAML frontmatter: `vcs`, `task_root`, `archive_root`, `docs_root`, `task_template`, `svn_flags`, `author`, `jira_cli`, `check` (the runnable check `run-plan --until-done` must pass). Without the file the skills detect git/svn and the usual folders.
+
+`check` accepts exactly these shapes, verbatim: `npm test` · `pnpm test` · `yarn test` · `bun test` · `pytest [paths]` · `make test` · `make check` · `cargo test` · `go test ./...` · `dotnet test` · `mvn test` · `gradle test`. Anything else is refused and the gate says so: `npm run x`, `npx …`, `python -m pytest`, flags, pipes, `&&`. A `bash <script>` check runs only when you pin it by hash with `until-done.py --trust "bash <script>"` (run from the repo; it prints the `sudo` commands, you run them) in a root-owned `/etc/smartuse/trusted-checks.json`: Linux/macOS only, needs sudo, not on Windows.
+
+Everything the hooks write lives under `~/.claude/smartuse/`, never inside your repo: `ledger.jsonl` (one line per run, all repos) and, per repo under `projects/<key>/`, `routing.json` (the active or latest run-plan run) · `receipts.jsonl` (one line per agent) · `runs/` (closed runs, archived) · `status.json` (the heartbeat) · `status.lock` (the heartbeat's write lock; not on Windows) · `pending.json` (a skill's hand-off, consumed by the Stop hook) · `receipt.<agent>.done` (one empty marker per agent so its receipt is written once; removed when run-plan closes the run; an aborted run leaves them behind, which is harmless: delete them, or the whole `projects/<key>/` dir, to clean up). State lives under `~/.claude/smartuse/projects/<key>/`, where `<key>` comes from the repository's full path (so two folders with the same name never share it). 0.3.0 used the folder name; 0.4.0 never writes there, and `/smartuse:receipts` still shows those older runs, marked as shared. Delete `~/.claude/smartuse/projects/<folder name>/` when you no longer need them.
 
 ## Repository map
 ```
 plugins/smartuse/      the plugin: skills/ (7: make-prompt · run-plan · living-docs · reply-style · ledger · receipts · status) · output-styles/ (7) ·
-                       hooks/ (5: bash-guard · file-guard · ledger · until-done · heartbeat; tests/ with all.sh) · evals/ (7 cases) · docs/
+                       hooks/ (5: bash-guard · file-guard · ledger · until-done · heartbeat; tests/ with all.sh) · evals/ (8 cases) · docs/
 bench/                 reproducible mini-benchmark: sample repo + 5 asks + runner
 docs/research/         the reading behind the design (reply styles, security profiles, the routing landscape)
-docs/notes/            design notes with test logs (4: make-prompt, living-docs, receipts, heartbeat)
+docs/notes/            5: design notes with test logs (make-prompt, living-docs, receipts, heartbeat) · the 1.0 audit (audit-2026-10-22)
 docs/releases/         release notes per version
 scripts/               2: term-scan.py — private-term scan before a public push · render-demo.py — the demo gif from a captured run
 ```
