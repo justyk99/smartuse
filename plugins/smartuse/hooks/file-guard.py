@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """file-guard.py — PreToolUse guard for Write / Edit / MultiEdit: two files are human-only.
 `.claude/smartuse.local.md` (the adapter: it names the check command the until-done gate will run) and
-`~/.claude/smartuse/trusted-checks.json` (the human's hash pins). The model may read them, never write them.
+`/etc/smartuse/trusted-checks.json` (the human's hash pins, root-owned: until-done.py TRUSTED). The model may read them, never write them.
 The path is normalised before the match (backslashes, `x/..`, case): APFS and NTFS are case-insensitive, so
 `.claude/SmartUse.Local.MD` is the adapter too. stdin is read as bytes and decoded as UTF-8 here: on Windows a piped stdin
 is decoded in the ANSI code page, where a non-ASCII path makes json.load raise — and a guard that raises fails OPEN.
