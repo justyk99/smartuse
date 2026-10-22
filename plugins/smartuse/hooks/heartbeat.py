@@ -35,7 +35,7 @@ Never blocks a turn. Any error -> exit 0 silently (a heartbeat must never stop t
 """
 import json, os, sys, datetime, pathlib
 
-HOME = pathlib.Path(os.path.expanduser("~"))
+HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop",
           "Notification", "Stop", "SessionEnd"}
 WAITS = ("idle_prompt", "permission_prompt")

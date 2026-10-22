@@ -3,16 +3,17 @@
 # the until-done exception on Stop, session reset, the three renderers (--line / --statusline / --subagent-statusline),
 # garbage input -> silent exit 0. Every hook invocation must print nothing. Exit 1 on failure.
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
+py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 P="$HOME/.claude/smartuse/projects/proj"; S="$P/status.json"; R="$P/routing.json"; fail=0
 ev() { # $1 = event JSON -> the hook prints nothing and exits 0
-  out=$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/heartbeat.py"; echo "rc=$?")
+  out=$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/heartbeat.py"; echo "rc=$?")
   [ "$out" = "rc=0" ] || { echo "FAIL hook printed or failed: $1 -> $out"; fail=1; }
 }
-line() { CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/heartbeat.py" --line; }
+line() { CLAUDE_PROJECT_DIR="$D/proj" py "$H/heartbeat.py" --line; }
 expect() { l=$(line); case "$l" in *"$2"*) echo "PASS $1: $l";; *) echo "FAIL $1: expected '$2' in: $l"; fail=1;; esac; }
 expect_not() { l=$(line); case "$l" in *"$2"*) echo "FAIL $1: unexpected '$2' in: $l"; fail=1;; *) echo "PASS $1: $l";; esac; }
-js() { CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/heartbeat.py" --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert $1, d"; }
-ago() { python3 -c "import datetime,sys; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(seconds=int(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1"; }
+js() { CLAUDE_PROJECT_DIR="$D/proj" py "$H/heartbeat.py" --json | py -c "import json,sys; d=json.load(sys.stdin); assert $1, d"; }
+ago() { py -c "import datetime,sys; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(seconds=int(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1"; }
 C="\"cwd\":\"$D/proj\""
 expect "no status file" "no activity recorded for proj"
 ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"source\":\"startup\",$C}"
@@ -68,22 +69,22 @@ rm "$R"
 # --- stall: a working state with no event for 10 minutes
 ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s1\",$C}"
 ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t3\",$C}"; ev "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"s1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t3\",$C}"
-python3 - "$S" "$(ago 72)" <<'PY'
+py - "$S" "$(ago 72)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["updated"]=t; s["last_tool"]["at"]=t; json.dump(s,open(p,"w"))
 PY
 expect "duration format m:ss" "last Bash 1m12s · 1 call this turn"
-python3 - "$S" "$(ago 600)" <<'PY'
+py - "$S" "$(ago 600)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["updated"]=t; s["last_tool"]["at"]=t; json.dump(s,open(p,"w"))
 PY
 l=$(line); case "$l" in "stalled? smartuse · no activity 10m00s"*) echo "PASS stalled: $l";; *) echo "FAIL stalled: $l"; fail=1;; esac
 js "d['state']=='stalled'" && echo "PASS --json state stalled" || { echo "FAIL state stalled"; fail=1; }
 l=$(SMARTUSE_STALL_MIN=15 line); case "$l" in "smartuse · working · last Bash 10m00s"*) echo "PASS SMARTUSE_STALL_MIN=15 -> not stalled: $l";; *) echo "FAIL stall threshold env: $l"; fail=1;; esac
-python3 - "$S" "$(ago 3723)" <<'PY'
+py - "$S" "$(ago 3723)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["updated"]=t; s["last_tool"]["at"]=t; s["tool_running"]={"name":"Bash","tool_use_id":"t9","since":t}; json.dump(s,open(p,"w"))
 PY
 expect "a long tool is not a stall (h:mm)" "smartuse · working · Bash running 1h02m"
 # an agent whose SubagentStop was never seen is ignored after 3 h
-python3 - "$S" "$(ago 14400)" <<'PY'
+py - "$S" "$(ago 14400)" <<'PY'
 import json,sys; p,t=sys.argv[1:]; s=json.load(open(p)); s["tool_running"]=None; s["agents"]={"zombie":{"type":"general-purpose","since":t}}; json.dump(s,open(p,"w"))
 PY
 expect_not "agent older than 3 h dropped" "waiting on agent"
@@ -101,31 +102,43 @@ ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s3\",\"source\":\"sta
 js "d['session_id']=='s3' and d['turn']==0 and d['agents_done']==0 and d['ended'] is False" && echo "PASS SessionStart resets for the new session" || { echo "FAIL SessionStart reset"; fail=1; }
 # --- the renderers for the status line and the subagent rows
 ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s3\",$C}"
-OUT=$(printf '%s' "{\"model\":{\"display_name\":\"Opus\"},\"cost\":{\"total_cost_usd\":1.234},\"context_window\":{\"used_percentage\":34},\"workspace\":{\"current_dir\":\"$D/proj\",\"project_dir\":\"$D/proj\"},$C}" | python3 "$H/heartbeat.py" --statusline)
+OUT=$(printf '%s' "{\"model\":{\"display_name\":\"Opus\"},\"cost\":{\"total_cost_usd\":1.234},\"context_window\":{\"used_percentage\":34},\"workspace\":{\"current_dir\":\"$D/proj\",\"project_dir\":\"$D/proj\"},$C}" | py "$H/heartbeat.py" --statusline)
 case "$OUT" in "[Opus] ctx 34% · \$1.23 · working · thinking"*) echo "PASS --statusline: $OUT";; *) echo "FAIL --statusline: $OUT"; fail=1;; esac
-OUT=$(printf '%s' "{$C}" | python3 "$H/heartbeat.py" --statusline)
+OUT=$(printf '%s' "{$C}" | py "$H/heartbeat.py" --statusline)
 case "$OUT" in "working · thinking"*) echo "PASS --statusline without model/cost fields: $OUT";; *) echo "FAIL --statusline minimal: $OUT"; fail=1;; esac
-OUT=$(printf 'garbage' | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/heartbeat.py" --statusline)
+OUT=$(printf 'garbage' | CLAUDE_PROJECT_DIR="$D/proj" py "$H/heartbeat.py" --statusline)
 [ -n "$OUT" ] && echo "PASS --statusline with garbage stdin still prints the heartbeat line: $OUT" || { echo "FAIL --statusline garbage"; fail=1; }
 MS=$(( $(date +%s) * 1000 - 75000 ))
-OUT=$(printf '%s' "{\"tasks\":[{\"id\":\"task-1\",\"name\":\"grep callers\",\"type\":\"local_agent\",\"agentType\":\"general-purpose\",\"status\":\"running\",\"startTime\":$MS,\"model\":\"haiku\",\"tokenCount\":12345,\"cwd\":\"$D/proj\"}]}" | python3 "$H/heartbeat.py" --subagent-statusline)
-[ "$(printf '%s\n' "$OUT" | wc -l)" = 1 ] && printf '%s' "$OUT" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); assert d['id']=='task-1' and d['content'].startswith('general-purpose · 1m1') and d['content'].endswith('12.3k tok'), d" && echo "PASS --subagent-statusline: $OUT" || { echo "FAIL --subagent-statusline: $OUT"; fail=1; }
+OUT=$(printf '%s' "{\"tasks\":[{\"id\":\"task-1\",\"name\":\"grep callers\",\"type\":\"local_agent\",\"agentType\":\"general-purpose\",\"status\":\"running\",\"startTime\":$MS,\"model\":\"haiku\",\"tokenCount\":12345,\"cwd\":\"$D/proj\"}]}" | py "$H/heartbeat.py" --subagent-statusline)
+[ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 1 ] && printf '%s' "$OUT" | py -c "import json,sys; d=json.loads(sys.stdin.read()); assert d['id']=='task-1' and d['content'].startswith('general-purpose · 1m1') and d['content'].endswith('12.3k tok'), d" && echo "PASS --subagent-statusline: $OUT" || { echo "FAIL --subagent-statusline: $OUT"; fail=1; }
 echo '{"active":true,"units":[{"id":2,"title":"build route","tier":"build","model":"opus","status":"running"}]}' > "$R"
-OUT=$(printf '%s' "{\"tasks\":[{\"id\":\"task-2\",\"agentType\":\"Explore\",\"startTime\":\"$(ago 5)\",\"tokenCount\":500,\"cwd\":\"$D/proj\"}]}" | python3 "$H/heartbeat.py" --subagent-statusline)
+OUT=$(printf '%s' "{\"tasks\":[{\"id\":\"task-2\",\"agentType\":\"Explore\",\"startTime\":\"$(ago 5)\",\"tokenCount\":500,\"cwd\":\"$D/proj\"}]}" | py "$H/heartbeat.py" --subagent-statusline)
 case "$OUT" in '{"id": "task-2", "content": "step 2 build·opus · Explore · '*'k tok"}') echo "PASS --subagent-statusline with a running step: $OUT";; *) echo "FAIL subagent step prefix: $OUT"; fail=1;; esac
 rm "$R"
-OUT=$(printf 'nope' | python3 "$H/heartbeat.py" --subagent-statusline; echo "rc=$?"); [ "$OUT" = "rc=0" ] && echo "PASS --subagent-statusline garbage -> nothing, exit 0" || { echo "FAIL subagent garbage: $OUT"; fail=1; }
+OUT=$(printf 'nope' | py "$H/heartbeat.py" --subagent-statusline; echo "rc=$?"); [ "$OUT" = "rc=0" ] && echo "PASS --subagent-statusline garbage -> nothing, exit 0" || { echo "FAIL subagent garbage: $OUT"; fail=1; }
 # hooks installed mid-session: the first event is a PostToolUse (no SessionStart, no prompt seen) -> still "working"
 rm "$S"; ev "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"s4\",\"tool_name\":\"Read\",\"tool_use_id\":\"t7\",$C}"
 expect "first event mid-session is a PostToolUse" "smartuse · working · thinking"
 ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s3\",\"source\":\"startup\",$C}"; ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s3\",$C}"
 # --- robustness: garbage / unknown events print nothing and never fail
-OUT=$(printf 'not json' | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/heartbeat.py"; echo "rc=$?"); [ "$OUT" = "rc=0" ] && echo "PASS garbage stdin -> exit 0, no output" || { echo "FAIL garbage stdin: $OUT"; fail=1; }
-OUT=$(printf '' | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/heartbeat.py"; echo "rc=$?"); [ "$OUT" = "rc=0" ] && echo "PASS empty stdin -> exit 0, no output" || { echo "FAIL empty stdin: $OUT"; fail=1; }
+OUT=$(printf 'not json' | CLAUDE_PROJECT_DIR="$D/proj" py "$H/heartbeat.py"; echo "rc=$?"); [ "$OUT" = "rc=0" ] && echo "PASS garbage stdin -> exit 0, no output" || { echo "FAIL garbage stdin: $OUT"; fail=1; }
+OUT=$(printf '' | CLAUDE_PROJECT_DIR="$D/proj" py "$H/heartbeat.py"; echo "rc=$?"); [ "$OUT" = "rc=0" ] && echo "PASS empty stdin -> exit 0, no output" || { echo "FAIL empty stdin: $OUT"; fail=1; }
 ev "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"s3\",$C}"
 js "d['turn']==1 and d['tool_calls']==0" && echo "PASS unknown event ignored" || { echo "FAIL unknown event changed the state"; fail=1; }
 printf '{"active":true,"units":"broken"' > "$R"; expect "corrupt routing.json ignored" "smartuse · working"; rm "$R"
 printf 'corrupt' > "$S"; ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s3\",$C}"
 js "d['turn']==1 and d['session_id']=='s3'" && echo "PASS corrupt status.json -> rebuilt from the next event" || { echo "FAIL corrupt status.json"; fail=1; }
 [ -z "$(ls "$P" | grep '\.tmp$')" ] && echo "PASS no temp files left behind" || { echo "FAIL temp files left: $(ls "$P")"; fail=1; }
+# --- the launcher (py.sh): on stock Windows `python3` is the Microsoft Store stub (prints a hint, exits 9009), so the launcher
+# skips it and the next candidate, `python`, runs the hook. Here `python` wraps the interpreter the launcher itself found, so the
+# case also passes on a Mac or a minimal Linux without a `python` of its own. No usable interpreter at all -> the launcher prints
+# nothing and exits 0 (a hook must never block).
+REAL=$(bash "$H/py.sh" -c "import sys; sys.stdout.write(sys.executable)")
+mkdir -p "$D/stub" "$D/real" "$D/home2"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases."\nexit 9009\n' > "$D/stub/python3"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL" > "$D/real/python"; chmod +x "$D/stub/python3" "$D/real/python"
+OUT=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_use_id":"t","session_id":"s","cwd":"/tmp"}' | PATH="$D/stub:$D/real:$PATH" HOME="$D/home2" bash "$H/py.sh" "$H/heartbeat.py"; echo "rc=$?")
+[ "$OUT" = "rc=0" ] && [ -f "$D/home2/.claude/smartuse/projects/tmp/status.json" ] && echo "PASS launcher skips the Store stub: python3 = stub first on PATH, the hook still wrote status.json via python" || { echo "FAIL launcher skips the Store stub: $OUT"; fail=1; }
+OUT=$(printf '{}' | PATH="$D/stub" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
+[ "$OUT" = "rc=0" ] && echo "PASS launcher with no usable interpreter: prints nothing, exit 0 (a hook never blocks)" || { echo "FAIL launcher without an interpreter: $OUT"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

@@ -22,7 +22,7 @@ RULES = [
      "destructive SQL through the shell — SQL in chat, a human runs it"),
     (r"\bgit\s+push\b[^;&|]*(\s--force\b|\s-f\b|--force-with-lease)",
      "force push"),
-    (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bprintf\b|\becho\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json)",
+    (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b|\bprintf\b|\becho\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json)",
      "human-only file (it decides what the until-done gate may run) — ask the user to edit it"),
     (r"(^|[;&|]\s*)(unbuffer|expect|script)\s",
      "faking an interactive terminal (script / unbuffer / expect) is not allowed"),

@@ -19,7 +19,7 @@ Claude's Write/Edit on the adapter and on the pin file. Its output is redacted (
 """
 import json, os, sys, subprocess, pathlib, datetime, re, shlex
 
-HOME = pathlib.Path(os.path.expanduser("~"))
+HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 
 # Exact command shapes that may run. Extra args are allowed only for the runners marked True, and only if they look like
 # plain paths/names (no flags, no URLs, no package specs).
@@ -111,7 +111,7 @@ def safe_argv(check, project):
                 return argv, ""
             return None, f"extra arguments not allowed after `{' '.join(shape)}`"
     return None, ("not an allowed check. Allowed: " + ", ".join(" ".join(k) for k in FIXED if k[0] not in ("true", "false")) +
-                  ", or a `bash <script-in-repo>` the human pinned with: python3 <hook dir>/until-done.py --trust \"bash path/to/check.sh\" (run from the repo)")
+                  ", or a `bash <script-in-repo>` the human pinned with: bash <hook dir>/py.sh <hook dir>/until-done.py --trust \"bash path/to/check.sh\" (run from the repo)")
 
 
 def trust(check):

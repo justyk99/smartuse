@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 H="$(cd "$(dirname "$0")/.." && pwd)"; fail=0
-chk() { out=$(printf '%s' "$2" | python3 "$H/file-guard.py"); if [ "$1" = deny ]; then [ -n "$out" ] && echo "PASS deny $3" || { echo "FAIL expected deny $3"; fail=1; }; else [ -z "$out" ] && echo "PASS allow $3" || { echo "FAIL expected allow $3"; fail=1; }; fi; }
+py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
+chk() { out=$(printf '%s' "$2" | py "$H/file-guard.py"); if [ "$1" = deny ]; then [ -n "$out" ] && echo "PASS deny $3" || { echo "FAIL expected deny $3"; fail=1; }; else [ -z "$out" ] && echo "PASS allow $3" || { echo "FAIL expected allow $3"; fail=1; }; fi; }
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/smartuse.local.md","content":"x"}}' "Write adapter"
 chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/trusted-checks.json"}}' "Edit pin file"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/features/x/DEV.md","content":"x"}}' "Write a doc"
