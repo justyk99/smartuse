@@ -1,4 +1,4 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 02:40 UTC)
+# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 06:10 UTC)
 
 Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2. Dev branch: `claude/inspiring-galileo-8icw6s` (= main + 0.4.0-dev work).
 
@@ -13,9 +13,9 @@ Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2. Dev branch:
 ## In progress
 - Nothing running. Next candidates, your call: (1) cut **0.4.0 = heartbeat** now, A/B numbers later as 0.5; (2) run the A/B first (spend) and ship both as 0.4.0.
 
-## Blocked (needs YK, 2 clicks)
-- **Release page**: the harness refuses to let the agent create a GitHub release, even a draft ("create public surface"), and GitHub returned 403 on the agent's tag push. You: Releases → Draft new release → tag `v0.3.0` (create on publish, target `main`) → title `smartuse 0.3.0 — a receipt per plan step` → paste `docs/releases/0.3.0.md` → Publish.
-- **LinkedIn post #2**: `docs/launch/post-2-linkedin.md` + `docs/media/demo.gif` + `docs/media/demo-last-frame.png`.
+## Plan to go hands-free (YK asked for full automation)
+- The cloud brain cannot create the release (harness blocks "public surface"; GitHub 403 on tag push) and cannot post on LinkedIn (no login). A **laptop session under Remote Control** can do both plus the heartbeat check: YK starts it once (6 typed lines, see the brain's message), messages the brain first (`@smartuse-46: line open`), then the brain drives it: checkout branch → hook tests → `gh release create v0.3.0` → `/smartuse:status install` → Friday 13:00 MYT post from the personal computer's browser after YK says "post".
+- Post #2 rewritten to the ship-post rules (`docs/launch/post-2-linkedin.md`, 150 words, hook 43 chars, `[YK: …]` line pending). A scheduled wake-up at Fri 12:50 MYT runs the posting checklist.
 
 ## Decision for YK — A/B spend
 Running the A/B for real costs plan usage: ≈ $5–6 per ask per dial on the bench repo, ≈ $50 and 1.5 h for 5 asks × 3 dials, run from here. Options: (a) run it here now, 5 asks × 3 dials, you get the table today; (b) you run `bench/ab.sh` on the laptop over the week against the bench repo or a real one (the "30 days of receipts" story); (c) both. Until you answer I build and dry-run-test the runner and spend nothing.
