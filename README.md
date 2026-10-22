@@ -3,7 +3,7 @@
 <p align="center">
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img alt="Claude Code 2.1.300+" src="https://img.shields.io/badge/Claude%20Code-2.1.300%2B-black">
-<img alt="plugin evals 4/4 (0.2.0)" src="https://img.shields.io/badge/plugin%20evals-4%2F4%20%280.2.0%29-brightgreen">
+<img alt="plugin evals 8/8 (0.4.0)" src="https://img.shields.io/badge/plugin%20evals-8%2F8%20%280.4.0%29-brightgreen">
 <img alt="tests 285 hook + 36 bench cases" src="https://img.shields.io/badge/tests-285%20hook%20%2B%2036%20bench-brightgreen">
 <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/justyk99/smartuse/actions/workflows/ci.yml/badge.svg"></a>
 </p>
@@ -52,7 +52,7 @@ flowchart LR
 
 | What | Result |
 |---|---|
-| `claude plugin eval`, 4 cases, with vs without the plugin (0.2.0, 2026-10-15) | **4 of 4 pass with it** (1.00 each); without: 0.00 / 0.00 / 0.50 / 0.00 · mean gain **+0.88** · $1.27 list price per full run. The other 4 of the 8 cases (`receipts-empty`, added in 0.3.0; `ledger-empty`, `status-line`, `run-plan-no-task`, added in 0.4.0) are not scored yet |
+| `claude plugin eval`, all 8 cases, with vs without the plugin (0.4.0, 2026-10-22, Claude Code 2.1.308, one run per case) | **8 of 8 pass with it** (1.00 each); without: 0.50 for `bash-guard-sudo` and `living-docs-no-root`, 0.00 for the other six · mean gain **+0.88** · $1.01 per full run (both arms). Scoring first found three skill defects, fixed before this run: make-prompt's template had a deliverable with no gate and its self-check could read "about 9/14"; reply-style never told the model where its catalogue is. The two fixed cases then passed 3 of 3 runs each. `plugins/smartuse/evals/results/2026-10-22-0.4.0/` (0.2.0: 4 of 4, +0.88) |
 | `make-prompt quick` on three real asks (two production repos + the bench repo) | 0.9 – 1.8 min · 3.1k – 3.9k output tokens · 130k – 205k cached reads each · self-check 11/13 – 12/13 (the receipt's denominator at the time; the list has 14 lines and the receipt says /14 since 0.4.0) |
 | `run-plan` first real unit | tiered to Haiku (7 calls, 24k output tokens), reported **blocked** by a read-only database rule instead of working around it |
 | `run-plan --until-done`, bench repo, one line in | kickoff 14/14 → endpoint + 4 tests built (11/11 pass) → verified end to end → stopped with a precise human question (pre-existing lint gap). $1.30, 5.6 min, 19 turns. `bench/results-example/` |
@@ -60,12 +60,13 @@ flowchart LR
 | **A/B, routed vs not, 2026-10-22, model pinned to Opus, 4 bench asks** | same kickoff per ask, then `run-plan --until-done` per dial: median cost `off` $1.35 · `safe` $1.10 · `aggressive` $1.26 — **−24 % median per ask on both routed dials**; agent output not lower (cheaper models wrote more); tests green in 11 of 12 runs (one aggressive run left 3 failing tests); 3 of 4 asks ended on a real human question on every dial. n=4 on one fixture repo: a direction, not a claim. `bench/results-example/2026-10-22-ab-run3/` (and run 2, n=1: −17 % / −31 %) |
 | bash-guard · file-guard · ledger + receipts · until-done · heartbeat hooks · bench A/B dry run | 126 / 126 · 10 / 10 · 46 / 46 · 36 / 36 · 67 / 67 · 36 / 36 cases — `bash plugins/smartuse/hooks/tests/all.sh` prints `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 67 · ab 36` (PASS lines per suite, 2026-10-22) |
 
-Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tools "Bash,Read,Grep,Glob,Agent,Write,Skill"` (Linux needs `bubblewrap` + `socat` for the sandbox) and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks). The regression suites: `bash plugins/smartuse/hooks/tests/all.sh` — the five hook suites plus the bench A/B dry run, one summary line, nothing spent.
+Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tools Bash Skill Read Grep Glob Agent Write` (Linux needs `bubblewrap` + `socat` for the sandbox, and `TMPDIR` set to a directory outside `/tmp`: the eval sandbox denies writes to `/tmp`, where it would otherwise put its own temp dir, and every skill's `!` line then fails with "Read-only file system") and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks). The regression suites: `bash plugins/smartuse/hooks/tests/all.sh` — the five hook suites plus the bench A/B dry run, one summary line, nothing spent.
 
 ## Honest limits
 - Skills and styles are instructions. The hook is the only enforcement.
 - `make-prompt quick` reads a lot: budget 1–8 minutes and real plan usage per kickoff. It refuses one-file fixes.
 - Subagents cannot ask you questions. Unknowns come back as `unknown: … → who`.
+- With Claude Code's sandbox on, Bash cannot write under `~/.claude`, so the skills' state writes (a skill's ledger receipt, run-plan's plan) are refused inside it — seen in the eval sandbox. The hooks run outside the sandbox and still write the per-agent receipts and the heartbeat.
 - Routing is measured on **four** bench asks so far (median cost −24 % on both routed dials, agent output not lower, one aggressive run left failing tests); real-repo runs decide whether that holds. The cost column is the session's own `total_cost_usd`, not an estimate. The per-step receipts exist so that every published number has a line of evidence per step.
 
 ## Windows
@@ -84,7 +85,7 @@ plugins/smartuse/      the plugin: skills/ (7: make-prompt · run-plan · living
                        hooks/ (5: bash-guard · file-guard · ledger · until-done · heartbeat; tests/ with all.sh) · evals/ (8 cases) · docs/
 bench/                 reproducible mini-benchmark: sample repo + 5 asks + runner
 docs/research/         the reading behind the design (reply styles, security profiles, the routing landscape)
-docs/notes/            5: design notes with test logs (make-prompt, living-docs, receipts, heartbeat) · the 1.0 audit (audit-2026-10-22)
+docs/notes/            6: design notes with test logs (make-prompt, living-docs, receipts, heartbeat) · the 1.0 audit (audit-2026-10-22) · relay guards (a proposal, not built)
 docs/releases/         release notes per version
 scripts/               2: term-scan.py — private-term scan before a public push · render-demo.py — the demo gif from a captured run
 ```
@@ -92,7 +93,7 @@ scripts/               2: term-scan.py — private-term scan before a public pus
 ## Roadmap
 - **0.2**: make-prompt · run-plan · living-docs · reply-style · ledger · bash-guard · evals · bench.
 - **0.3** (released 2026-10-22): a receipt per plan step with the user-override field, `/smartuse:receipts` per task, `run-plan --until-done` with its deterministic Stop gate, `file-guard`.
-- **0.4** (this release): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model. Then: the measured A/B numbers, "30 days of receipts", the measured post.
+- **0.4** (released 2026-10-22): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model · state writes without a permission prompt · Windows. Then: real-repo A/B runs, "30 days of receipts", the measured post. Proposed: relay guards (`docs/notes/relay-design.md`).
 
 ## Contributing
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Every change to a hook needs its test (`plugins/smartuse/hooks/tests/`; `bash plugins/smartuse/hooks/tests/all.sh` runs every suite). Security reports: [SECURITY.md](SECURITY.md).
