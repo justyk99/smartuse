@@ -4,7 +4,7 @@
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img alt="Claude Code 2.1.300+" src="https://img.shields.io/badge/Claude%20Code-2.1.300%2B-black">
 <img alt="plugin evals 4/4 (0.2.0)" src="https://img.shields.io/badge/plugin%20evals-4%2F4%20%280.2.0%29-brightgreen">
-<img alt="tests 239 hook + 36 bench cases" src="https://img.shields.io/badge/tests-239%20hook%20%2B%2036%20bench-brightgreen">
+<img alt="tests 285 hook + 36 bench cases" src="https://img.shields.io/badge/tests-285%20hook%20%2B%2036%20bench-brightgreen">
 <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/justyk99/smartuse/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
@@ -58,7 +58,7 @@ flowchart LR
 | `run-plan --until-done`, bench repo, one line in | kickoff 14/14 → endpoint + 4 tests built (11/11 pass) → verified end to end → stopped with a precise human question (pre-existing lint gap). $1.30, 5.6 min, 19 turns. `bench/results-example/` |
 | **0.3.0 run (2026-10-21, 2.1.306), same ask, headless** | kickoff 14/14 ($1.57, 2.4 min) → 6 steps, no "go" in between: router + mount + 4 tests (6/6), live curl, three fresh-agent reviews "no gaps", docs on haiku, step 6 blocked by rule (never commits). **A receipt per step with hook-attached tokens**: agent out 10.0k (fable 40% · haiku 45% · sonnet 13%). $3.72, 6.4 min, 22 turns. `bench/results-example/2026-10-21-csv-export/` |
 | **A/B, routed vs not, 2026-10-22, model pinned to Opus, 4 bench asks** | same kickoff per ask, then `run-plan --until-done` per dial: median cost `off` $1.35 · `safe` $1.10 · `aggressive` $1.26 — **−24 % median per ask on both routed dials**; agent output not lower (cheaper models wrote more); tests green in 11 of 12 runs (one aggressive run left 3 failing tests); 3 of 4 asks ended on a real human question on every dial. n=4 on one fixture repo: a direction, not a claim. `bench/results-example/2026-10-22-ab-run3/` (and run 2, n=1: −17 % / −31 %) |
-| bash-guard · file-guard · ledger + receipts · until-done · heartbeat hooks · bench A/B dry run | 94 / 94 · 10 / 10 · 32 / 32 · 36 / 36 · 67 / 67 · 36 / 36 cases — `bash plugins/smartuse/hooks/tests/all.sh` prints `run 94 · ledger 32 · until-done 36 · file-guard 10 · heartbeat 67 · ab 36` (PASS lines per suite, 2026-10-22) |
+| bash-guard · file-guard · ledger + receipts · until-done · heartbeat hooks · bench A/B dry run | 126 / 126 · 10 / 10 · 46 / 46 · 36 / 36 · 67 / 67 · 36 / 36 cases — `bash plugins/smartuse/hooks/tests/all.sh` prints `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 67 · ab 36` (PASS lines per suite, 2026-10-22) |
 
 Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tools "Bash,Read,Grep,Glob,Agent,Write,Skill"` (Linux needs `bubblewrap` + `socat` for the sandbox) and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks). The regression suites: `bash plugins/smartuse/hooks/tests/all.sh` — the five hook suites plus the bench A/B dry run, one summary line, nothing spent.
 
