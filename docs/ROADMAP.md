@@ -7,7 +7,7 @@
 - [x] Receipts by model, `--json`
 - [x] A/B runner with dry run in CI; first real run archived (found the run-plan blocker defect)
 - [x] Windows: interpreter launcher, HOME honoured (laptop-verified: run, until-done, file-guard pass)
-- [x] Windows round 2 on the branch (laptop confirmation pending)
+- [x] Windows round 2: all five hook suites pass on the laptop (Git Bash, Python 3.13), confirmed 2026-10-22
 - [x] A/B runner: pinned `--model`, "no work done" rows out of the deltas, exact per-model split, no jq
 - [x] A/B re-run (1 ask × 3 dials, Opus pinned): clean; row in README with the n=1 caveat
 - [ ] Release 0.4.0 (laptop publishes; notes in `docs/releases/0.4.0.md`)
