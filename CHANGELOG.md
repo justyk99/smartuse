@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.3.0 — 2026-10-23, "a receipt per plan step"
+## 0.4.0 — in progress (2026-10-22)
+- Roadmap: the routed-vs-not A/B with the per-step receipts as evidence. `bench/ab.sh` (one kickoff, then `run-plan --until-done` per dial on fresh copies, receipts collected, a comparison table); receipts view with the agent-output share by model and `--json`.
+
+## 0.3.0 — 2026-10-22, "a receipt per plan step"
 - **One receipt per plan step.** `run-plan` marks the unit it is about to run as `running`; the `SubagentStop` hook attaches that agent's real API calls and tokens (`agent_calls`, `agent_input`, `agent_output`, `agent_models`, `agents`) to that unit in `routing.json` — never estimated, never guessed (two running units → the receipt line stays unattached). Build and verify agents on the same step accumulate. The unit also records the user's retier as `override: {from, to, by}`, the one escalation, and the fresh-agent verdict `verify: no gaps | gaps fixed | gaps open`.
 - **`/smartuse:receipts [task|all]`** — new skill, 0 model tokens to compute: one row per plan step (`# · step · tier · model · override · outcome · esc · verify · calls · in · out · check`) plus the delegated share ("delegated out 4.0k, 100% of agent output on sonnet"). Closed runs are archived by the Stop hook under `~/.claude/smartuse/projects/<repo>/runs/<started_at>_<task>.json`, so a task's receipts outlive the next run.
 - `run-plan --until-done`: the lazy-CEO loop. A Stop hook (`until-done.py`) refuses to end the turn while units or the repo's `check` command are unfinished; the model stops only for a real human question (`needs_human`), a double failure, a rule gate, or after 6 blocks. 23-case test.
