@@ -1,5 +1,5 @@
 {
-  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, or stalled?), all deterministic",
+  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 wait gate (Stop: a hand-off with nothing armed to wake the session is blocked once) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, stopped, or stalled?), all deterministic",
   "hooks": {
     "PreToolUse": [
       {
@@ -45,6 +45,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/until-done.py\"",
             "timeout": 330
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/wait-gate.py\"",
+            "timeout": 10
           },
           {
             "type": "command",

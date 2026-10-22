@@ -186,6 +186,102 @@ out=$(printf '%s' "{\"hook_event_name\":\"SubagentStart\",\"session_id\":\"s3\",
 expect "agent type with Á / 中文 recorded (stdin read as bytes, decoded as UTF-8)" "waiting on agent: Á中文-agent"
 ev "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s3\",\"agent_id\":\"u8\",$C}"
 [ -z "$(ls "$P" | grep '\.tmp$')" ] && echo "PASS no temp files left behind" || { echo "FAIL temp files left: $(ls "$P")"; fail=1; }
+# --- M3: the wait gate's outcome (docs/notes/one-session-design.md). wait-gate.py writes wait.json at Stop when a hand-off is open. Rendered
+# only when the turn is over, from this session, and not older than the last UserPromptSubmit (status.json prompt_at): "stopped" / "blocked"
+# -> "STOPPED · handed off <HH:MM> (<what>) — nothing will wake this session", "watching" -> "waiting on <what> · watcher armed <HH:MM>"
+# (HH:MM = the local clock); anything else -> "waiting on you". A project of its own, so the earlier cases stay as they were.
+mkdir -p "$D/wproj"; PWW=$(wp "$D/wproj"); KW=$(key "$PWW"); WJ="$HOME/.claude/smartuse/projects/$KW/wait.json"; CW="\"cwd\":\"$PWW\""
+evw() { out=$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$PWW" py "$H/heartbeat.py"; echo "rc=$?"); [ "$out" = "rc=0" ] || { echo "FAIL hook printed or failed: $1 -> $out"; fail=1; }; }
+hbl() { CLAUDE_PROJECT_DIR="$PWW" py "$H/heartbeat.py" --line; }
+wline() { l=$(hbl); if [ "$l" = "$2" ]; then echo "PASS $1: $l"; else echo "FAIL $1: expected '$2', got: $l"; fail=1; fi; }   # the whole line
+wexpect() { l=$(hbl); case "$l" in *"$2"*) echo "PASS $1: $l";; *) echo "FAIL $1: expected '$2' in: $l"; fail=1;; esac; }
+jsw() { CLAUDE_PROJECT_DIR="$PWW" py "$H/heartbeat.py" --json | py -c "import json,sys; d=json.load(sys.stdin); assert $1, d"; }
+hm() { py -c "import datetime,sys; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).astimezone().strftime('%H:%M'))" "$1"; }   # the local HH:MM of the epoch second $1, converted the way the hook converts a stamp
+mkwait() { # $1 state, $2 what, $3 seconds ago = "since", $4 seconds ago = the watcher's "armed" (- = no watcher), $5 session_id (- = none; default w1), $6 seconds ago = "at" (default 0); A = the epoch second read in bash
+  py - "$WJ" "$A" "$1" "$2" "$3" "$4" "${5-w1}" "${6-0}" <<'PY'
+import datetime, json, sys
+p, a, state, what, since, armed, sid, atage = sys.argv[1:9]
+def iso(age): return datetime.datetime.fromtimestamp(int(a) - int(age), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+d = {"at": iso(atage), "state": state, "what": what, "since": iso(since), "watcher": None if armed == "-" else {"kind": "bash", "id": "b1", "armed": iso(armed), "state": "alive"}}
+if sid != "-": d["session_id"] = sid
+json.dump(d, open(p, "w"))
+PY
+}
+evw "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"w1\",\"source\":\"startup\",$CW}"; evw "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"w1\",$CW}"
+evw "{\"hook_event_name\":\"Stop\",\"session_id\":\"w1\",\"stop_hook_active\":false,$CW}"
+wexpect "no wait.json: the turn is over and the line says waiting on you" "smartuse · waiting on you ·"
+A=$(date +%s); hs=$(hm $((A - 300))); ha=$(hm $((A - 200)))
+mkwait blocked builder 300 -; wline "wait.json blocked: STOPPED, the hand-off time (local HH:MM) and what" "smartuse · STOPPED · handed off $hs (builder) — nothing will wake this session"
+mkwait stopped builder 300 -; wline "wait.json stopped: the same line" "smartuse · STOPPED · handed off $hs (builder) — nothing will wake this session"
+mkwait stopped builder 300 200; wline "stopped with an ended watcher on record: still STOPPED" "smartuse · STOPPED · handed off $hs (builder) — nothing will wake this session"
+mkwait watching builder 300 200; wline "wait.json watching: waiting on <what> · watcher armed <HH:MM> replaces waiting on you" "smartuse · waiting on builder · watcher armed $ha"
+mkwait watching builder 300 -; wline "watching with no watcher time (taken from the Stop input): no time is invented" "smartuse · waiting on builder · watcher armed"
+mkwait watching "" 300 200; wline "watching with no what" "smartuse · waiting on the hand-off · watcher armed $ha"
+wshape() { # $1 = how wait.json spells the watcher: stamp (a bare ISO stamp) | hhmm (a plain "HH:MM") | at (an object with "at" instead of "armed")
+  py - "$WJ" "$A" "$1" <<'PY'
+import datetime, json, sys
+p, a, how = sys.argv[1:4]
+iso = lambda age: datetime.datetime.fromtimestamp(int(a) - age, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+w = {"stamp": iso(200), "hhmm": "09:07", "at": {"kind": "monitor", "at": iso(200)}}[how]
+json.dump({"at": iso(0), "state": "watching", "what": "builder", "since": iso(300), "watcher": w}, open(p, "w"))
+PY
+}
+wshape stamp; wline "the watcher as a bare ISO stamp" "smartuse · waiting on builder · watcher armed $ha"
+wshape hhmm; wline "the watcher as a plain HH:MM string is shown as it is" "smartuse · waiting on builder · watcher armed 09:07"
+wshape at; wline "the watcher as an object with at instead of armed" "smartuse · waiting on builder · watcher armed $ha"
+mkwait blocked "" 300 -; wline "STOPPED with no what: no empty parentheses" "smartuse · STOPPED · handed off $hs — nothing will wake this session"
+mkwait blocked '"Paste this into   the builder"  and a very long tail that goes on and on and on past sixty characters' 300 -; wexpect "what is one line (whitespace collapsed), cut at 60 characters" "(\"Paste this into the builder\" and a very long tail that goes) —"
+py - "$WJ" "$A" <<'PY'
+import datetime, json, sys
+p, a = sys.argv[1:3]
+d = {"at": datetime.datetime.fromtimestamp(int(a), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "state": "blocked", "what": "builder", "watcher": None}
+json.dump(d, open(p, "w"))
+PY
+wexpect "no since in wait.json: the time of the Stop (at) is used" "STOPPED · handed off $(hm "$A") (builder)"
+mkwait blocked builder 300 - - ; wexpect "wait.json without a session_id (an older writer) counts" "STOPPED · handed off $hs (builder)"
+mkwait blocked builder 300 - other; wexpect "wait.json of ANOTHER session in this repo is not this session's: waiting on you" "smartuse · waiting on you ·"
+mkwait blocked builder 300 - w1 3600; wexpect "wait.json older than the last UserPromptSubmit is last turn's: waiting on you" "smartuse · waiting on you ·"
+printf 'not json' > "$WJ"; wexpect "corrupt wait.json is ignored" "smartuse · waiting on you ·"
+printf '[1,2]' > "$WJ"; wexpect "wait.json that is not an object is ignored" "smartuse · waiting on you ·"
+mkwait paused builder 300 -; wexpect "a state this file does not know is ignored" "smartuse · waiting on you ·"
+py - "$WJ" <<'PY'
+import json, sys
+json.dump({"at": "yesterday", "state": "blocked", "what": "builder"}, open(sys.argv[1], "w"))
+PY
+wexpect "a wait.json whose at cannot be read is ignored" "smartuse · waiting on you ·"
+mkwait blocked builder 300 -
+jsw "d['state']=='stopped' and d['line'].startswith('smartuse · STOPPED · handed off ')" && echo "PASS --json: state stopped" || { echo "FAIL --json state stopped"; fail=1; }
+mkwait watching builder 300 200
+jsw "d['state']=='waiting_on_handoff' and d['line']=='smartuse · waiting on builder · watcher armed $ha'" && echo "PASS --json: state waiting_on_handoff" || { echo "FAIL --json state waiting_on_handoff"; fail=1; }
+mkwait blocked builder 300 -
+OUT=$(printf '%s' "{\"model\":{\"display_name\":\"Opus\"},\"context_window\":{\"used_percentage\":12},\"workspace\":{\"current_dir\":\"$PWW\",\"project_dir\":\"$PWW\"}}" | py "$H/heartbeat.py" --statusline)
+[ "$OUT" = "[Opus] ctx 12% · STOPPED · handed off $hs (builder) — nothing will wake this session" ] && echo "PASS --statusline: STOPPED without the smartuse prefix: $OUT" || { echo "FAIL --statusline STOPPED: $OUT"; fail=1; }
+# the line follows the turn: only a turn that is over is STOPPED
+evw "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"w1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"w-t1\",$CW}"
+wexpect "a tool running: working, whatever wait.json says" "smartuse · working · Bash running"
+evw "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"w1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"w-t1\",$CW}"
+wexpect "between tools (the gate blocked, the model is acting on it): working" "smartuse · working · last Bash"
+evw "{\"hook_event_name\":\"SubagentStart\",\"session_id\":\"w1\",\"agent_id\":\"wa1\",\"agent_type\":\"Explore\",$CW}"
+evw "{\"hook_event_name\":\"Stop\",\"session_id\":\"w1\",\"stop_hook_active\":true,$CW}"
+wexpect "an agent still running beats STOPPED" "working · waiting on agent: Explore"
+evw "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"w1\",\"agent_id\":\"wa1\",$CW}"
+wexpect "the agent done and the turn over (a second Stop, stop_hook_active true): STOPPED" "smartuse · STOPPED · handed off $hs (builder)"
+evw "{\"hook_event_name\":\"Notification\",\"session_id\":\"w1\",\"notification_type\":\"permission_prompt\",$CW}"
+wexpect "a permission prompt beats STOPPED" "waiting on you: permission prompt"
+evw "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"w1\",\"tool_name\":\"Read\",\"tool_use_id\":\"w-t2\",$CW}"
+evw "{\"hook_event_name\":\"Notification\",\"session_id\":\"w1\",\"notification_type\":\"idle_prompt\",$CW}"
+wexpect "idle_prompt after the turn counts as the turn being over: STOPPED" "smartuse · STOPPED · handed off $hs (builder)"
+echo '{"active":true,"needs_human":"which branch?","units":[]}' > "$HOME/.claude/smartuse/projects/$KW/routing.json"
+wexpect "NEEDS YOU beats STOPPED" "smartuse · NEEDS YOU: which branch?"
+rm "$HOME/.claude/smartuse/projects/$KW/routing.json"
+A=$(date +%s); mkwait blocked builder 300 -; sleep 1.1   # a new prompt after wait.json (whole-second stamps): last turn's file is stale at once
+evw "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"w1\",$CW}"
+wexpect "a new UserPromptSubmit: working" "smartuse · working"
+evw "{\"hook_event_name\":\"Stop\",\"session_id\":\"w1\",\"stop_hook_active\":false,$CW}"
+wexpect "the next Stop with last turn's wait.json (older than the new prompt): waiting on you, not STOPPED" "smartuse · waiting on you ·"
+jsw "d['prompt_at'] and d['turn']==2 and abs(__import__('time').time() - __import__('datetime').datetime.fromisoformat(d['prompt_at'].replace('Z','+00:00')).timestamp()) < 300" && echo "PASS UserPromptSubmit records prompt_at in status.json" || { echo "FAIL prompt_at: $(CLAUDE_PROJECT_DIR="$PWW" py "$H/heartbeat.py" --json | head -8)"; fail=1; }
+evw "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"w2\",\"source\":\"startup\",$CW}"
+jsw "d['prompt_at'] is None and d['session_id']=='w2'" && echo "PASS a new session starts with no prompt_at" || { echo "FAIL prompt_at after SessionStart"; fail=1; }
 # --- the launcher (py.sh): on stock Windows `python3` is the Microsoft Store stub (prints a hint, exits 9009), so the launcher
 # skips it and the next candidate, `python`, runs the hook. Here `python` wraps the interpreter the launcher itself found, so the
 # case also passes on a Mac or a minimal Linux without a `python` of its own. No usable interpreter at all -> the launcher prints

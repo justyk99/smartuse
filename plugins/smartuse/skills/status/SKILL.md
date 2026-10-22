@@ -1,6 +1,6 @@
 ---
 name: status
-description: "Show whether Claude is working, waiting on an agent, waiting on you, or stalled — one deterministic line from the heartbeat hook (0 model tokens), plus how to put it in your status line. Use when the user asks 'are you still working', 'is it stuck', 'what is it doing', 'status', 'heartbeat'."
+description: "Show whether Claude is working, waiting on an agent, waiting on you, stopped after a hand-off, or stalled — one deterministic line from the heartbeat hook (0 model tokens), plus how to put it in your status line. Use when the user asks 'are you still working', 'is it stuck', 'what is it doing', 'status', 'heartbeat'."
 argument-hint: "[install]"
 allowed-tools: Bash(bash *), Bash(echo *), Read, Edit
 ---
@@ -15,6 +15,7 @@ Print the heartbeat line above verbatim as your first line — that one line, un
 - `working · thinking 0s · 0 calls this turn` = a turn is running and no tool has run in it yet. Typed in this session, `/smartuse:status` always shows this: it runs inside your own new turn, and the prompt that started it is the latest activity (it ends the wait on you), so the line is this turn, not the work before it.
 - `working · <tool> running 4s` / `working · last <tool> 4s · N calls this turn` = Claude is inside a turn, using tools; `working · waiting on agent: <type> 2m10s` = a subagent is running (`, N more` = several).
 - `waiting on you · 4m12s` = the turn ended and nothing happens until you type (`no prompt yet` = a new session); `waiting on you: permission prompt` = an approval is pending; `NEEDS YOU: …` = run-plan wrote a question into routing.json — answer it.
+- `STOPPED · handed off 20:41 (builder) — nothing will wake this session` = the wait gate saw work handed to another session while nothing is armed to wake this one: it is stopped, not waiting, so tell whoever should wake it or ask for a watcher (`hooks/watch.py`); `waiting on builder · watcher armed 20:41` = work was handed off and a watcher or a check-in will wake this session.
 - `stalled? · no activity 6m10s` = a working state with no hook event for 5 minutes (`SMARTUSE_STALL_MIN` changes it): a long think and a hung tool look the same from outside — you decide whether to interrupt.
 - `· step 2/5 build·opus "…"` = the run-plan step running now; `· loop block 1/6` = the until-done gate's block count; `session ended` = the session closed; `no activity recorded` = the hooks have not fired for this repo yet (restart Claude Code after installing the plugin).
 
