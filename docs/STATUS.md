@@ -1,4 +1,4 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 08:40 UTC)
+# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 09:00 UTC)
 
 Mandate (YK, 2026-10-22): **brain drives to 1.0 without asking unless a real decision is needed**; the laptop session Smartuse-Worker (Remote Control, Windows, Git Bash, gh logged in) is the worker for laptop-only steps. Gate this week: 0.3.0 release page · LinkedIn post #2 Fri 13:00 MYT. Dev branch: `claude/inspiring-galileo-8icw6s` (= main + 0.4.0-dev work).
 
@@ -14,7 +14,8 @@ Mandate (YK, 2026-10-22): **brain drives to 1.0 without asking unless a real dec
 - **Laptop (Smartuse-Worker)** re-tested da740dc on real Windows: launcher finds Python 3.13 and skips the Store stub; run, until-done, file-guard pass. ledger-test and heartbeat-test fail for test/encoding reasons (Git Bash paths inside JSON; cp1252 stdout; second-level timing) → **Windows round 2 landed** (4c5a1ad: paths inside event JSON, UTF-8 output, drift-tolerant tests); the bench no longer needs jq (c51e31b). **Laptop confirmed all five hook suites green on real Windows** (c51e31b). The bench test crashed on cp1252 output → fixed (7481bd6), laptop re-running that one.
 - **A/B runner hardened** (c51e31b): `--model` pin, session-model column, no-work rows out of the deltas, exact per-model split. **A/B run 2 clean** (Opus pinned): safe −17 % cost, aggressive −31 %, agent output flat, tests green on all dials; archived, README row with the n=1 caveat. **Full 5-ask run** (≈ $28) running now.
 - Plan to 1.0: `docs/ROADMAP.md`.
-- **1.0 audit** (ultracode workflow): five lenses (hook security, portability, docs-vs-code, skill prompts + evals, first-run) each adversarially verified → the confirmed gaps become `docs/ROADMAP.md` to 1.0.
+- **1.0 audit done**: 42 confirmed findings (5 blockers: the until-done gate yields after one push per prompt; hooks fail open on non-ASCII stdin on Windows; the check runner cannot start npm on Windows; `${1:-}` in three skills is refused in default permission mode), 7 refuted. List: `docs/notes/audit-2026-10-22.md`. **Three fix workers running in isolated worktrees** (hooks core · guards · skills+docs) so the A/B run keeps a stable plugin; merged after the run.
+- Repo: LF line endings; CI now runs on ubuntu + macOS + Windows and on the dev branch (first matrix run in progress).
 - Release notes meta line removed on main (f5506d2).
 - **A/B run 1 done** ($3.33 total): `aggressive` built the feature (4 steps, 6/6 tests, $1.12); `off` and `safe` stopped before any step on an assumed value → a run-plan prompt defect, fixed on the branch (assumed defaults are not blockers). Run archived as evidence. Worker now hardening the runner (pinned `--model`, "no work done" rows out of the deltas, exact per-model split). Re-run after that.
 
