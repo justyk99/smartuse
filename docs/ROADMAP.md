@@ -18,12 +18,11 @@
 - [ ] The subagentStatusLine verified live on the laptop (runtime loading of plugin settings)
 - [ ] until-done on Windows: `--trust` pin path without /etc (pins under a root-equivalent the user owns: documented, not faked)
 
-## 0.6.0 — the audit's list (filled from `smartuse-1.0-audit`)
-- [ ] hook correctness/security findings
-- [ ] portability findings beyond Windows
-- [ ] docs-vs-code mismatches
-- [ ] skill prompt fixes + eval cases for status, run-plan, ledger
-- [ ] first-run gaps (adapter, state dir, `check:` requirement, what the hooks write)
+## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches
+- [ ] hooks core (worker): the until-done gate holds until done or max_blocks (it yielded after one push per prompt); check runner finds npm/pnpm/yarn on Windows and stops after one "not found" block; state dir keyed by full path (two same-named repos shared one routing.json); UTF-8 stdin; Windows-safe status.json replace; no receipts after a run closed
+- [ ] guards (worker): bash-guard rules widened (sudo in if/for/subshell, `bash -c "$(curl …)"`, `git -C … push --force`, `+refspec`, key names without a directory prefix, Windows path spellings, echo-mention false positive); file-guard case-insensitive and normalised; UTF-8 stdin; PYTHONUTF8 in the launcher
+- [ ] skills + docs (worker): `$ARGUMENTS` in the three `!` lines (the `${1:-}` form was refused in default permission mode); make-prompt hands off to run-plan; living-docs writes its receipt and declares its tools; run-plan allowed-tools + headless example + accepted `check:` shapes; status legend; self-check 14; three new eval cases; README/CHANGELOG/CONTRIBUTING counts and claims; `hooks/tests/all.sh`
+- [x] repo: `.gitattributes` (LF), CI matrix ubuntu/macOS/Windows and on the dev branch
 
 ## 1.0 — public
 - [ ] "30 days of receipts": the measured post with the A/B table and the ledger medians
