@@ -9,12 +9,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Python syntax (all hooks + scripts)
-        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/file-guard.py plugins/smartuse/hooks/ledger.py plugins/smartuse/hooks/until-done.py scripts/term-scan.py
+        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/file-guard.py plugins/smartuse/hooks/ledger.py plugins/smartuse/hooks/until-done.py scripts/term-scan.py bench/ab-report.py
       - name: JSON manifests parse
         run: |
           python3 -c "import json; json.load(open('.claude-plugin/marketplace.json')); json.load(open('plugins/smartuse/.claude-plugin/plugin.json')); json.load(open('plugins/smartuse/hooks/hooks.json'))"
       - name: Shell syntax
-        run: for f in plugins/smartuse/hooks/tests/*.sh bench/run.sh; do bash -n "$f"; done
+        run: for f in plugins/smartuse/hooks/tests/*.sh bench/run.sh bench/ab.sh bench/fake-claude.sh bench/tests/ab-test.sh; do bash -n "$f"; done
       - name: bash-guard regression
         run: bash plugins/smartuse/hooks/tests/run.sh
       - name: file-guard regression
@@ -23,6 +23,8 @@ jobs:
         run: bash plugins/smartuse/hooks/tests/ledger-test.sh
       - name: until-done gate regression
         run: bash plugins/smartuse/hooks/tests/until-done-test.sh
+      - name: A/B runner dry run (fake claude, spends nothing)
+        run: bash bench/tests/ab-test.sh
       - name: term scan (generic patterns; the private list is never in the repo)
         run: python3 scripts/term-scan.py || echo "::warning::term-scan found hits — see the job log"
   validate:
