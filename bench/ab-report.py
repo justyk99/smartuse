@@ -219,6 +219,11 @@ def median(xs):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):   # the report has "·" and "→": on Windows a pipe defaults to cp1252
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     if not os.path.isdir(out):
         print(f"ab-report: not a directory: {out}", file=sys.stderr)
