@@ -12,7 +12,8 @@ two repos that share a folder name no longer share one status file. status.json 
 the line and the Stop rule below) read, in that keyed dir only: the 0.3.0 dir keyed by the folder name alone, projects/<folder
 name>/, is shared by every repo of that name and is never used, even while the keyed dir does not exist. The file holds:
   session_id · started (first event of the session) · updated (every event) · source (SessionStart's source) ·
-  turn (UserPromptSubmit count) · turn_ended (Stop sets it; UserPromptSubmit / PreToolUse / PostToolUse clear it) ·
+  turn (UserPromptSubmit count) · prompt_at (the time of the last UserPromptSubmit) ·
+  turn_ended (Stop sets it; UserPromptSubmit / PreToolUse / PostToolUse clear it) ·
   waiting_since (when the wait on the human began: Stop, idle_prompt or permission_prompt; cleared when work resumes) ·
   tool_calls (this turn, reset on UserPromptSubmit) · tool_running {name, tool_use_id, since} (PreToolUse sets, any
   PostToolUse clears) · last_tool {name, at} · agents {agent_id: {type, since}} (SubagentStart adds, SubagentStop removes;
@@ -26,14 +27,23 @@ refuse the stop (active until_done run with units pending / running / fail, no n
 stop_hook_active plays no part, the gate ignores it too) — then the turn continues and the line stays "working".
 Parallel tool calls share one tool_running slot (the latest PreToolUse wins); the counters are best-effort under a lock.
 
+The wait gate's outcome (wait.json, written by wait-gate.py at every Stop that finds a hand-off open; see docs/notes/one-session-design.md,
+M2 / M3) is read at render time only, never by the hooks: when the turn is over (the "waiting on you" rule below) and wait.json is from
+this session (its session_id, when both have one, equals status.json's) and not older than the last UserPromptSubmit (status.json
+`prompt_at`, set on every UserPromptSubmit; a wait.json older than the owner's latest prompt is last turn's), its state decides the line:
+"stopped" / "blocked" -> "STOPPED · handed off <HH:MM> (<what>) — nothing will wake this session" (the session handed work to another one
+and nothing is armed to wake it: it is stopped, not waiting); "watching" -> "waiting on <what> · watcher armed <HH:MM>". HH:MM is the
+local clock. Anything else in wait.json (a state this file does not know, a file it cannot read) is ignored: the line says "waiting on you".
+
 Render (no model tokens):
   --line                 one line, first rule wins: NEEDS YOU (routing.json needs_human) · session ended · waiting on you:
-                         permission prompt · working · waiting on agent · working · <tool> running · waiting on you (turn ended,
+                         permission prompt · working · waiting on agent · working · <tool> running · STOPPED / waiting on <what>
+                         (turn ended or idle_prompt, and a current wait.json says so) · waiting on you (turn ended,
                          idle_prompt, or no prompt yet) · working · last <tool> (prefixed "stalled? " + "no activity <ago>" after SMARTUSE_STALL_MIN
                          minutes, default 5, without any event). Then "· step <id>/<n> <tier>·<model> "<title>"" when
                          routing.json has a running unit and "· loop block <blocks>/<max>" in an until-done run.
   --json                 status.json + "project" (folder name), "project_path", "state_dir", the derived "state" (needs_human |
-                         ended | waiting_on_you | waiting_on_agent | working | stalled | none) and "line".
+                         ended | waiting_on_you | waiting_on_agent | working | stopped | waiting_on_handoff | stalled | none) and "line".
   --statusline           for ~/.claude/settings.json statusLine: reads Claude Code's status JSON on stdin and prints
                          "[<model>] ctx <used>% · $<cost> · <line without the smartuse prefix>".
   --subagent-statusline  for the plugin's subagentStatusLine: one JSON line per task {"id", "content"}.
@@ -106,6 +116,17 @@ def since(ts, now):
 
 def oneline(text, n):
     return " ".join(str(text or "").split())[:n]
+
+
+def hhmm(ts):
+    """The local wall-clock time HH:MM of a stamp (the owner's clock, not UTC); "" when it cannot be read."""
+    t = parse_ts(ts)
+    if t is None:
+        return ""
+    try:
+        return t.astimezone().strftime("%H:%M")
+    except Exception:
+        return t.strftime("%H:%M")
 
 
 def to_int(v, default=0):
@@ -200,7 +221,7 @@ def unlock(fd):
 # ---------------------------------------------------------------- state machine
 
 def fresh(sid, now):
-    return {"session_id": sid, "started": iso(now), "updated": iso(now), "source": None, "turn": 0, "turn_ended": False,
+    return {"session_id": sid, "started": iso(now), "updated": iso(now), "source": None, "turn": 0, "prompt_at": None, "turn_ended": False,
             "waiting_since": None, "tool_calls": 0, "tool_running": None, "last_tool": None, "agents": {},
             "agents_done": 0, "notification": None, "ended": False, "end_reason": None}
 
@@ -260,6 +281,7 @@ def apply(st, ev, data, now, sdir):
     st["updated"] = iso(now)
     if ev == "UserPromptSubmit":
         st["turn"] = to_int(st.get("turn")) + 1
+        st["prompt_at"] = iso(now)
         st["tool_calls"] = 0
         st["tool_running"] = None
         resume(st)
@@ -344,6 +366,31 @@ def routing_suffix(r):
     return s
 
 
+def armed_at(w):
+    """HH:MM the watcher in wait.json was armed: its "watcher" is {kind, id, armed, state} (an ISO stamp under armed; at / since / started are
+    read too) or the stamp itself; a plain "HH:MM" string is shown as it is. "" when wait.json does not say."""
+    v = w.get("watcher")
+    if isinstance(v, dict):
+        v = next((v[k] for k in ("armed", "at", "since", "started") if v.get(k)), None)
+    if isinstance(v, str) and re.fullmatch(r"\d{1,2}:\d{2}", v.strip()):
+        return v.strip()
+    return hhmm(v) if isinstance(v, str) else ""
+
+
+def live_wait(sdir, st):
+    """wait.json (the wait gate's outcome) when it still describes this turn, else None: it must be a dict with a state this file knows
+    ("watching" | "stopped" | "blocked") and a readable "at", from this session (session_id, when both sides have one) and not older than
+    the last UserPromptSubmit (prompt_at; when status.json has none the stamp cannot say otherwise and the file counts)."""
+    w = read_dict(sdir / "wait.json")
+    if not w or w.get("state") not in ("watching", "stopped", "blocked"):
+        return None
+    at, sid, wsid = parse_ts(w.get("at")), st.get("session_id"), w.get("session_id")
+    if at is None or (sid and wsid and sid != wsid):
+        return None
+    pa = parse_ts(st.get("prompt_at"))
+    return None if pa is not None and at < pa else w
+
+
 def render(sdir, now=None, name=None):
     """-> {"state", "line" (with the smartuse prefix), "short" (without), "status"}; name = the repo folder name for the
     "no activity" line (the state dir's name by default, which is the path key)."""
@@ -373,7 +420,16 @@ def render(sdir, now=None, name=None):
         elif tr:
             state, body = "working", f"working · {tr.get('name') or 'tool'} running {since(tr.get('since'), now)}"
         elif st.get("turn_ended") or st.get("notification") == "idle_prompt":
-            state, body = "waiting_on_you", f"waiting on you · {since(st.get('waiting_since') or st.get('updated'), now)}"
+            w = live_wait(sdir, st)
+            what = oneline(w.get("what"), 60) if w else ""
+            if w and w["state"] in ("stopped", "blocked"):   # a hand-off is open and nothing is armed: not waiting, stopped
+                state = "stopped"
+                body = f"STOPPED · handed off {hhmm(w.get('since') or w.get('at')) or 'earlier'}" + (f" ({what})" if what else "") + " — nothing will wake this session"
+            elif w:
+                armed = armed_at(w)
+                state, body = "waiting_on_handoff", f"waiting on {what or 'the hand-off'} · watcher armed" + (f" {armed}" if armed else "")
+            else:
+                state, body = "waiting_on_you", f"waiting on you · {since(st.get('waiting_since') or st.get('updated'), now)}"
         elif not to_int(st.get("turn")) and not calls and not lt:
             state, body = "waiting_on_you", f"waiting on you · no prompt yet · {since(st.get('started') or st.get('updated'), now)}"
         else:

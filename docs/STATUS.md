@@ -10,12 +10,13 @@ Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisio
 
 ## In progress
 - Laptop: time a hook event with the remembering launcher. Its replies do not arrive by message: read from its transcript.
-- Next build: the wait gate + the `STOPPED` status line (M2, M3).
+- On the dev branch: the wait gate (`hooks/wait-gate.py`, a Stop hook: a hand-off with nothing armed to wake the session is blocked once; `wait_gate: off` in the adapter) and the `STOPPED` status line (M2, M3); `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 105 · ab 36 · watch 63 · wait 187`.
+- Next build: the one-session steering (M4).
 
 ## Blocked on YK
 - Release pages and tags for v0.3.0 and v0.4.0: one paste on the laptop (in the Brain's message of 2026-10-22 ~12:55 UTC).
-- LinkedIn post #2: his one line + "post", Friday 23 Oct 13:00 MYT (wake-up armed).
+- LinkedIn post #2: his one line + "post", Friday 23 Oct 13:00 MYT. A wake-up is armed, but it is the kind that was refused at delivery today: YK should not rely on it.
 
 ## Next (mine)
-- 0.5 in the design's order: `watch.py` → the wait gate + `STOPPED` status → the one-session steering (make-prompt, run-plan, README, two eval cases) → the paid-call guard.
-- Every hand-off to the laptop session gets a watcher: a scheduled check-in that reads its transcript (messages from it do not arrive).
+- 0.5 in the design's order: `watch.py` ✓ → the wait gate + `STOPPED` status ✓ → the one-session steering (make-prompt, run-plan, README, two eval cases) → the paid-call guard.
+- Every hand-off to the laptop session gets a watcher. Scheduled check-ins into this session were refused at delivery (2026-10-22 15:27, ACCESS_DENIED), so the watcher is an in-session background loop; messages from the laptop do not arrive either, its transcript is read instead.
