@@ -2,7 +2,8 @@
 # Self-contained test for hooks/ledger.py: synthetic transcript + pending.json -> one ledger line; SubagentStop -> one receipt
 # (tokens by model on the line and on the running plan step), none once the run is closed; --receipts summary with the
 # agent-output share by model; --json; the state dir keyed by the full path (the 0.3.0 folder-name dir: listed by --receipts, marked
-# as shared, never read by the hooks nor written); --state-dir [--create] (always the keyed dir); non-ASCII under cp1252.
+# as shared, never read by the hooks nor written); --state-dir [--create] (always the keyed dir); non-ASCII under cp1252;
+# the skills' state writes --put / --unit / --run / --get (keyed dir only, hook- and gate-owned fields kept, typed values).
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
@@ -186,6 +187,108 @@ OUT=$(cd "$D/sd2/old" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py
 same "$OUT" "$(wp "$E5")" && [ ! -e "$E5" ] && echo "PASS --state-dir: with only the 0.3.0 folder-name dir present (projects/old) it still prints the keyed dir, creates nothing" || { echo "FAIL --state-dir with projects/old present: printed '$OUT', expected '$E5' (exists: $([ -e "$E5" ] && echo yes || echo no))"; exit 1; }
 OUT=$(cd "$D/sd2/old" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" --state-dir --create)
 same "$OUT" "$(wp "$E5")" && [ -d "$E5" ] && [ -z "$(ls -A "$HOME/.claude/smartuse/projects/old")" ] && echo "PASS --state-dir --create with projects/old present: creates and prints the keyed dir, projects/old untouched" || { echo "FAIL --state-dir --create with projects/old present: printed '$OUT', keyed dir: $([ -d "$E5" ] && echo yes || echo no), projects/old: $(ls -A "$HOME/.claude/smartuse/projects/old")"; exit 1; }
+# --- the skills' state writes: --put / --unit / --run / --get. Claude Code treats ~/.claude/ as a sensitive path (Write / Edit there
+# prompt in default and acceptEdits mode and are denied headless), so the skills write pending.json / routing.json only through this
+# script, which their Bash(bash *) already runs. Run from the repo with CLAUDE_PROJECT_DIR unset, the way the Bash tool runs it; every
+# write must land in that repo's keyed dir and nowhere else (others() = every file under HOME outside the keyed dir, with its hash).
+mkdir -p "$D/st/proj"; PW6=$(wp "$D/st/proj"); K6=$(key "$PW6"); E6="$HOME/.claude/smartuse/projects/$K6"
+st() { ( cd "$D/st/proj" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" "$@" ); }
+others() { snap "$HOME" | tr ' ' '\n' | grep -vF ".claude/smartuse/projects/$K6/" || true; }
+O0=$(others); [ ! -e "$E6" ] || { echo "FAIL $E6 exists before the first --put"; exit 1; }
+# the skills' form: the JSON as ONE single-quoted argument (Claude Code's Bash check refuses a JSON heredoc in default mode)
+PJ='{"skill":"make-prompt","task":"Á中文","mode":"quick","started_at":"2026-01-01T00:00:00Z","notes":"sudo and git push --force are only text here"}'
+RC=0; OUT=$(st --put pending.json "$PJ" < /dev/null 2>&1) || RC=$?
+[ "$RC" = 0 ] && [ "${OUT%% → *}" = "put pending.json" ] && same "${OUT#* → }" "$(wp "$E6/pending.json")" && py - "$E6/pending.json" "$PJ" <<'PY' && echo "PASS --put pending.json '<json>': the one JSON argument (Á中文 kept) -> the keyed dir, created; prints 'put pending.json → <path>'" || { echo "FAIL --put pending.json '<json>': exit $RC, printed '$OUT'"; exit 1; }
+import json,sys; p=json.load(open(sys.argv[1],encoding="utf-8")); assert p==json.loads(sys.argv[2]) and p["task"]=="Á中文", p
+PY
+rm "$E6/pending.json"
+RC=0; OUT=$(printf '%s\n' "$PJ" | PYTHONIOENCODING=cp1252 st --put pending.json 2>&1) || RC=$?
+[ "$RC" = 0 ] && [ "${OUT%% → *}" = "put pending.json" ] && py - "$E6/pending.json" "$PJ" <<'PY' && echo "PASS --put pending.json < stdin (a pipe or heredoc): bytes read as UTF-8 (Á中文 under PYTHONIOENCODING=cp1252), same file" || { echo "FAIL --put pending.json from stdin: exit $RC, printed '$OUT'"; exit 1; }
+import json,sys; p=json.load(open(sys.argv[1],encoding="utf-8")); assert p==json.loads(sys.argv[2]), p
+PY
+S0=$(snap "$E6"); rc=""
+for bad in '{"skill": "make-prompt", "task":' '["not", "an", "object"]' '{"started_at": NaN}' ''; do RC=0; OUT=$(printf '%s' "$bad" | st --put pending.json 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"; done
+RC=0; OUT=$(st --put pending.json '{"a": 1}' '{"b": 2}' < /dev/null 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"
+RC=0; OUT=$(st --put routing.json '{"units": [{"id": 1}, {"id": 1}]}' < /dev/null 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"
+RC=0; OUT=$(printf '%s' '{"units": {"id": 1}}' | st --put routing.json 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"
+RC=0; OUT=$(st --put status.json '{"a": 1}' < /dev/null 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"
+[ "$rc" = " 1:put refused 1:put refused 1:put refused 1:put refused 1:put refused 1:put refused 1:put refused 1:put refused" ] && [ "$(snap "$E6")" = "$S0" ] && echo "PASS --put refuses bad JSON, a non-object, NaN, empty input, two JSON arguments, units that are not a list of objects or repeat an id, and a file other than pending.json / routing.json: 'put refused: …', exit 1, nothing written" || { echo "FAIL --put refusals: '$rc' · $(snap "$E6")"; exit 1; }
+cat > "$D/plan.json" <<'JSON'
+{"active": true, "task": "st-run", "dial": "safe", "started_at": "2026-02-01T00:00:00Z", "until_done": true, "units": [
+ {"id": 1, "title": "decide", "tier": "judgment", "model": "session", "status": "pass"},
+ {"id": 2, "title": "build route", "tier": "build", "model": "opus", "why": "has a test", "status": "pending", "check": null},
+ {"id": 3, "title": "force-push cleanup with sudo", "tier": "mechanical", "model": "haiku", "status": "pending"}]}
+JSON
+RC=0; OUT=$(st --put routing.json "$(cat "$D/plan.json")" < /dev/null 2>&1) || RC=$?
+[ "$RC" = 0 ] && [ "${OUT%% → *}" = "put routing.json" ] && same "${OUT#* → }" "$(wp "$E6/routing.json")" && py - "$E6/routing.json" "$D/plan.json" <<'PY' && echo "PASS --put routing.json '<json>': the plan (a multi-line argument) lands in the keyed dir as given" || { echo "FAIL --put routing.json: exit $RC, printed '$OUT'"; exit 1; }
+import json,sys; assert json.load(open(sys.argv[1],encoding="utf-8"))==json.load(open(sys.argv[2],encoding="utf-8"))
+PY
+# step 2 runs: the real SubagentStop hook attaches the agent's tokens to it, the real until-done gate blocks once (blocks, last_block);
+# then the plan is put again for the SAME run (same task + started_at) — those fields are kept unless the new JSON sets them
+OUT=$(st --unit 2 status=running)
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s6\",\"agent_id\":\"st1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW6\"}" | CLAUDE_PROJECT_DIR="$PW6" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s6\",\"cwd\":\"$PW6\"}" | CLAUDE_PROJECT_DIR="$PW6" py "$H/until-done.py" > /dev/null
+py - "$D/plan.json" "$D/plan2.json" <<'PY'
+import json,sys; r=json.load(open(sys.argv[1],encoding="utf-8")); r["units"][1].update(status="pass", agent_calls=7); r["units"][2]["status"]="running"; json.dump(r,open(sys.argv[2],"w",encoding="utf-8"))
+PY
+st --put routing.json "$(cat "$D/plan2.json")" < /dev/null > /dev/null
+py - "$E6/routing.json" <<'PY' || { echo "FAIL hook-owned fields lost on a re-put of the same run"; exit 1; }
+import json,sys; r=json.load(open(sys.argv[1],encoding="utf-8")); u=r["units"][1]
+assert u["status"]=="pass" and u["agent_calls"]==7, u   # the new JSON set agent_calls: it wins
+assert u["agent_input"]==3316 and u["agent_output"]==2004 and u["agents"]==["st1"] and u["agent_models"]==["m-a","m-b"], u
+assert u["agent_by_model"]=={"m-a":{"calls":4,"input":2317,"output":1005},"m-b":{"calls":1,"input":999,"output":999}}, u
+assert r["blocks"]==1 and r["last_block"] and r["units"][2]["status"]=="running" and "agent_output" not in r["units"][2], r
+print("PASS --put routing.json again for the same run keeps the SubagentStop tokens on step 2 (agent_input / output / models / by_model / agents) and the gate's blocks + last_block; a field the new JSON sets (agent_calls 7) wins")
+PY
+RC=0; OUT=$(st --unit 2 status=pass verify='no gaps' escalated=true budget_turns=15 'files=["src/a.js","src/b.js"]' 'override={"from":"mechanical","to":"build","by":"user"}' 'check=12 passing' blocked_by=null 2>&1) || RC=$?
+[ "$RC" = 0 ] && echo "$OUT" | grep -qF 'unit 2/3 · build·opus · pass · verify no gaps · escalated · override mechanical→build · "build route"' && py - "$E6/routing.json" <<'PY' && echo "PASS --unit 2 key=value …: merged into step 2 only, values typed as JSON when they parse (true, 15, a list, an object, null) else text; agent_* untouched; prints the step's line" || { echo "FAIL --unit merge: exit $RC, printed '$OUT'"; exit 1; }
+import json,sys; r=json.load(open(sys.argv[1],encoding="utf-8")); u=r["units"][1]
+assert u["status"]=="pass" and u["verify"]=="no gaps" and u["escalated"] is True and u["budget_turns"]==15 and isinstance(u["budget_turns"],int), u
+assert u["files"]==["src/a.js","src/b.js"] and u["override"]=={"from":"mechanical","to":"build","by":"user"} and u["check"]=="12 passing" and u["blocked_by"] is None, u
+assert u["agent_output"]==2004 and u["agent_calls"]==7 and r["units"][0]=={"id":1,"title":"decide","tier":"judgment","model":"session","status":"pass"} and r["units"][2]["status"]=="running", r
+PY
+S1=$(snap "$E6"); rc=""
+RC=0; OUT=$(st --unit 9 status=pass 2>&1) || RC=$?; rc="$rc $RC:$OUT"
+RC=0; OUT=$(st --unit 2 agent_output=0 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"
+RC=0; OUT=$(st --unit 2 status 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"
+[ "$rc" = " 1:unit refused: no unit 9 in routing.json (units: 1, 2, 3) 1:unit refused 1:unit refused" ] && [ "$(snap "$E6")" = "$S1" ] && echo "PASS --unit refuses an unknown id (names the known ones), a hook-owned field (agent_output) and a word without '=': exit 1, routing.json unchanged" || { echo "FAIL --unit refusals: '$rc'"; exit 1; }
+RC=0; OUT=$(st --run needs_human='which rounding rule?' active=false 2>&1) || RC=$?
+[ "$RC" = 0 ] && echo "$OUT" | grep -qF "run st-run · dial safe · closed · until-done · steps 2 pass · 0 blocked · 1 open · needs_human: which rounding rule?" && py - "$E6/routing.json" <<'PY' && echo "PASS --run key=value …: top-level fields (needs_human as text, active=false as a boolean), the steps and the gate's blocks untouched; prints the run's line" || { echo "FAIL --run: exit $RC, printed '$OUT'"; exit 1; }
+import json,sys; r=json.load(open(sys.argv[1],encoding="utf-8"))
+assert r["needs_human"]=="which rounding rule?" and r["active"] is False and r["blocks"]==1 and [u["status"] for u in r["units"]]==["pass","pass","running"], r
+PY
+S2=$(snap "$E6"); rc=""
+for kv in blocks=0 last_block=null check_error=null 'units=[]' oops; do RC=0; OUT=$(st --run "$kv" 2>&1) || RC=$?; rc="$rc $RC:${OUT%%:*}"; done
+RC=0; OUT=$(cd "$D/sd/fresh" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" --run active=false 2>&1) || RC=$?; rc="$rc $RC:${OUT%% in *}"
+[ "$rc" = " 1:run refused 1:run refused 1:run refused 1:run refused 1:run refused 1:run refused: no routing.json" ] && [ "$(snap "$E6")" = "$S2" ] && [ ! -e "$E4/routing.json" ] && echo "PASS --run refuses the gate's blocks / last_block / check_error, units (that is --put or --unit) and a word without '='; with no routing.json it refuses and creates none" || { echo "FAIL --run refusals: '$rc'"; exit 1; }
+st --get routing.json > "$D/got.json"; ( cd "$D" && CLAUDE_PROJECT_DIR="$PW6" py "$H/ledger.py" --get pending.json ) > "$D/gotp.json"
+mkdir -p "$D/st/none"; K7=$(key "$(wp "$D/st/none")"); OUT=$(cd "$D/st/none" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" --get routing.json)
+[ "$OUT" = "{}" ] && [ ! -e "$HOME/.claude/smartuse/projects/$K7" ] && py - "$D/got.json" "$E6/routing.json" "$D/gotp.json" <<'PY' && echo "PASS --get routing.json / pending.json prints the stored file (CLAUDE_PROJECT_DIR wins over the cwd); {} for a repo with no state, creating nothing" || { echo "FAIL --get: printed '$OUT' for a repo without state"; exit 1; }
+import json,sys; assert json.load(open(sys.argv[1],encoding="utf-8"))==json.load(open(sys.argv[2],encoding="utf-8")); assert json.load(open(sys.argv[3],encoding="utf-8"))["task"]=="Á中文"
+PY
+[ "$(others)" = "$O0" ] && [ -z "$(ls -A "$D/st/proj")" ] && echo "PASS every --put / --unit / --run / --get above wrote in the keyed dir only: no other file under HOME changed, nothing in the repo" || { echo "FAIL a state write landed outside $E6"; others; ls -A "$D/st/proj"; exit 1; }
+# the hooks read what --put wrote: run-plan's close (--run active=false above, then --put pending.json) -> the Stop hook writes the ledger
+# line and archives routing.json with its tokens; the next run's plan (another started_at) then starts clean over the closed run's file
+st --put pending.json '{"skill":"run-plan","task":"st-run","mode":"safe","started_at":"2026-02-01T00:00:00Z","self_check":"2/3"}' < /dev/null > /dev/null
+echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s6\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW6\"}" | CLAUDE_PROJECT_DIR="$PW6" py "$H/ledger.py"
+py - "$L" "$E6" <<'PY' || { echo "FAIL the Stop hook did not consume the --put pending.json / archive the run"; ls -R "$E6"; exit 1; }
+import json,sys,pathlib; r=json.loads(open(sys.argv[1],encoding="utf-8").read().splitlines()[-1]); E=pathlib.Path(sys.argv[2])
+assert r["skill"]=="run-plan" and r["task"]=="st-run" and r["session_id"]=="s6" and r["self_check"]=="2/3", r
+a=json.load(open(E/"runs"/"2026-02-01T00-00-00Z_st-run.json",encoding="utf-8")); assert not (E/"pending.json").exists()
+assert a["active"] is False and a["closed_at"] and a["needs_human"]=="which rounding rule?" and a["units"][1]["agent_output"]==2004 and a["units"][1]["verify"]=="no gaps", a
+print("PASS the Stop hook reads what --put wrote: the run-plan pending.json becomes the ledger line, routing.json is archived under runs/ with step 2's tokens")
+PY
+py - "$D/plan.json" "$D/plan3.json" <<'PY'
+import json,sys; r=json.load(open(sys.argv[1],encoding="utf-8")); r["started_at"]="2026-03-01T00:00:00Z"; json.dump(r,open(sys.argv[2],"w",encoding="utf-8"))
+PY
+st --put routing.json < "$D/plan3.json" > /dev/null   # stdin works for a plan too
+py - "$E6/routing.json" <<'PY' || { echo "FAIL a new run inherited the closed run's tokens or block count"; exit 1; }
+import json,sys; r=json.load(open(sys.argv[1],encoding="utf-8"))
+assert r["started_at"]=="2026-03-01T00:00:00Z" and r["active"] is True and not any(k in r for k in ("blocks","last_block","check_error","needs_human")), r
+assert not any(k.startswith("agent") for u in r["units"] for k in u), r["units"]
+print("PASS --put routing.json for a new run (another started_at) over the closed run's file starts clean: no blocks, no needs_human, no agent tokens carried over")
+PY
+[ "$(others | grep -vF '.claude/smartuse/ledger.jsonl:')" = "$(echo "$O0" | grep -vF '.claude/smartuse/ledger.jsonl:')" ] && [ -z "$(ls -A "$D/st/proj")" ] && [ -z "$(ls -A "$E6" | grep '\.tmp$')" ] && echo "PASS after the whole run only the keyed dir (and the Stop hook's ledger line) changed; no .tmp file left behind" || { echo "FAIL files changed outside $E6 or a .tmp was left: $(ls -A "$E6")"; exit 1; }
 # the hook reads the MSYS path form too: on Windows "/c/Users/x/t.jsonl" inside the event JSON (Git Bash converts arguments and
 # environment variables, not JSON strings) is opened as "C:/Users/x/t.jsonl"; "/tmp/..." and "C:/..." are left alone, elsewhere nothing changes
 py - "$H/ledger.py" <<'PY'
