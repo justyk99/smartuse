@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""file-guard.py — PreToolUse guard for Write / Edit / MultiEdit: two files are human-only.
+"""file-guard.py — PreToolUse guard for Write / Edit / MultiEdit / NotebookEdit: two files are human-only.
 `.claude/smartuse.local.md` (the adapter: it names the check command the until-done gate will run) and
 `/etc/smartuse/trusted-checks.json` (the human's hash pins, root-owned: until-done.py TRUSTED). The model may read them, never write them.
 The path is normalised before the match (backslashes, `x/..`, case): APFS and NTFS are case-insensitive, so
