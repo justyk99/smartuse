@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: status-line
+description: The status skill quotes the heartbeat line verbatim, explains its state words, and invents no agent, tool or step.
+tags: [status, heartbeat]
+runs: 1
+max_turns: 4
+allowed_tools: [Bash, Skill]

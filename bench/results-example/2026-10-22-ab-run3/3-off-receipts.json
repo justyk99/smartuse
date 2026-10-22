@@ -1,0 +1,128 @@
+{
+  "active": false,
+  "task": "persistent-store-decision",
+  "dial": "off",
+  "until_done": true,
+  "started_at": "2026-10-22T08:02:10Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Audit table: every db read/write, file:line, sync/async, change per option",
+      "tier": "mechanical",
+      "model": "opus",
+      "why": "grep inventory with a countable check; routing off keeps it on the session model",
+      "budget_turns": 15,
+      "check": "grep hits: 7, table usage rows: 7; npm test 2 passed",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 6,
+      "agent_input": 159951,
+      "agent_output": 5982,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "abaf12d126485423c"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 6,
+          "input": 159951,
+          "output": 5982
+        }
+      },
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/audit.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Requirements check: persistence, instances, deploy target, concurrency",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design input; most answers are user unknowns",
+      "budget_turns": 5,
+      "check": "9 requirements: 2 answered, 3 assumed, 4 unknown -> user",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/requirements.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Decision note docs/features/persistent-store/DEV.md (options table + recommendation)",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design options + money type = judgment tier",
+      "budget_turns": 10,
+      "check": "6/6 rabbit holes named in DEV.md; npm test 2 passed",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        "docs/features/persistent-store/DEV.md"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Hand-off for the orders.js owner (interface change)",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "another developer's file; doc only, no edit",
+      "budget_turns": 5,
+      "check": "git diff --stat: orders.js unchanged",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/handoff-orders-owner.md"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Phased migration plan + test plan (separate task folder)",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "plan writing; needs the approved engine and the owner's name",
+      "budget_turns": 10,
+      "check": "blocked: gate 3 approval + orders.js owner (Q3)",
+      "blocked_by": "gate 3 (user approves engine) + § 7 Q3 (orders.js owner)",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "Task folder ticks + decisions.md lines (living-docs runs after the user's commit)",
+      "tier": "mechanical",
+      "model": "opus",
+      "why": "doc bookkeeping",
+      "budget_turns": 5,
+      "check": "4 dated lines in decisions.md; task.md ticked",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/decisions.md",
+        ".task/ACTIVE/persistent-store-decision/task.md"
+      ]
+    }
+  ],
+  "needs_human": "Approve better-sqlite3 (gate 3)? It assumes one instance on a host with a persistent disk (§ 7 Q1) -- answer: where it runs + instance count, and who owns src/routes/orders.js (Q3).",
+  "closed_at": "2026-10-22T08:05:46Z"
+}

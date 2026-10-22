@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: run-plan-no-task
+description: run-plan on a task.md that does not exist stops and points to make-prompt instead of inventing a plan, a routing table or an agent run.
+tags: [run-plan]
+runs: 1
+max_turns: 6
+allowed_tools: [Read, Glob, Skill]

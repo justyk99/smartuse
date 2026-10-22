@@ -1,0 +1,165 @@
+{
+  "active": false,
+  "task": "persistent-store-decision",
+  "dial": "aggressive",
+  "until_done": true,
+  "started_at": "2026-10-22T08:10:15Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Audit table of every db read/write",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "grep inventory of 2 route files; row count checkable against grep",
+      "budget_turns": 12,
+      "check": "grep total 5 == 5 table rows",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 5,
+      "agent_input": 123670,
+      "agent_output": 7198,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "a493c6d018048bdae"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 5,
+          "input": 123670,
+          "output": 7198
+        }
+      },
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/audit.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Requirements check (restart, instances, deploy, concurrency, Node)",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "answers vs unknowns drive the engine choice; no check runnable",
+      "budget_turns": 0,
+      "check": "9 requirements: 4 answered, 1 assumed, 4 unknown→user (R6 non-blocking)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/requirements.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Decision note docs/features/persistent-store/DEV.md",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design options + money type + another dev's file",
+      "budget_turns": 0,
+      "check": "grep: all 6 rabbit holes + Node 20/22 + lockfile present in DEV.md",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        "docs/features/persistent-store/DEV.md"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Hand-off for the orders.js owner",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "interface change in another person's file (rule gate)",
+      "budget_turns": 0,
+      "check": "handoff names orders.js:12, :16, :22 (all audit rows for orders.js)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/handoff-orders-owner.md"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Phased migration plan in separate task folder",
+      "tier": "build",
+      "model": "sonnet",
+      "why": "well-specified doc from the approved-draft decision; section grep is the check",
+      "budget_turns": 15,
+      "check": "13/13 section greps >= 1; verify: 6 gaps → 5 fixed, 3 open (listed in plan)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps open",
+      "agent_calls": 13,
+      "agent_input": 348802,
+      "agent_output": 13029,
+      "agent_models": [
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "aedcc01e1fdaeadab",
+        "acae86e44a24e504b",
+        "a9c188a628523ffa8",
+        "adf8c7af1b05a5b97"
+      ],
+      "agent_by_model": {
+        "claude-sonnet-5-5": {
+          "calls": 13,
+          "input": 348802,
+          "output": 13029
+        }
+      },
+      "files": [
+        ".task/ACTIVE/persistent-store-migration/task.md"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Task folder + decisions.md + USER.md update",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "doc updates with a grep check",
+      "budget_turns": 10,
+      "check": "6 DRAFT lines; 0 placeholders; 10 markers intact",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 4,
+      "agent_input": 104163,
+      "agent_output": 3798,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "abb84afc5e5e6ae69"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 4,
+          "input": 104163,
+          "output": 3798
+        }
+      },
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/decisions.md",
+        "docs/features/persistent-store/USER.md"
+      ]
+    }
+  ],
+  "needs_human": "Will the API run as ONE instance on a host with a persistent writable disk? (yes → approve better-sqlite3; no/more than one → switch to pg)",
+  "closed_at": "2026-10-22T08:18:19Z"
+}

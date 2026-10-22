@@ -1,0 +1,4 @@
+# Checked out LF everywhere: bash refuses CRLF scripts, and a default Git for Windows clone (core.autocrlf=true) would ship them that way.
+* text=auto eol=lf
+*.gif binary
+*.png binary
