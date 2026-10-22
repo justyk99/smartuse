@@ -2,8 +2,10 @@
 # Self-contained test for hooks/until-done.py (Stop gate of run-plan --until-done). Exit 1 on failure.
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse/projects/proj" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
-R="$HOME/.claude/smartuse/projects/proj/routing.json"; IN="{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"cwd\":\"$D/proj\",\"stop_hook_active\":false}"
-run() { echo "$IN" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/until-done.py"; }
+wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
+PW=$(wp "$D/proj")   # the project path as it goes into the event JSON and CLAUDE_PROJECT_DIR
+R="$HOME/.claude/smartuse/projects/proj/routing.json"; IN="{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"cwd\":\"$PW\",\"stop_hook_active\":false}"
+run() { echo "$IN" | CLAUDE_PROJECT_DIR="$PW" py "$H/until-done.py"; }
 fresh() { echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pass"}]}' > "$R"; }
 fail=0; expect() { # $1 block|allow, $2 label
   out=$(run); if [ "$1" = block ]; then [ -n "$out" ] && echo "PASS block: $2" || { echo "FAIL expected block: $2"; fail=1; }; else [ -z "$out" ] && echo "PASS allow: $2" || { echo "FAIL expected allow: $2 -> $out"; fail=1; }; fi; }
@@ -35,5 +37,5 @@ echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"ne
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"blocks":6}' > "$R"; expect allow "max_blocks reached"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}]}' > "$R"; expect block "pending again (counts a block)"
 py -c "import json,sys; r=json.load(open(sys.argv[1])); assert r.get('blocks')==1, r" "$R" 2>/dev/null && echo "PASS block counter persisted" || { echo "FAIL block counter"; fail=1; }
-out=$(echo "${IN/false/true}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/until-done.py"); [ -z "$out" ] && echo "PASS allow: stop_hook_active" || { echo "FAIL stop_hook_active"; fail=1; }
+out=$(echo "${IN/false/true}" | CLAUDE_PROJECT_DIR="$PW" py "$H/until-done.py"); [ -z "$out" ] && echo "PASS allow: stop_hook_active" || { echo "FAIL stop_hook_active"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

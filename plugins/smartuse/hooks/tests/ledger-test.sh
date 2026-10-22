@@ -3,7 +3,8 @@
 # (tokens by model on the line and on the running plan step); --receipts summary with the agent-output share by model; --json.
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj" "$HOME/.claude/smartuse/projects/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
-T="$D/t.jsonl"
+wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
+T="$D/t.jsonl"; TW=$(wp "$T"); PW=$(wp "$D/proj")   # TW / PW go into the event JSON and CLAUDE_PROJECT_DIR; T and $D/proj stay for the shell itself
 printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:10Z","message":{"model":"m-a","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":10}}}' \
  '{"type":"assistant","timestamp":"2026-01-01T00:00:20Z","message":{"model":"m-a","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":0}}}' \
  '{"type":"assistant","timestamp":"2025-12-31T23:00:00Z","message":{"model":"m-b","usage":{"input_tokens":999,"output_tokens":999}}}' \
@@ -14,7 +15,7 @@ printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:10Z","message":
  '{"type":"assistant","timestamp":"2026-01-01T00:00:41Z","message":{"id":"grow","model":"m-a","usage":{"input_tokens":2,"output_tokens":900,"cache_read_input_tokens":100}}}' > "$T"
 mkdir -p "$D/t/subagents"; printf '%s\n' '{"type":"assistant","timestamp":"2026-01-01T00:00:50Z","message":{"id":"sub1","model":"m-fork","usage":{"input_tokens":7,"output_tokens":70}}}' '{"type":"assistant","timestamp":"2025-12-31T00:00:00Z","message":{"id":"old","model":"m-fork","usage":{"input_tokens":1,"output_tokens":1}}}' > "$D/t/subagents/agent-x.jsonl"
 echo '{"skill":"make-prompt","task":"t","mode":"quick","started_at":"2026-01-01T00:00:00Z","self_check":"13/13"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
-echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 L="$HOME/.claude/smartuse/ledger.jsonl"; [ -f "$L" ] || { echo "FAIL no ledger"; exit 1; }
 py - "$L" <<'PY'
 import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1])
@@ -23,27 +24,27 @@ print("PASS stop: main + forked-subagent usage after started_at summed; earlier 
 PY
 [ -f "$HOME/.claude/smartuse/projects/proj/pending.json" ] && { echo "FAIL pending not removed"; exit 1; } || echo "PASS pending removed"
 echo '{"active":true}' > "$HOME/.claude/smartuse/projects/proj/routing.json"
-echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 grep -q '"agent_id": "a1"' "$HOME/.claude/smartuse/projects/proj/receipts.jsonl" && echo "PASS subagent receipt written" || { echo "FAIL receipt"; exit 1; }
-echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 [ "$(grep -c '"agent_id": "a1"' "$HOME/.claude/smartuse/projects/proj/receipts.jsonl")" = 1 ] && echo "PASS second SubagentStop for the same agent -> no duplicate" || { echo "FAIL duplicate receipt"; exit 1; }
-echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 [ "$(wc -l < "$L" | tr -d ' ')" = 1 ] && echo "PASS no pending -> no new line" || { echo "FAIL wrote without pending"; exit 1; }
 echo '{"skill":"living-docs","task":"future","mode":"update","started_at":"2099-01-01T00:00:00Z"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
-echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s3\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s3\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 py - "$L" <<'PY'
 import json,sys; r=json.loads(open(sys.argv[1]).read().splitlines()[-1]); assert r["task"]=="future" and 840 <= r["duration_s"] <= 960 and "future" in (r.get("notes") or ""), r
 print("PASS future started_at -> 15-minute window, note added")
 PY
 # two Stop hooks at once (user-level + plugin copy) must produce ONE line
 echo '{"skill":"make-prompt","task":"race","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' > "$HOME/.claude/smartuse/projects/proj/pending.json"
-IN="{\"hook_event_name\":\"Stop\",\"session_id\":\"s2\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}"
-( echo "$IN" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" ) & ( echo "$IN" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" ) & wait
+IN="{\"hook_event_name\":\"Stop\",\"session_id\":\"s2\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}"
+( echo "$IN" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" ) & ( echo "$IN" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" ) & wait
 [ "$(grep -c '"task": "race"' "$L")" = 1 ] && echo "PASS concurrent hooks -> one line" || { echo "FAIL duplicate line from concurrent hooks"; exit 1; }
 # --- receipt per plan step: the agent's tokens land on the unit that is "running" in routing.json
 P="$HOME/.claude/smartuse/projects/proj"
 echo '{"active":true,"task":"csv-export","dial":"safe","started_at":"2026-01-01T00:00:00Z","until_done":true,"units":[{"id":1,"title":"decide","tier":"judgment","model":"session","status":"pass"},{"id":2,"title":"build route","tier":"build","model":"opus","why":"has a test","status":"running","check":"npm test"},{"id":3,"title":"tests","tier":"build","model":"opus","status":"pending"}]}' > "$P/routing.json"
-echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"b1\",\"agent_transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"b1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 py - "$P" <<'PY'
 import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); r=json.load(open(P/"routing.json")); u=r["units"][1]
 assert u["agent_calls"]==5 and u["agent_output"]==2004 and u["agent_input"]==3316 and u["agents"]==["b1"] and u["agent_models"]==["m-a","m-b"], u
@@ -55,7 +56,7 @@ BM={"m-a":{"calls":4,"input":2317,"output":1005},"m-b":{"calls":1,"input":999,"o
 assert line["by_model"]==BM, line; assert u["agent_by_model"]==BM, u
 print("PASS SubagentStop -> tokens attached to the running step (unit 2), receipt line carries unit; by_model on the line = agent_by_model on the step")
 PY
-echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"b2\",\"agent_transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"b2\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 py - "$P" <<'PY'
 import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); u=json.load(open(P/"routing.json"))["units"][1]
 assert u["agent_calls"]==10 and u["agent_output"]==4008 and u["agents"]==["b1","b2"], u
@@ -65,7 +66,7 @@ PY
 py - "$P" <<'PY'
 import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); r=json.load(open(P/"routing.json")); r["units"][2]["status"]="running"; json.dump(r,open(P/"routing.json","w"))
 PY
-echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"c1\",\"agent_transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"c1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 py - "$P" <<'PY'
 import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); r=json.load(open(P/"routing.json"))
 assert r["units"][1]["agent_calls"]==10 and r["units"][2].get("agent_calls") is None, r
@@ -75,20 +76,20 @@ PY
 py - "$P" <<'PY'
 import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); r=json.load(open(P/"routing.json")); r["units"][1]["status"]="pass"; r["units"][1]["verify"]="no gaps"; r["units"][2]["status"]="blocked"; r["units"][2]["override"]={"from":"mechanical","to":"build","by":"user"}; json.dump(r,open(P/"routing.json","w"))
 PY
-OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" --receipts)
+OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts)
 echo "$OUT" | grep -q "| 2 | build route | build | opus |  | pass |  | no gaps | 10 | 6.6k | 4.0k | npm test |" && echo "$OUT" | grep -q "| 3 | tests | build | opus | mechanical→build | blocked |" && echo "$OUT" | grep -q "steps 2 pass · 1 blocked · 0 open" && echo "PASS --receipts: one row per plan step with tier, model, override, outcome, verify, tokens" || { echo "FAIL --receipts output:"; echo "$OUT"; exit 1; }
 # share of all agent output tokens (floor): m-a 2010 of 4008 = 50%, m-b 1998 of 4008 = 49%; the larger share first; the old "delegated out" wording is gone
 echo "$OUT" | grep -q "agent tokens in 6.6k / out 4.0k · agent out by model: m-a 50% · m-b 49%" && ! echo "$OUT" | grep -q "delegated out" && echo "PASS --receipts summary: agent output share by model, largest first (m-a 50% · m-b 49%)" || { echo "FAIL by-model summary line:"; echo "$OUT"; exit 1; }
 # run-plan close -> the Stop hook archives routing.json under runs/ so /smartuse:receipts <task> finds it later
 echo '{"skill":"run-plan","task":"csv-export","mode":"safe","started_at":"2026-01-01T00:00:00Z","self_check":"2/3"}' > "$P/pending.json"
-echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s4\",\"transcript_path\":\"$T\",\"cwd\":\"$D/proj\"}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py"
+echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s4\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 ls "$P/runs/" | grep -q "2026-01-01T00-00-00Z_csv-export.json" && grep -q '"closed_at"' "$P/runs/"*csv-export.json && echo "PASS run-plan close -> run archived under runs/" || { echo "FAIL run archive"; ls -R "$P"; exit 1; }
 rm "$P/routing.json"
-OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" --receipts csv-export)
+OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts csv-export)
 echo "$OUT" | grep -q "receipts: csv-export · dial safe" && echo "$OUT" | grep -q "closed · 3 steps" && echo "PASS --receipts <task> reads the archived run" || { echo "FAIL --receipts <task>:"; echo "$OUT"; exit 1; }
 # --json: one object for a run (steps verbatim + totals by model), a list for "all", no markdown around it
-( cd "$D/proj" && CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" --receipts csv-export --json ) > "$D/one.json"
-( cd "$D/proj" && CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" --receipts all --json ) > "$D/all.json"
+( cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts csv-export --json ) > "$D/one.json"
+( cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts all --json ) > "$D/all.json"
 py - "$D/one.json" "$D/all.json" <<'PY'
 import json,sys; r=json.load(open(sys.argv[1])); l=json.load(open(sys.argv[2]))
 assert r["task"]=="csv-export" and r["dial"]=="safe" and r["started_at"]=="2026-01-01T00:00:00Z" and r["closed_at"] and r["active"] is False and r["needs_human"] is None and r["path"].endswith("_csv-export.json"), r
@@ -105,7 +106,15 @@ import json,sys,pathlib; P=pathlib.Path(sys.argv[1]); r=json.load(open(next((P/"
 for u in r["units"]: u.pop("agent_by_model", None)
 json.dump(r, open(P/"runs"/"2025-12-01T00-00-00Z_old-run.json","w"))
 PY
-OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" --receipts old-run)
+OUT=$(cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts old-run)
 echo "$OUT" | grep -q "agent tokens in 6.6k / out 4.0k · delegated out 4.0k (100% of agent output) on m-a, m-b" && ! echo "$OUT" | grep -q "agent out by model" && echo "PASS archive without agent_by_model (0.3.0 run) -> old delegated-share line, no crash" || { echo "FAIL old-archive fallback:"; echo "$OUT"; exit 1; }
-( cd "$D/proj" && CLAUDE_PROJECT_DIR="$D/proj" py "$H/ledger.py" --receipts old-run --json ) | py -c "import json,sys; r=json.load(sys.stdin); assert r['task']=='old-run' and r['totals']['by_model']=={} and r['totals']['output']==4008, r" && echo "PASS old archive --json: by_model empty, totals still summed" || { echo "FAIL old-archive --json"; exit 1; }
+( cd "$D/proj" && CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py" --receipts old-run --json ) | py -c "import json,sys; r=json.load(sys.stdin); assert r['task']=='old-run' and r['totals']['by_model']=={} and r['totals']['output']==4008, r" && echo "PASS old archive --json: by_model empty, totals still summed" || { echo "FAIL old-archive --json"; exit 1; }
+# the hook reads the MSYS path form too: on Windows "/c/Users/x/t.jsonl" inside the event JSON (Git Bash converts arguments and
+# environment variables, not JSON strings) is opened as "C:/Users/x/t.jsonl"; "/tmp/..." and "C:/..." are left alone, elsewhere nothing changes
+py - "$H/ledger.py" <<'PY'
+import os,sys; ns={}; exec(compile(open(sys.argv[1],encoding="utf-8").read().replace("\nmain()\n","\n"),"ledger","exec"),ns); np=ns["native_path"]
+assert os.name=="nt" or np("/c/Users/x/t.jsonl")=="/c/Users/x/t.jsonl", "must be a no-op off Windows"
+os.name="nt"; assert np("/c/Users/x/t.jsonl")=="C:/Users/x/t.jsonl" and np("/tmp/tmp.X/t.jsonl")=="/tmp/tmp.X/t.jsonl" and np("C:/Users/x")=="C:/Users/x" and np("")=="" and np(None) is None
+print("PASS native_path: /c/Users/x -> C:/Users/x on Windows only; /tmp/... and C:/... untouched")
+PY
 echo "ALL PASS"

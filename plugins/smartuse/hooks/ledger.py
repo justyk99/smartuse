@@ -16,6 +16,9 @@ Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger
              bash py.sh ledger.py --receipts [task|all] --json -> the same run(s) as JSON for scripts: one object (a list for "all")
                                                            with the steps verbatim and totals {input, output, by_model}.
              (py.sh = the plugin's launcher: python3, else python, else py -3 — on stock Windows python3 is only the Store stub.)
+Windows:     Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the event
+             JSON, so every path taken from the JSON goes through native_path() ("/c/Users/x" -> "C:/Users/x"); the reports print
+             UTF-8 whatever the console code page (stdout is reconfigured in main()).
 Never blocks a turn. Any error -> exit 0 silently (a receipt must never stop the work).
 """
 import json, os, sys, re, time, datetime, pathlib, statistics
@@ -33,6 +36,22 @@ def parse_ts(s):
         return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def native_path(p):
+    """A path string from the event JSON as this interpreter can open it. On Windows the hook runs through Git Bash, which
+    converts POSIX paths in arguments and environment variables for a Windows program but not inside JSON strings: given
+    "/c/Users/x/t.jsonl", Windows Python looks under <current drive>:/c/Users/x/ and finds nothing. So when the string starts
+    with "/" and nothing exists there, the MSYS drive form "/c/..." becomes "C:/..."; "/tmp/..." has no drive letter and stays
+    as it is. Anything else, and everything on other platforms, comes back unchanged. Never raises."""
+    try:
+        s = str(p or "")
+        if os.name == "nt" and s.startswith("/") and not os.path.exists(s):
+            if len(s) >= 2 and "a" <= s[1].lower() <= "z" and (len(s) == 2 or s[2] == "/"):
+                return s[1].upper() + ":" + (s[2:] or "/")
+    except Exception:
+        pass
+    return p
 
 
 def sum_usage(transcript, since=None):
@@ -131,7 +150,7 @@ def state_dir(project):
 
 
 def on_stop(data):
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
     pending = state_dir(project) / "pending.json"
     if not pending.exists():
         return
@@ -153,7 +172,7 @@ def on_stop(data):
         # a forked skill wrote a local-time clock labelled Z (future) -> count the last 15 minutes instead of nothing
         since = now0 - datetime.timedelta(minutes=15)
         p["notes"] = (p.get("notes") or "") + " [started_at was in the future; window = last 15 min]"
-    tp = data.get("transcript_path") or ""
+    tp = native_path(data.get("transcript_path") or "")
     totals, turns = sum_usage(tp, since)
     # A forked skill (context: fork) or a subagent spends its tokens in <session>/subagents/agent-*.jsonl, not in the
     # main transcript: add every subagent file of this session that has usage after started_at.
@@ -234,11 +253,11 @@ def attach_to_step(sdir, rec):
 
 
 def on_subagent_stop(data):
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
     routing = state_dir(project) / "routing.json"
     if not routing.exists():
         return
-    tp = data.get("agent_transcript_path") or data.get("transcript_path") or ""
+    tp = native_path(data.get("agent_transcript_path") or data.get("transcript_path") or "")
     # Two SubagentStop hooks may run (a user-level copy and the plugin's): claim this agent once, atomically.
     aid = data.get("agent_id") or pathlib.Path(tp).stem
     marker = state_dir(project) / f"receipt.{aid}.done"
@@ -432,6 +451,11 @@ def recompute():
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):   # the renderers print "·": on Windows a pipe defaults to cp1252, which the reader shows as mojibake
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     if len(sys.argv) > 1 and sys.argv[1] == "--recompute":
         recompute(); return
     if len(sys.argv) > 1 and sys.argv[1] == "--receipts":
