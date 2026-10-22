@@ -5,3 +5,5 @@ node_modules/
 plugins/smartuse/evals/results/*
 !plugins/smartuse/evals/results/2026-10-15-final/
 bench/results/
+.smartuse-terms.local
+__pycache__/

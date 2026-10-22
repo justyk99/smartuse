@@ -5,7 +5,7 @@ Runs `/smartuse:make-prompt quick dry <ask>` on 5 typical asks against a tiny sa
 ## Run
 
 ```bash
-cd /home/yk/smartuse/bench
+cd smartuse/bench
 ./run.sh                          # loads ../plugins/smartuse via --plugin-dir
 ./run.sh --plugin-dir /path/to/smartuse
 ```

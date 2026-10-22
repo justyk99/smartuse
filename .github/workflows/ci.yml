@@ -8,17 +8,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Python syntax
-        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/ledger.py
+      - name: Python syntax (all hooks + scripts)
+        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/file-guard.py plugins/smartuse/hooks/ledger.py plugins/smartuse/hooks/until-done.py scripts/term-scan.py
       - name: JSON manifests parse
         run: |
           python3 -c "import json; json.load(open('.claude-plugin/marketplace.json')); json.load(open('plugins/smartuse/.claude-plugin/plugin.json')); json.load(open('plugins/smartuse/hooks/hooks.json'))"
       - name: Shell syntax
-        run: bash -n plugins/smartuse/hooks/tests/run.sh && bash -n plugins/smartuse/hooks/tests/ledger-test.sh && bash -n bench/run.sh
-      - name: bash-guard regression (32 cases)
+        run: for f in plugins/smartuse/hooks/tests/*.sh bench/run.sh; do bash -n "$f"; done
+      - name: bash-guard regression
         run: bash plugins/smartuse/hooks/tests/run.sh
-      - name: ledger regression
+      - name: file-guard regression
+        run: bash plugins/smartuse/hooks/tests/file-guard-test.sh
+      - name: ledger + receipts regression
         run: bash plugins/smartuse/hooks/tests/ledger-test.sh
+      - name: until-done gate regression
+        run: bash plugins/smartuse/hooks/tests/until-done-test.sh
+      - name: term scan (generic patterns; the private list is never in the repo)
+        run: python3 scripts/term-scan.py || echo "::warning::term-scan found hits — see the job log"
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -29,4 +35,4 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           claude plugin validate --strict plugins/smartuse
-          claude plugin validate .
+          claude plugin validate --strict .

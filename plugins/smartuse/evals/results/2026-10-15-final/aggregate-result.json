@@ -6,7 +6,7 @@
   "costUsd": 1.2651241500000001,
   "partial": false,
   "suite": {
-    "root": "/home/yk/smartuse/plugins/smartuse",
+    "root": "<repo>/plugins/smartuse",
     "ablation": "with-without",
     "threshold": 1,
     "concurrency": 1,
@@ -14,7 +14,7 @@
       {
         "name": "smartuse",
         "version": "0.2.0-dev",
-        "path": "/home/yk/smartuse/plugins/smartuse"
+        "path": "<repo>/plugins/smartuse"
       }
     ]
   },

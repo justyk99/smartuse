@@ -1,0 +1,155 @@
+{
+  "active": false,
+  "task": "csv-export-orders",
+  "dial": "safe",
+  "started_at": "2026-10-21T15:16:00Z",
+  "until_done": true,
+  "units": [
+    {
+      "id": 1,
+      "title": "Route decision confirmed (path, columns, no orders.js edit)",
+      "tier": "judgment",
+      "model": "fable",
+      "why": "user gate + other developer's file; session model records the assumed decision, user signs off",
+      "budget_turns": 0,
+      "check": "decisions.md: decision line written 2026-10-21 (assumed defaults, user sign-off pending)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/csv-export-orders/decisions.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "src/routes/orders-export.js: toCsv() + router",
+      "tier": "build",
+      "model": "fable",
+      "why": "RFC 4180 escaping + headers, runnable lint check; safe dial = session model in a fresh agent",
+      "budget_turns": 15,
+      "check": "npm run lint: clean (exit 0); sanity rows 14.99 / 12.5 / escaped OK",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 5,
+      "agent_input": 110748,
+      "agent_output": 2683,
+      "agent_models": [
+        "claude-fable-5-1",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "a2e515e86768ccd54",
+        "a905dc53201064fea"
+      ],
+      "files": [
+        "src/routes/orders-export.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Mount export router in src/server.js before /orders",
+      "tier": "build",
+      "model": "fable",
+      "why": "route-order rabbit hole (/:id shadows export.csv); check is a live curl",
+      "budget_turns": 10,
+      "check": "curl export.csv: 200 text/csv, header + 2 rows (14.99, 12.5); /orders/1 JSON total 14.99; lint clean",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 5,
+      "agent_input": 107574,
+      "agent_output": 1200,
+      "agent_models": [
+        "claude-fable-5-1",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "afe4c3e9296cc7fd6",
+        "af41f13c7ab86940b"
+      ],
+      "files": [
+        "src/server.js"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "tests/orders-export.test.js (unit + HTTP)",
+      "tier": "build",
+      "model": "fable",
+      "why": "HTTP test with app.listen(0) + fetch, no supertest; check is npm test",
+      "budget_turns": 15,
+      "check": "npm test: Tests 6 passed, 6 total (2 suites); lint clean",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 3,
+      "agent_input": 64597,
+      "agent_output": 1552,
+      "agent_models": [
+        "claude-fable-5-1",
+        "claude-sonnet-5-5"
+      ],
+      "agents": [
+        "a9fdf431e2c5cc78f",
+        "a2cb522b96e5ce35a"
+      ],
+      "files": [
+        "tests/orders-export.test.js"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Docs: DEV.md + USER.md + README line",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "doc fill from a fixed spec; check is a grep for the exact path",
+      "budget_turns": 10,
+      "check": "grep 'orders/export.csv' README.md:5 hit (exact path); DEV.md/USER.md filled",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 3,
+      "agent_input": 72845,
+      "agent_output": 4540,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "ac38ff9743dce4659"
+      ],
+      "files": [
+        "docs/features/csv-export-orders/DEV.md",
+        "docs/features/csv-export-orders/USER.md",
+        "README.md"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Commit by path, move task folder, /living-docs",
+      "tier": "judgment",
+      "model": "fable",
+      "why": "run-plan never commits; the user's commit procedure does",
+      "budget_turns": 0,
+      "check": "blocked: run-plan never commits; user's commit procedure stages by path, then /living-docs",
+      "blocked_by": "rule: no commits from run-plan",
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    }
+  ],
+  "finished_at": "2026-10-21T15:23:00Z",
+  "closed_at": "2026-10-21T15:20:56Z"
+}

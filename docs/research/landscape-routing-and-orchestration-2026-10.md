@@ -46,7 +46,7 @@ A commenter on the feature request asked for exactly what nobody ships: **audita
 - **Easy install + a story + an author with a real workplace**: gstack won on "my daily setup" + 30-second install. the author's story nobody else has: a Claude setup grown inside a legacy ASP.NET back office AND a Vue/.NET rebuild, every rule born from a dated incident, measured with his own `history.jsonl`.
 - **Light beats heavy**: the only independent comparison recommends the lightest gate. Ship ≤ 10 files per piece, native mechanisms only (survives harness updates — the spec's own point).
 - **Numbers beat adjectives**: everyone's savings are self-reported; a receipts ledger across 30 real tasks is a post people will cite.
-- **Where**: own marketplace repo (`/plugin marketplace add yk/smartuse`), the community marketplace form (official listing requires Anthropic review), PRs to `jqueryscript/awesome-claude-code` and `ccplugins/awesome-claude-code-plugins`, the `skills.sh` registry for the single skills, r/ClaudeAI and X with the roast story ("one line in, planner-grade kickoff out"), and the Guru course as the long tail.
+- **Where**: own marketplace repo (`/plugin marketplace add yk/smartuse`), the community marketplace form (official listing requires Anthropic review), PRs to `jqueryscript/awesome-claude-code` and `ccplugins/awesome-claude-code-plugins`, the `skills.sh` registry for the single skills, r/ClaudeAI and X with the roast story ("one line in, planner-grade kickoff out"), and a course as the long tail.
 - **Order**: ship the three existing pieces as `smartuse` v0.1 this month (road guide C1), measure for a month, then the routing layer with receipts as v0.2, then the write-up.
 
 ## 5. Sources

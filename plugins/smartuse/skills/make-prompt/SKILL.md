@@ -11,7 +11,7 @@ allowed-tools: Bash(date *), Bash(pwd), Bash(git *), Bash(svn info *), Bash(svn 
 
 Part of smartuse. Sources and reasoning: `DESIGN.md` beside this file (official "let Claude interview you" pattern, clarification research, context engineering, Shape Up).
 
-**Guarantees:** no empty slot (filled, assumed, or `unknown → who answers`), no invented fact (every path / name / date from the repo, memory, or YK), saved where `/clear` cannot kill it, a self-check table before "go". **Not guaranteed:** the research after "go" (plan mode + the project rules do that) and a wrong answer from the user (it propagates; the summary shows it so it can be caught).
+**Guarantees:** no empty slot (filled, assumed, or `unknown → who answers`), no invented fact (every path / name / date from the repo, memory, or the user), saved where `/clear` cannot kill it, a self-check table before "go". **Not guaranteed:** the research after "go" (plan mode + the project rules do that) and a wrong answer from the user (it propagates; the summary shows it so it can be caught).
 
 
 ## Project adapter (optional, read first)
@@ -88,7 +88,7 @@ Print, in this order:
 7. **Receipt.** Write `~/.claude/smartuse/projects/<repo folder name>/pending.json` (create the folder; never inside the repo) with: `{"skill":"make-prompt","task":"<feature name>","mode":"interview|quick","started_at":"<Invoked at, from the live context>","self_check":"<n>/13","corrections":<how many answers the user changed>,"notes":"<one line>"}`. The Stop hook turns it into one ledger line (tokens, minutes) when this turn ends — say `receipt: pending → ledger` in the report. `dry` mode: still write it (the ledger is how the skill proves its cost).
 
 ## Rules
-- Ground check before questions. Memory and grep answer before YK does.
+- Ground check before questions. Memory and grep answer before the user does.
 - Defaults first; typing is the exception. One block at a time, ≤ 3 calls.
 - Dates absolute, people named, paths verified, non-goals explicit, deliverables gated, verification last.
 - No praise, no roast, no essay. The prompt and the 5-line summary are the output.
