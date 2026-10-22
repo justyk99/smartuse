@@ -24,6 +24,12 @@
 - [x] skills + docs (worker): `$ARGUMENTS` in the three `!` lines (the `${1:-}` form was refused in default permission mode); make-prompt hands off to run-plan; living-docs writes its receipt and declares its tools; run-plan allowed-tools + headless example + accepted `check:` shapes; status legend; self-check 14; three new eval cases; README/CHANGELOG/CONTRIBUTING counts and claims; `hooks/tests/all.sh`
 - [x] repo: `.gitattributes` (LF everywhere), CI matrix ubuntu/macOS/Windows and on the dev branch — green on all three (bac4685)
 
+## Proposed — relay guards (case study 7; design and failing tests in `docs/notes/relay-design.md`; not in the 1.0 bar until YK adds it)
+- [ ] Rule 4: a `paid` rule family in bash-guard — the owner's go per script, a cap, one test output first (stops money; build first)
+- [ ] Rule 1: `relay.py save` + `relay-guard` on the relay channels, then the receiver's open-before-done Stop gate
+- [ ] Rule 2: `inventory.py` + the brief gate; the ask-again check
+- [ ] Rules 3 and 5: the review-file contract with a round-3 owner verdict; the planner's `deny_write:` and the empty `## Visual parameters` section
+
 ## 1.0 — public
 - [ ] "30 days of receipts": the measured post with the A/B table and the ledger medians
 - [ ] Marketplace listing (community marketplace form), awesome-lists PRs (YK's clicks)
