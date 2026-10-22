@@ -18,7 +18,12 @@ Manual-only on purpose (`disable-model-invocation: true`): it spends plan usage,
 - Repo check command: from the adapter `check:` (e.g. `npm test`, `bash .claude/build-check.sh`) — required for `--until-done`; without it the gate only tracks unit status.
 
 ## 0. Read the kickoff
-Read task.md: § 5 deliverables (the units), § 4 constraints and rabbit holes (restated in every brief), § 7 open questions (a unit that depends on an unanswered one is **blocked** — say so, do not guess), § 8 verification. No task.md → "run `make-prompt` first" and stop.
+Read task.md: § 5 deliverables (the units), § 4 constraints and rabbit holes (restated in every brief), § 7 open questions, § 8 verification. No task.md → "run `make-prompt` first" and stop.
+
+**Open questions are not all blockers.** make-prompt writes a kickoff that assumes and lets the user correct by exception, so:
+- A question whose answer the kickoff already gives as an `assumed:` default (a route, a column set, a date, a file layout) is **answered for now**: proceed on the default, write one dated line in `decisions.md` ("proceeding on assumed <X>; correct by exception"), and list it at the end under **Confirm**, not under NEEDS YOU.
+- A question with **no default**, or one in a rule-gate area (money, security, shared servers or procedures, another person's file that the plan would edit), **blocks** the units that depend on it — say so, do not guess.
+- Never block every unit on a question the kickoff has a default for. A run that ends with 0 steps done and a NEEDS YOU about an assumed value is a failed run.
 
 ## 1. Tier each unit (the session model decides, never a hook or a keyword rule)
 | Tier | What belongs here | Who runs it |
@@ -45,8 +50,8 @@ Stop after N units (default 3) and ask "go" again, so the user can read the rece
 Write `"until_done": true` and a `"status": "pending"` on every unit into routing.json before the first unit. The check command is read by the gate from the human-written adapter (`check:` in `.claude/smartuse.local.md`) — you cannot set or change it from routing.json; if the adapter has none, the gate only tracks unit status. Then:
 1. Run units in order with no "go" between batches. After each unit set its `status` (`pass` · `fail` · `blocked`) in routing.json and print the one-line progress message.
 2. The `until-done` Stop hook refuses to end the turn while any unit is pending / running / failed or while the check command fails, and tells you what is left. Keep working; do not argue with the gate.
-3. **Stop reasons — the only ways out:** (a) every unit is pass or blocked AND the check passes; (b) a unit needs the human: write the exact question into routing.json as `"needs_human": "<question>"` and make it the FIRST line of your final message (`NEEDS YOU: …`); (c) a unit failed twice (escalation used) → mark it `blocked`, record why, continue with units that do not depend on it; (d) a rule gate (a file owned by someone else, a shared server, money or security paths) → `needs_human`; (e) the gate has blocked 6 times → it lets you stop; say what is left.
-4. Never commit. The final message: `NEEDS YOU` line if any, then the receipts table, then "what the human should look at first".
+3. **Stop reasons — the only ways out:** (a) every unit is pass or blocked AND the check passes; (b) a unit needs the human for a question with **no assumed default** (or a rule gate): write the exact question into routing.json as `"needs_human": "<question>"` and make it the FIRST line of your final message (`NEEDS YOU: …`) — an assumed default is not a stop reason, see § 0; (c) a unit failed twice (escalation used) → mark it `blocked`, record why, continue with units that do not depend on it; (d) a rule gate (a file owned by someone else, a shared server, money or security paths) → `needs_human`; (e) the gate has blocked 6 times → it lets you stop; say what is left.
+4. Never commit. The final message: `NEEDS YOU` line if any (real blockers only), then the receipts table, then **Confirm** (the assumed defaults you proceeded on, one line each), then "what the human should look at first".
 In an interactive session the user may also set `/goal <§ 8 acceptance>`; in headless use the CLI caps: `claude -p "/smartuse:run-plan <task.md> --until-done" --max-budget-usd N --max-turns M`.
 
 ## 4. Close (always — after a finished batch, a stop, or a block)
