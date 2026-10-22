@@ -1,6 +1,6 @@
 {
   "name": "smartuse",
-  "version": "0.3.0",
+  "version": "0.4.0-dev",
   "description": "Use Claude Code smartly: one line in, a planner-grade kickoff out; docs that stay current after every commit; a reply voice you choose; a deterministic safety floor; and a receipt for every run and every plan step. make-prompt \u00b7 run-plan \u00b7 living-docs \u00b7 reply-style \u00b7 ledger \u00b7 receipts \u00b7 bash-guard.",
   "author": {
     "name": "JustYK",
