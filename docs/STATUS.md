@@ -6,7 +6,7 @@ Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisio
 - 0.3.0 on `main`, CI green; the marketplace serves it. The release page is still not published (see Blocked).
 - 0.4.0-dev on the branch: heartbeat, receipts by model, A/B runner, Windows, audit batch one, state per repository, and now **state writes without a prompt** (skills write through `ledger.py --put/--unit/--run`; proven headless in default mode) and the bash-guard heredoc rule (eight bypasses closed): `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 67 · ab 36`, strict validate passes.
 - **A/B run 3** (5 bench asks × 3 dials, Opus pinned): median cost −24 % on both routed dials over 4 asks; agent output not lower; 11 of 12 runs green. In README with the caveats.
-- Case study 7 ("the relay that turned photos into words") in claude-guru `training/case-studies.md` (branch `claude/inspiring-galileo-8icw6s`); the mechanism design is `docs/notes/relay-design.md`, listed in ROADMAP as proposed, outside the 1.0 bar.
+- Case study 7 ("the relay that turned photos into words") added to YK's training case studies (private repo, dev branch); the mechanism design is `docs/notes/relay-design.md`, listed in ROADMAP as proposed, outside the 1.0 bar.
 
 ## In progress
 - CI on the merged state-writes commit (all legs).
