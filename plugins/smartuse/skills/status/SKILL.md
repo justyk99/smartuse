@@ -20,7 +20,7 @@ Print the heartbeat line above verbatim as your first line — that one line, un
 
 Then say it plainly, in one or two lines: the live answer — while Claude works, or after it stopped — is the status line (`/smartuse:status install`), or this command run from a plain shell, not from Claude: `bash "<plugin root>/hooks/py.sh" "<plugin root>/hooks/heartbeat.py" --line` (write it out with the plugin root printed above). Never a second Claude session in the same repo: its own events overwrite this repo's status file.
 
-Data: `~/.claude/smartuse/projects/<key>/status.json` (`<key>` is derived from the repo's full path), written by the heartbeat hook on every event (0 tokens, ~80 ms per event through the launcher — `py.sh` probes the interpreter first; more on Windows, where it also has to skip the Store stub). One status file per repo: the last session that writes it wins.
+Data: `~/.claude/smartuse/projects/<key>/status.json` (`<key>` is derived from the repo's full path), written by the heartbeat hook on every event (0 tokens, one Python start per event: ~55 ms on Linux, more on Windows, where a start can take seconds; `py.sh` probes for an interpreter once and remembers it). One status file per repo: the last session that writes it wins.
 
 ## install — only when `$ARGUMENTS` contains `install`
 
