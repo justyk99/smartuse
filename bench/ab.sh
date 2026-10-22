@@ -2,17 +2,24 @@
 # A/B: routed vs not (the 0.4 roadmap item). Per ask in asks.txt: ONE kickoff (/smartuse:make-prompt quick) on a fresh,
 # git-initialised copy of sample-repo/, a snapshot of that kickoff, then /smartuse:run-plan --until-done ONCE PER DIAL
 # (off / safe / aggressive) on an identical restore of the snapshot, so the dials differ only in the routing.
-# Collected per (ask, dial) under <out>/: claude's JSON (cost, turns, minutes), the per-step receipts the Stop hook archived
-# (routing.json -> runs/, read straight from ~/.claude/smartuse/projects/<run dir basename>/) and the `npm test` result.
+# Collected per (ask, dial) under <out>/: claude's JSON (cost, turns, minutes, modelUsage), the per-step receipts the Stop hook
+# archived (routing.json -> runs/, read straight from ~/.claude/smartuse/projects/<run dir basename>/) and the `npm test` result.
+# --model <id or alias> pins the session model of EVERY session (stage 1 and 2; passed to claude as --model, recorded in
+# run.json). Without it claude's default decides per session, and A/B run 1 showed it can differ between the kickoff and the
+# run-plan sessions, which makes the dials incomparable: pin it for a real run.
 # bench/ab-report.py turns <out>/ into the comparison table. See README.md § "A/B: routed vs not".
 # Writes nothing inside sample-repo/ or this repo except <out>/ (default bench/results/ab/, gitignored) and the dependency
 # cache bench/.cache/node_modules. Every real session spends plan usage: read the NOTE this script prints. --dry-run spends nothing.
+# The JSON work goes through python 3 and nothing else, found the way the hooks find it (plugins/smartuse/hooks/py.sh:
+# python3, python or py -3, so Git Bash on Windows works).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 PLUGIN_DIR=$(cd "$HERE/../plugins/smartuse" 2>/dev/null && pwd || true)
+PY="$HERE/../plugins/smartuse/hooks/py.sh"
 ASKS_FILE="$HERE/asks.txt"
 N_ASKS=0                       # 0 = every line of asks.txt
 DIALS="off,safe,aggressive"
+MODEL=""                       # "" = claude's default (not pinned)
 OUT=""
 DRY=0
 TS=$(date -u +%Y-%m-%dT%H-%M-%SZ)
@@ -21,11 +28,12 @@ TS=$(date -u +%Y-%m-%dT%H-%M-%SZ)
 S1_TURNS=60; S1_BUDGET=4
 S2_TURNS=40; S2_BUDGET=5
 
-usage() { echo "usage: ab.sh [--asks N] [--dials off,safe,aggressive] [--plugin-dir P] [--out DIR] [--dry-run]"; }
+usage() { echo "usage: ab.sh [--asks N] [--dials off,safe,aggressive] [--model ID] [--plugin-dir P] [--out DIR] [--dry-run]"; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --asks) N_ASKS=${2:-}; shift 2 ;;
     --dials) DIALS=${2:-}; shift 2 ;;
+    --model) MODEL=${2:-}; [ -n "$MODEL" ] || { echo "--model needs a model id or alias (e.g. claude-opus-5-5, sonnet)" >&2; exit 2; }; shift 2 ;;
     --plugin-dir) PLUGIN_DIR=$(cd "${2:-}" 2>/dev/null && pwd || true); shift 2 ;;
     --out) OUT=${2:-}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
@@ -35,7 +43,10 @@ while [ $# -gt 0 ]; do
 done
 case "$N_ASKS" in ''|*[!0-9]*) echo "--asks takes a number" >&2; exit 2 ;; esac
 [ -d "${PLUGIN_DIR:-}" ] || { echo "plugin dir not found; pass --plugin-dir" >&2; exit 2; }
-for t in jq git tar python3; do command -v "$t" >/dev/null || { echo "$t is required" >&2; exit 2; }; done
+for t in git tar; do command -v "$t" >/dev/null || { echo "$t is required" >&2; exit 2; }; done
+[ -f "$PY" ] || { echo "python launcher not found: $PY (bench/ lives next to plugins/smartuse/ in the smartuse repo)" >&2; exit 2; }
+py() { bash "$PY" "$@"; }       # the launcher prints nothing and exits 0 when no python runs, so probe its output
+[ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "python 3 is required (none of python3, python, py -3 runs)" >&2; exit 2; }
 IFS=, read -r -a DIAL_LIST <<< "$DIALS"
 [ ${#DIAL_LIST[@]} -gt 0 ] || { echo "--dials needs at least one of off,safe,aggressive" >&2; exit 2; }
 for d in "${DIAL_LIST[@]}"; do
@@ -68,21 +79,40 @@ else
   echo "      per ask: 1 make-prompt session (cap $S1_TURNS turns / \$$S1_BUDGET) + $M run-plan session(s) (cap $S2_TURNS turns / \$$S2_BUDGET each)."
   echo "      On the bench repo that is ~\$5-6 per ask per dial (kickoff ~\$1.5 once, each run-plan ~\$2-4 / 6 min)."
   echo "      Hard cap for this run: $N ask(s) x (\$$S1_BUDGET + $M x \$$S2_BUDGET) = \$$((N * (S1_BUDGET + M * S2_BUDGET))). Ctrl-C stops between sessions; --dry-run spends nothing."
+  [ -n "$MODEL" ] || echo "      model: NOT pinned. claude's default decides per session and can differ between sessions (A/B run 1: kickoff on one model, run-plan on another); pass --model to pin it."
 fi
-echo "asks: $N · dials: $DIALS · plugin: $PLUGIN_DIR · claude: $CLAUDE_BIN ($VER) · out: $OUT"
-jq -n --arg ts "$TS" --arg dials "$DIALS" --arg plugin "$PLUGIN_DIR" --arg claude "$CLAUDE_BIN" --arg ver "$VER" \
-  --argjson dry "$DRY" --argjson n "$N" --argjson s1t "$S1_TURNS" --argjson s1b "$S1_BUDGET" --argjson s2t "$S2_TURNS" --argjson s2b "$S2_BUDGET" \
-  '{started_at: $ts, dry_run: ($dry == 1), asks: $n, dials: ($dials | split(",")), plugin_dir: $plugin, claude_bin: $claude,
-    claude_version: $ver, caps: {stage1: {max_turns: $s1t, max_budget_usd: $s1b}, stage2: {max_turns: $s2t, max_budget_usd: $s2b}}}' \
-  > "$OUT/run.json"
+MSHOW="claude's default (not pinned)"; [ -n "$MODEL" ] && MSHOW=$MODEL
+echo "asks: $N · dials: $DIALS · model: $MSHOW · plugin: $PLUGIN_DIR · claude: $CLAUDE_BIN ($VER) · out: $OUT"
+py -c '
+import json, sys
+a = sys.argv[1:]
+json.dump({"started_at": a[0], "dry_run": a[1] == "1", "asks": int(a[2]), "dials": a[3].split(","), "model": a[4] or None,
+           "plugin_dir": a[5], "claude_bin": a[6], "claude_version": a[7],
+           "caps": {"stage1": {"max_turns": int(a[8]), "max_budget_usd": int(a[9])},
+                    "stage2": {"max_turns": int(a[10]), "max_budget_usd": int(a[11])}}}, sys.stdout, indent=2, ensure_ascii=False)
+print()' "$TS" "$DRY" "$N" "$DIALS" "$MODEL" "$PLUGIN_DIR" "$CLAUDE_BIN" "$VER" "$S1_TURNS" "$S1_BUDGET" "$S2_TURNS" "$S2_BUDGET" > "$OUT/run.json"
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 CACHE="$HERE/.cache/node_modules"
 STATE="$HOME/.claude/smartuse/projects"
 
-summ() { # one line from a claude JSON file: $cost · turns · min
-  local s; s=$(jq -r '"$" + ((.total_cost_usd // 0) * 100 | round / 100 | tostring) + " · " + ((.num_turns // 0) | tostring) + " turns · " + (((.duration_ms // 0) / 60000 * 10 | round / 10) | tostring) + " min"' "$1" 2>/dev/null)
+summ() { # one line from a claude JSON file: $cost · turns · min · the models that ran (the keys of modelUsage)
+  local s; s=$(py -c '
+import json, math, sys
+j = json.load(open(sys.argv[1], encoding="utf-8"))
+def g(x): return str(int(x)) if x == int(x) else str(x)          # 2.0 -> "2", 1.55 -> "1.55"
+def r(x): return math.floor(x + 0.5)                                # round half away from zero (non-negative input)
+cost, turns, ms = float(j.get("total_cost_usd") or 0), j.get("num_turns") or 0, float(j.get("duration_ms") or 0)
+mu = j.get("modelUsage"); models = "+".join(mu) if isinstance(mu, dict) else ""
+print("$" + g(r(cost * 100) / 100) + " · " + str(turns) + " turns · " + g(r(ms / 60000 * 10) / 10) + " min" + (" · " + models if models else ""))' "$1" 2>/dev/null)
   [ -n "$s" ] && echo "$s" || echo "no JSON (see $(basename "$1" .json).err)"
+}
+meta_json() { # $1 = n, $2 = ask, $3 = task.md path or "" (-> null), $4 = note; the dials come from $DIALS
+  py -c '
+import json, sys
+a = sys.argv[1:]
+json.dump({"n": int(a[0]), "ask": a[1], "kickoff": a[2] or None, "note": a[3], "dials": a[4].split(",")}, sys.stdout, indent=2, ensure_ascii=False)
+print()' "$1" "$2" "$3" "$4" "$DIALS"
 }
 install_deps() { # $1 = repo copy. Installed once, cached in bench/.cache/node_modules, reused with cp -a.
   if [ -d "$CACHE" ]; then
@@ -92,8 +122,9 @@ install_deps() { # $1 = repo copy. Installed once, cached in bench/.cache/node_m
     mkdir -p "$HERE/.cache" && cp -a "$1/node_modules" "$CACHE"
   fi
 }
-claude_run() { # $1 = cwd, $2 = prompt, $3 = max turns, $4 = max budget; stdout = claude's JSON
+claude_run() { # $1 = cwd, $2 = prompt, $3 = max turns, $4 = max budget; stdout = claude's JSON. --model only when pinned.
   ( cd "$1" && env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_PROJECT_DIR "$CLAUDE_BIN" --plugin-dir "$PLUGIN_DIR" \
+      ${MODEL:+--model "$MODEL"} \
       -p "$2" --permission-mode bypassPermissions --output-format json --max-turns "$3" --max-budget-usd "$4" )
 }
 
@@ -114,10 +145,10 @@ for ask in "${ASKS[@]}"; do
   TASK=$(cd "$REPO" && ls .task/ACTIVE/*/task.md 2>/dev/null | head -1)
   if [ -z "$TASK" ]; then
     echo "  no kickoff: stage 1 left no .task/ACTIVE/*/task.md; ask skipped (row: no kickoff)"
-    jq -n --argjson n "$n" --arg ask "$ask" --arg dials "$DIALS" '{n: $n, ask: $ask, kickoff: null, note: "no kickoff", dials: ($dials | split(","))}' > "$OUT/$n-meta.json"
+    meta_json "$n" "$ask" "" "no kickoff" > "$OUT/$n-meta.json"
     rm -rf "$REPO"; continue
   fi
-  jq -n --argjson n "$n" --arg ask "$ask" --arg task "$TASK" --arg dials "$DIALS" '{n: $n, ask: $ask, kickoff: $task, note: "", dials: ($dials | split(","))}' > "$OUT/$n-meta.json"
+  meta_json "$n" "$ask" "$TASK" "" > "$OUT/$n-meta.json"
   # (c) snapshot the kickoff so every dial starts from the same task.md
   SNAP="$WORK/ask-$n.tar"; tar -cf "$SNAP" -C "$REPO" . ; rm -rf "$REPO"
   # (d) stage 2: run-plan --until-done once per dial, each in a new dir whose basename is the receipt state key
@@ -144,6 +175,6 @@ for ask in "${ASKS[@]}"; do
 done
 
 echo
-python3 "$HERE/ab-report.py" "$OUT" || exit 1
+py "$HERE/ab-report.py" "$OUT" || exit 1
 echo
 echo "raw files + report.md: $OUT"
