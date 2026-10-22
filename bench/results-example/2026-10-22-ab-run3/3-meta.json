@@ -1,0 +1,11 @@
+{
+  "n": 3,
+  "ask": "should we move the in-memory store to SQLite or Postgres",
+  "kickoff": ".task/ACTIVE/persistent-store-decision/task.md",
+  "note": "",
+  "dials": [
+    "off",
+    "safe",
+    "aggressive"
+  ]
+}

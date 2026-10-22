@@ -1,0 +1,127 @@
+{
+  "active": false,
+  "task": "orders-faster",
+  "dial": "off",
+  "until_done": true,
+  "started_at": "2026-10-22T08:20:33Z",
+  "needs_human": "Approve the design note (.task/ACTIVE/orders-faster/design.md): A = close with no src/ change (recommended), B = A + opt-in ?limit/offset pagination in src/routes/orders.js (owner must be warned first; who is the owner?), or C = something else (e.g. real N/target, or the db.js id Map)?",
+  "units": [
+    {
+      "id": 1,
+      "title": "Baseline bench script (scripts/bench-orders.js, N=10,000, p50/p95)",
+      "tier": "build",
+      "model": "opus",
+      "why": "new script with a runnable check (it prints numbers); routing off = session model",
+      "budget_turns": 20,
+      "check": "GET /orders p50=24.86 p95=35.39 ms · GET /orders/:id p50=0.97 p95=1.47 ms (N=10000)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 8,
+      "agent_input": 184504,
+      "agent_output": 4979,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "aba0716178aff5506",
+        "a8e1daf4275f1f54d"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 8,
+          "input": 184504,
+          "output": 4979
+        }
+      },
+      "files": [
+        "scripts/bench-orders.js"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Route tests for GET /, GET /:id, POST + totals snapshot",
+      "tier": "build",
+      "model": "opus",
+      "why": "well-specified tests with npm test as the check",
+      "budget_turns": 20,
+      "check": "npm test: 20 passed, 1 snapshot passed; lint clean; src/ unchanged",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "gaps open",
+      "agent_calls": 8,
+      "agent_input": 189800,
+      "agent_output": 5673,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "a787ae687b8f11fd4",
+        "a966e6ab83b2c8521"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 8,
+          "input": 189800,
+          "output": 5673
+        }
+      },
+      "files": [
+        "tests/orders.routes.test.js",
+        "tests/__snapshots__/orders.routes.test.js.snap"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Design note: id Map in db.js · totals on write vs read · pagination",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design + money (totals) + db.js/orders.js rule gates; user must approve",
+      "budget_turns": 0,
+      "check": "design.md written; awaiting user approval (A/B/C)",
+      "blocked_by": null,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/orders-faster/design.md"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Implement smallest change to reach p95 targets",
+      "tier": "build",
+      "model": "opus",
+      "why": "edits db.js (ask first) and orders.js (other owner)",
+      "budget_turns": 20,
+      "check": "blocked by unit 3 approval + rule gates (db.js ask-first, orders.js unknown owner)",
+      "blocked_by": 3,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    },
+    {
+      "id": 5,
+      "title": "Re-bench, before/after in decisions.md, DEV.md + USER.md",
+      "tier": "mechanical",
+      "model": "opus",
+      "why": "rerun of unit 1 + doc update",
+      "budget_turns": 10,
+      "check": "blocked by unit 4",
+      "blocked_by": 4,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null
+    }
+  ],
+  "blocks": 1,
+  "last_block": "2026-10-22T08:25:27Z",
+  "closed_at": "2026-10-22T08:26:14Z"
+}

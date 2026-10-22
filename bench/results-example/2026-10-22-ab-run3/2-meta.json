@@ -1,0 +1,11 @@
+{
+  "n": 2,
+  "ask": "totals are off by one cent on some orders",
+  "kickoff": ".task/ACTIVE/order-total-rounding/task.md",
+  "note": "",
+  "dials": [
+    "off",
+    "safe",
+    "aggressive"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "n": 5,
+  "ask": "make orders faster",
+  "kickoff": ".task/ACTIVE/orders-faster/task.md",
+  "note": "",
+  "dials": [
+    "off",
+    "safe",
+    "aggressive"
+  ]
+}
