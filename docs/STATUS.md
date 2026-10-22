@@ -1,4 +1,4 @@
-# STATUS — smartuse 0.3.0 relaunch (owner: Smartuse-Brain · updated 2026-10-21 15:40 UTC)
+# STATUS — smartuse 0.3.0 relaunch (owner: Smartuse-Brain · updated 2026-10-22 00:10 UTC)
 
 Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2 ("a receipt per plan step"). Branch: `claude/inspiring-galileo-8icw6s` (pushed; main untouched).
 
@@ -9,17 +9,15 @@ Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2 ("a receipt 
 - Tests 44/13/23/4 green · strict validate green · CHANGELOG, release notes `docs/releases/0.3.0.md`, README numbers, SECURITY, CI, versions 0.3.0.
 - Term scan: 18 real tree hits fixed; remaining hits are expected generic patterns. `docs/RELAUNCH.md` has the hand-run commands.
 
-## Next (mine, once YK answers)
-- Public repo: create it, push the single-commit history + `v0.3.0` tag (no force, nothing to the existing main). Blocked on decision 1.
-- Term scan with the private list (decision 2), then the final export.
+## Next (mine, on YK's "merge")
+- Merge the branch into `main` (tests green), push, tag `v0.3.0`, push the tag, watch CI. RELAUNCH.md §2.
 
 ## Blocked
-- Public repo name (decision 1). Release page + LinkedIn posting have no tool here (YK, 5 min total).
+- Nothing. **Fresh-history repo dropped**: `justyk99/smartuse` is already public, so a rewrite would un-publish nothing and would need a force-push. Development continues on the existing repo.
 
 ## Decisions for YK
-1. **Public repo name.** `justyk99/smartuse` exists (private, old history). Either (A) you rename it to `smartuse-archive` in Settings → General, then I create a new public `smartuse`; or (B) I create `smartuse-plugin` (or a name you give) and update both manifests + README. Say A or B.
-2. **Private terms list.** Paste the terms here (they land only in the gitignored file and this session's transcript) or run the scan yourself per RELAUNCH §1. Or say "generic only" and I export as is.
-3. Gate date: I am working to 23 Oct; 22 Oct is the Thursday.
+1. Say **"merge"** and 0.3.0 goes to `main` + tag. Or review the branch first: `git diff main..claude/inspiring-galileo-8icw6s --stat`.
+2. Private terms list: optional now (tree is clean on generic patterns); run it on the laptop per RELAUNCH §1 if you want.
 
-## Needs YK's hands (after my export)
+## Needs YK's hands (after the merge)
 - Click "Publish release" (text ready in `docs/releases/0.3.0.md`). · Paste the LinkedIn post + attach `demo.gif` / `demo-last-frame.png`. · Optional: a laptop screen recording to replace the rendered gif later.
