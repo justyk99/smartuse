@@ -1,4 +1,4 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 07:30 UTC)
+# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 08:00 UTC)
 
 Mandate (YK, 2026-10-22): **brain drives to 1.0 without asking unless a real decision is needed**; the laptop session Smartuse-Worker (Remote Control, Windows, Git Bash, gh logged in) is the worker for laptop-only steps. Gate this week: 0.3.0 release page · LinkedIn post #2 Fri 13:00 MYT. Dev branch: `claude/inspiring-galileo-8icw6s` (= main + 0.4.0-dev work).
 
@@ -11,7 +11,8 @@ Mandate (YK, 2026-10-22): **brain drives to 1.0 without asking unless a real dec
 - **Heartbeat shipped on the branch** (your "is it working or AFK?" weakness): `hooks/heartbeat.py` on every event → `status.json`; `/smartuse:status` → one line (`working · waiting on agent: general-purpose 4m12s · step 3/6 build·opus "tests"`, `waiting on you · 3m`, `NEEDS YOU: …`, `stalled? no activity 6m`); `/smartuse:status install` → terminal status line with model, context %, cost; plugin `subagentStatusLine` names the plan step per agent row. 54-case test; one live headless session verified every event lands; ~45 ms per event. Design: `docs/notes/heartbeat-design.md`.
 
 ## In progress
-- **Laptop (Smartuse-Worker)** re-tested da740dc on real Windows: launcher finds Python 3.13 and skips the Store stub; run, until-done, file-guard pass. ledger-test and heartbeat-test fail for test/encoding reasons (Git Bash paths inside JSON; cp1252 stdout; second-level timing) → **Windows round 2** worker running. jq missing on Windows → bench drops jq (A/B worker).
+- **Laptop (Smartuse-Worker)** re-tested da740dc on real Windows: launcher finds Python 3.13 and skips the Store stub; run, until-done, file-guard pass. ledger-test and heartbeat-test fail for test/encoding reasons (Git Bash paths inside JSON; cp1252 stdout; second-level timing) → **Windows round 2 landed** (4c5a1ad: paths inside event JSON, UTF-8 output, drift-tolerant tests); the bench no longer needs jq (c51e31b). Laptop re-testing all six suites now.
+- **A/B runner hardened** (c51e31b): `--model` pin, session-model column, no-work rows out of the deltas, exact per-model split. **A/B run 2** (1 ask × 3 dials, `--model opus`) running.
 - Plan to 1.0: `docs/ROADMAP.md`.
 - **1.0 audit** (ultracode workflow): five lenses (hook security, portability, docs-vs-code, skill prompts + evals, first-run) each adversarially verified → the confirmed gaps become `docs/ROADMAP.md` to 1.0.
 - Release notes meta line removed on main (f5506d2).
