@@ -2,20 +2,21 @@
 name: status
 description: "Show whether Claude is working, waiting on an agent, waiting on you, or stalled — one deterministic line from the heartbeat hook (0 model tokens), plus how to put it in your status line. Use when the user asks 'are you still working', 'is it stuck', 'what is it doing', 'status', 'heartbeat'."
 argument-hint: "[install]"
-allowed-tools: Bash(bash *), Read, Edit
+allowed-tools: Bash(bash *), Bash(echo *), Read, Edit
 ---
 
 # status — the heartbeat (deterministic, 0 model tokens to compute)
 
 !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --line || true`
 
-Quote that line verbatim as your first line, then explain it in ≤ 4 lines:
+Quote that line verbatim as your first line, then explain it in ≤ 4 lines — the state words only; never invent an agent, a tool or a step the line does not show:
+- `working · thinking 0s · 0 calls this turn` = a turn has started and no tool has run yet. In-session `/smartuse:status` ALWAYS shows this shape: the skill runs inside your own current turn, so the line describes this turn, not the work you wanted to check. Say so, then run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --json` and quote its `last_tool`, `agents` and `waiting_since` — the facts the previous turn left. The live answer is the status line (`/smartuse:status install`) or `/smartuse:status` typed in a second terminal in the same repo.
 - `working · <tool> running 4s` / `working · last <tool> 4s · N calls this turn` = Claude is inside a turn; `working · waiting on agent: <type> 2m10s` = a subagent is running (SubagentStart seen, no SubagentStop yet; `, N more` = several).
 - `waiting on you · 4m12s` = the turn ended (or Claude has been idle, or no prompt yet) and nothing happens until you type; `waiting on you: permission prompt` = an approval is pending; `NEEDS YOU: …` = run-plan wrote a question into routing.json — answer it.
 - `stalled? · no activity 6m10s` = a working state with no hook event for 5 minutes (`SMARTUSE_STALL_MIN` changes it): a long model think and a hung tool look the same from outside, hence the question mark — you decide whether to interrupt.
 - `· step 2/5 build·opus "…"` / `· loop block 1/6` = the run-plan unit running now and the until-done gate's block count; `session ended` = SessionEnd fired; `no activity recorded` = the hooks have not fired for this repo yet (restart Claude Code after installing the plugin).
 
-Data: `~/.claude/smartuse/projects/<repo>/status.json`, written by the heartbeat hook on every event (0 tokens, ~60 ms per event on macOS/Linux — `py.sh` probes the interpreter first — more on Windows, where it also has to skip the Store stub). Limit: **one status file per repo, the last session that wrote wins** — two sessions in the same repo overwrite each other's line (`--json` shows the `session_id`). Scripts: `bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --json` (the file plus the derived `state` and `line`).
+Data: `~/.claude/smartuse/projects/<key>/status.json` (`<key>` is derived from the repo's full path; older runs: the folder name), written by the heartbeat hook on every event (0 tokens, ~80 ms per event through the launcher — `py.sh` probes the interpreter first; more on Windows, where it also has to skip the Store stub). Limit: **one status file per repo, the last session that wrote wins** — two sessions in the same repo overwrite each other's line (`--json` shows the `session_id`). Scripts: `bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --json` (the file plus the derived `state` and `line`).
 
 ## install — only when `$ARGUMENTS` contains `install`
 

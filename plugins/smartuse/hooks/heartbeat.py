@@ -4,7 +4,12 @@ Deterministic, 0 model tokens, no network, stdlib only.
 
 Hook (stdin = the event JSON; prints nothing; exit 0 always): SessionStart · UserPromptSubmit · PreToolUse · PostToolUse ·
 SubagentStart · SubagentStop · Notification (idle_prompt | permission_prompt) · Stop · SessionEnd. Every event updates
-~/.claude/smartuse/projects/<repo dir name>/status.json (same state dir as ledger.py; atomic tmp + os.replace):
+~/.claude/smartuse/projects/<key>/status.json (same state dir as ledger.py and until-done.py; atomic tmp + os.replace — on
+Windows the replace is retried 5 x 20 ms while another reader holds the file, then the tmp file is dropped, never an error).
+<key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
+dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/, so
+two repos that share a folder name no longer share one status file. 0.3.0 keyed the dir by the folder name alone: while the
+keyed dir does not exist and projects/<folder name>/ does, that old dir is used (read and written). The file holds:
   session_id · started (first event of the session) · updated (every event) · source (SessionStart's source) ·
   turn (UserPromptSubmit count) · turn_ended (Stop sets it; UserPromptSubmit / PreToolUse / PostToolUse clear it) ·
   waiting_since (when the wait on the human began: Stop, idle_prompt or permission_prompt; cleared when work resumes) ·
@@ -16,9 +21,9 @@ SessionStart resets the file for the new session (counters at 0) — except sour
 keeps the state (an agent may be mid-flight). An event whose session_id differs from the file's starts fresh: ONE FILE
 PER REPO, LAST WRITER WINS — two sessions in the same repo overwrite each other's line (session_id says whose it is).
 A SessionEnd of another session never overwrites the live one. Stop sets turn_ended unless the until-done gate will
-refuse the stop (active until_done run with units pending / running / fail, no needs_human, blocks < max_blocks, not
-stop_hook_active) — then the turn continues and the line stays "working". Parallel tool calls share one
-tool_running slot (the latest PreToolUse wins); the counters are best-effort under a lock.
+refuse the stop (active until_done run with units pending / running / fail, no needs_human, blocks < max_blocks;
+stop_hook_active plays no part, the gate ignores it too) — then the turn continues and the line stays "working".
+Parallel tool calls share one tool_running slot (the latest PreToolUse wins); the counters are best-effort under a lock.
 
 Render (no model tokens):
   --line                 one line, first rule wins: NEEDS YOU (routing.json needs_human) · session ended · waiting on you:
@@ -26,17 +31,18 @@ Render (no model tokens):
                          idle_prompt, or no prompt yet) · working · last <tool> (prefixed "stalled? " + "no activity <ago>" after SMARTUSE_STALL_MIN
                          minutes, default 5, without any event). Then "· step <id>/<n> <tier>·<model> "<title>"" when
                          routing.json has a running unit and "· loop block <blocks>/<max>" in an until-done run.
-  --json                 status.json + the derived "state" (needs_human | ended | waiting_on_you | waiting_on_agent |
-                         working | stalled | none) and "line".
+  --json                 status.json + "project" (folder name), "project_path", "state_dir", the derived "state" (needs_human |
+                         ended | waiting_on_you | waiting_on_agent | working | stalled | none) and "line".
   --statusline           for ~/.claude/settings.json statusLine: reads Claude Code's status JSON on stdin and prints
                          "[<model>] ctx <used>% · $<cost> · <line without the smartuse prefix>".
   --subagent-statusline  for the plugin's subagentStatusLine: one JSON line per task {"id", "content"}.
 Windows: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the JSON on
-stdin, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"); the renderers print UTF-8 ("·")
-whatever the console code page (stdout is reconfigured in main()).
+stdin, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"); stdin is read as bytes and decoded
+as UTF-8 (Windows Python would decode a pipe in the ANSI code page and raise on the first non-ASCII byte, losing the event);
+the renderers print UTF-8 ("·") whatever the console code page (stdout is reconfigured in main()).
 Never blocks a turn. Any error -> exit 0 silently (a heartbeat must never stop the work).
 """
-import json, os, sys, datetime, pathlib
+import json, os, sys, re, time, datetime, pathlib
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop",
@@ -112,9 +118,21 @@ def project_dir(data=None):
     return pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path((data or {}).get("cwd")) or os.getcwd())
 
 
+def project_key(project):
+    """The state-dir name of a project: its full resolved path with every character outside [A-Za-z0-9._-] replaced by "-"
+    and a leading "-" dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys
+    ~/.claude/projects/. Two repos that share a folder name get two state dirs."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
+
+
 def state_dir(project, create=False):
-    """Per-project state lives under the user's home, never inside the repo (same rule as ledger.py)."""
-    d = HOME / ".claude" / "smartuse" / "projects" / project.name
+    """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (same rule as ledger.py and
+    until-done.py). 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist and projects/<folder
+    name>/ does, that old dir is used (read and written), so state recorded before the change stays visible."""
+    base = HOME / ".claude" / "smartuse" / "projects"
+    d = base / project_key(project)
+    if not d.is_dir() and project.name and project.name != d.name and (base / project.name).is_dir():
+        d = base / project.name
     if create:
         d.mkdir(parents=True, exist_ok=True)
     return d
@@ -132,10 +150,33 @@ def read_dict(path):
     return d if isinstance(d, dict) else None
 
 
+def stdin_json():
+    """stdin as JSON, read as bytes and decoded as UTF-8: Windows Python decodes a piped stdin in the ANSI code page, where a
+    non-ASCII byte in a tool argument raises and the event would be lost; a bad byte becomes U+FFFD instead."""
+    raw = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8", "replace")
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
 def write_json(path, obj):
+    """Atomic: tmp file + os.replace. On Windows the replace raises PermissionError while another hook or the status line has
+    the file open: retry 5 times, 20 ms apart; still failing -> drop the tmp file and give up (last writer wins). Never raises."""
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return True
+            except OSError:
+                if attempt < 4:
+                    time.sleep(0.02)
+    except Exception:
+        pass
+    try:
+        tmp.unlink()
+    except Exception:
+        pass
+    return False
 
 
 def lock(sdir):
@@ -187,12 +228,11 @@ def active_routing(sdir):
     return r if r and r.get("active") else None
 
 
-def gate_will_block(sdir, data):
+def gate_will_block(sdir):
     """Mirror of until-done.py's unit rule: the Stop gate refuses the stop while an active until_done run has units
-    pending / running / fail. The gate's check command cannot be predicted here: when only the check fails the line
-    says "waiting on you" until the next tool call clears it."""
-    if data.get("stop_hook_active"):
-        return False
+    pending / running / fail, no needs_human and blocks < max_blocks. stop_hook_active plays no part: Claude Code sets it
+    on every Stop after a block and the gate holds until done or max_blocks. The gate's check command cannot be predicted
+    here: when only the check fails the line says "waiting on you" until the next tool call clears it."""
     r = active_routing(sdir)
     if not r or not r.get("until_done") or r.get("needs_human"):
         return False
@@ -251,7 +291,7 @@ def apply(st, ev, data, now, sdir):
     elif ev == "Stop":
         st["tool_running"] = None
         st["notification"] = None
-        if not gate_will_block(sdir, data):
+        if not gate_will_block(sdir):
             st["turn_ended"] = True
             st["waiting_since"] = st.get("waiting_since") or iso(now)
     elif ev == "SessionEnd":
@@ -263,7 +303,7 @@ def apply(st, ev, data, now, sdir):
 
 def on_event():
     try:
-        data = json.load(sys.stdin)
+        data = stdin_json()
         if not isinstance(data, dict):
             return
         ev = data.get("hook_event_name") or ""
@@ -306,8 +346,9 @@ def routing_suffix(r):
     return s
 
 
-def render(sdir, now=None):
-    """-> {"state", "line" (with the smartuse prefix), "short" (without), "status"}"""
+def render(sdir, now=None, name=None):
+    """-> {"state", "line" (with the smartuse prefix), "short" (without), "status"}; name = the repo folder name for the
+    "no activity" line (the state dir's name by default, which is the path key)."""
     now = now or utcnow()
     r = active_routing(sdir)
     st = read_dict(sdir / "status.json")
@@ -315,7 +356,7 @@ def render(sdir, now=None):
     if r and r.get("needs_human"):
         state, body = "needs_human", "NEEDS YOU: " + oneline(r["needs_human"], 80)
     elif st is None:
-        state, body = "none", f"no activity recorded for {sdir.name}"
+        state, body = "none", f"no activity recorded for {name or sdir.name}"
     elif st.get("ended"):
         state, body = "ended", f"session ended {since(st.get('updated'), now)} ago"
     elif st.get("notification") == "permission_prompt":
@@ -355,13 +396,14 @@ def cli_sdir():
 
 def statusline():
     try:
-        data = json.load(sys.stdin)
+        data = stdin_json()
     except Exception:
         data = {}
     data = data if isinstance(data, dict) else {}
     ws = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
     cwd = native_path(ws.get("project_dir") or ws.get("current_dir") or data.get("cwd")) or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    hb = render(state_dir(pathlib.Path(str(cwd))))
+    proj = pathlib.Path(str(cwd))
+    hb = render(state_dir(proj), name=proj.name)
     head = []
     model = data.get("model") if isinstance(data.get("model"), dict) else {}
     if model.get("display_name"):
@@ -390,7 +432,7 @@ def elapsed(start, now):
 
 def subagent_statusline():
     try:
-        data = json.load(sys.stdin)
+        data = stdin_json()
         tasks = data.get("tasks") if isinstance(data, dict) else None
         if not isinstance(tasks, list):
             return
@@ -425,10 +467,12 @@ def main():
             pass
     args = sys.argv[1:]
     if "--line" in args:
-        print(render(cli_sdir())["line"])
+        print(render(cli_sdir(), name=project_dir().name)["line"])
     elif "--json" in args:
-        hb = render(cli_sdir())
-        print(json.dumps({**(hb["status"] or {}), "project": cli_sdir().name, "state": hb["state"], "line": hb["line"]}, indent=2, ensure_ascii=False))
+        proj, sdir = project_dir(), cli_sdir()
+        hb = render(sdir, name=proj.name)
+        print(json.dumps({**(hb["status"] or {}), "project": proj.name, "project_path": str(proj.resolve()), "state_dir": str(sdir),
+                          "state": hb["state"], "line": hb["line"]}, indent=2, ensure_ascii=False))
     elif "--statusline" in args:
         statusline()
     elif "--subagent-statusline" in args:

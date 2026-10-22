@@ -5,8 +5,10 @@
 # ran nothing there; the real interpreter is `python` or `py -3`. Try the candidates in that order and exec the first one
 # that can run `-c "import sys"`. The probe takes its stdin from /dev/null and discards its output, so the hook's stdin
 # (the event JSON) reaches the interpreter untouched. None works -> print nothing, exit 0: a hook must never block.
+# PYTHONUTF8=1 puts every hook in UTF-8 mode: on Windows, stdin/stdout and open() would otherwise use the ANSI code page.
 # Usage: bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/<hook>.py" [args…]
 works() { "$@" -c "import sys" </dev/null >/dev/null 2>&1; }
+export PYTHONUTF8=1
 works python3 && exec python3 "$@"
 works python && exec python "$@"
 works py -3 && exec py -3 "$@"

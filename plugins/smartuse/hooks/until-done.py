@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
 """until-done.py — Stop hook: the deterministic half of `run-plan --until-done`.
 
-When ~/.claude/smartuse/projects/<repo>/routing.json is active with "until_done": true, the turn may NOT end while
-units are still pending / running / failed, or while the repo's check command fails. The hook blocks the stop with a
-reason the model reads ("units left: 3, 4 · check failed: …"), so the session keeps working. It lets the turn end when:
+When the project's routing.json is active with "until_done": true, the turn may NOT end while units are still pending /
+running / failed, or while the repo's check command fails. The hook blocks the stop with a reason the model reads ("units
+left: 3, 4 · check failed: …"), so the session keeps working. It lets the turn end when:
   - routing.needs_human is set (the model wrote the question it needs answered),
   - every unit is pass / blocked and the check passes (or no check is configured),
-  - stop_hook_active is true (Claude Code already blocked once this turn — never loop),
-  - the hook has blocked `max_blocks` times for this run (default 6; stored in routing.json),
+  - the hook has blocked `max_blocks` times for this run (default 6; the counter `blocks` lives in routing.json),
   - routing.active is false.
+Claude Code sets stop_hook_active=true on EVERY Stop that follows a block, so the gate ignores that flag on purpose:
+allowing on it would push exactly once per user prompt. The loop is bounded by `max_blocks` instead.
+State dir: ~/.claude/smartuse/projects/<key>/ (shared with heartbeat.py and ledger.py). <key> is the repo's full resolved
+path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-" dropped (/home/u/proj -> home-u-proj,
+C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys ~/.claude/projects/, so two repos that share a folder name no
+longer share routing.json. 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist and
+projects/<folder name>/ does, that old dir is used (read and written), so a run started before the change keeps working.
 The check command is NEVER taken from routing.json (the model writes that file). It comes only from the human-authored
 adapter `.claude/smartuse.local.md` (`check:`), is screened by the bash-guard rules, must be one of a few exact shapes
 (`npm test`, `pytest`, `make test`, `cargo test`, `go test ./...`, `dotnet test`, …) or a `bash <script>` the human pinned by
-hash in a ROOT-OWNED file (/etc/smartuse/trusted-checks.json, installed with sudo — `--trust` only prints the commands),
-contains no shell metacharacters, and runs with shell=False. A file-guard hook denies
-Claude's Write/Edit on the adapter and on the pin file. Its output is redacted (last 8 lines, secrets masked).
+hash in a ROOT-OWNED file (/etc/smartuse/trusted-checks.json, installed with sudo — `--trust` only prints the commands;
+Linux/macOS only: Windows has no root-owned /etc/smartuse, so only the fixed shapes run there), contains no shell
+metacharacters, and runs with shell=False. The runner is resolved with shutil.which first (on Windows npm / pnpm / yarn /
+mvn / gradle are .cmd shims that CreateProcess alone does not find; which honours PATHEXT) and its output is decoded as
+UTF-8 with replacement, never strictly in the console code page. A runner that is not installed blocks ONCE ("check
+command not found: …") and is recorded in routing.json as `check_error` {check, exe, reason, at}: the next Stop allows
+instead of blocking six times; the check runs again once `check:` changes or the runner appears on PATH. A file-guard hook
+denies Claude's Write/Edit on the adapter and on the pin file. Check output is redacted (last 8 lines, secrets masked).
 Windows: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the event
-JSON, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"). The block decision is JSON with
-ASCII escapes (json.dumps), so stdout needs no re-encoding.
+JSON, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"). stdin is read as bytes and decoded
+as UTF-8 (Windows Python would decode a pipe in the ANSI code page and raise on the first non-ASCII byte, failing the gate
+open). The block decision is JSON with ASCII escapes (json.dumps), so stdout needs no re-encoding.
 0 model tokens. Any error -> allow the stop (a gate must never trap the session).
 """
-import json, os, sys, subprocess, pathlib, datetime, re, shlex
+import json, os, sys, subprocess, pathlib, datetime, re, shlex, shutil
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 
@@ -32,6 +44,7 @@ FIXED = {("npm", "test"): False, ("pnpm", "test"): False, ("yarn", "test"): Fals
          ("true",): False, ("false",): False}
 ARG_OK = re.compile(r"^[A-Za-z0-9_./:-]+$")
 TRUSTED = pathlib.Path("/etc/smartuse/trusted-checks.json")   # human-pinned `bash <script>` checks, ROOT-OWNED: the agent runs as the user and cannot write it
+POSIX_ONLY = "(Linux/macOS only: needs a root-owned /etc/smartuse; on Windows use one of the fixed shapes)"
 META = re.compile(r"[;&|`$<>\\]|\$\(|\n")
 SECRET = re.compile(r"(?i)(token|password|passwd|secret|api[_-]?key|authorization)[^\n]{0,80}")
 
@@ -50,6 +63,37 @@ def native_path(p):
     except Exception:
         pass
     return p
+
+
+def project_key(project):
+    """The state-dir name of a project: its full resolved path with every character outside [A-Za-z0-9._-] replaced by "-"
+    and a leading "-" dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys
+    ~/.claude/projects/. Two repos that share a folder name get two state dirs."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
+
+
+def state_dir(project, create=False):
+    """~/.claude/smartuse/projects/<project_key()>/ — under the user's home, never inside the repo (same rule as heartbeat.py
+    and ledger.py). 0.3.0 keyed the dir by the folder name alone: while the keyed dir does not exist and projects/<folder
+    name>/ does, that old dir is used (read and written), so state recorded before the change stays visible."""
+    base = HOME / ".claude" / "smartuse" / "projects"
+    d = base / project_key(project)
+    if not d.is_dir() and project.name and project.name != d.name and (base / project.name).is_dir():
+        d = base / project.name
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def stdin_json():
+    """The event JSON from stdin, read as bytes and decoded as UTF-8: Windows Python decodes a piped stdin in the ANSI code
+    page, where one non-ASCII byte raises and the gate would fail open; a bad byte becomes U+FFFD instead."""
+    raw = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8", "replace")
+    return json.loads(raw.decode("utf-8", "replace"))
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def adapter_check(project):
@@ -132,11 +176,14 @@ def safe_argv(check, project):
                 return argv, ""
             return None, f"extra arguments not allowed after `{' '.join(shape)}`"
     return None, ("not an allowed check. Allowed: " + ", ".join(" ".join(k) for k in FIXED if k[0] not in ("true", "false")) +
-                  ", or a `bash <script-in-repo>` the human pinned with: bash <hook dir>/py.sh <hook dir>/until-done.py --trust \"bash path/to/check.sh\" (run from the repo)")
+                  ", or a `bash <script-in-repo>` the human pinned with: bash <hook dir>/py.sh <hook dir>/until-done.py --trust \"bash path/to/check.sh\" (run from the repo) " + POSIX_ONLY)
 
 
 def trust(check):
-    """Human helper: prints the pin entry and the sudo command that installs it. Writes nothing itself."""
+    """Human helper: prints the pin entry and the sudo command that installs it. Writes nothing itself.
+    On Windows there is no root-owned /etc/smartuse, so it prints the one-line refusal and nothing else."""
+    if os.name == "nt":
+        print("`bash <script>` pins are not available here " + POSIX_ONLY); return
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
     argv = shlex.split(check)
     if len(argv) != 2 or argv[0] not in ("bash", "sh") or argv[1].startswith(("-", "/", "~")) or ".." in argv[1] or not (project / argv[1]).is_file():
@@ -150,12 +197,35 @@ def trust(check):
     body = json.dumps(existing, indent=2)
     print("Run these yourself in your terminal (root-owned file = the human boundary; the agent cannot write it):\n")
     print("sudo mkdir -p /etc/smartuse && sudo chmod 755 /etc/smartuse && sudo tee /etc/smartuse/trusted-checks.json >/dev/null <<'JSON'\n" + body + "\nJSON\nsudo chmod 644 /etc/smartuse/trusted-checks.json")
-    print("\nRe-run this after you change the script (the hash is pinned).")
+    print("\nRe-run this after you change the script (the hash is pinned). " + POSIX_ONLY)
 
 
 def redact(text):
     lines = [SECRET.sub(lambda m: m.group(1) + " [redacted]", l) for l in text.strip().splitlines()[-8:]]
     return "\n".join(l[:200] for l in lines)
+
+
+def run_check(check, argv, project, prior):
+    """Run an allowed check in the repo -> (reason to block or "", check_error to record or None).
+    argv[0] goes through shutil.which (PATHEXT: npm -> npm.cmd on Windows, which CreateProcess alone does not find).
+    A runner that is not installed is reported ONCE: `prior` is routing.json's check_error, and while it names this same
+    check with the same (missing) resolution the check is skipped, so the next Stop allows instead of blocking six times."""
+    exe = shutil.which(argv[0])
+    if isinstance(prior, dict) and prior.get("check") == check and prior.get("exe") == exe:
+        return "", None
+    argv0, argv = argv[0], [exe or argv[0]] + argv[1:]
+    try:
+        cp = subprocess.run(argv, shell=False, cwd=str(project), capture_output=True, encoding="utf-8", errors="replace", timeout=300)
+    except subprocess.TimeoutExpired:
+        return f"check timed out: `{check}`", None
+    except FileNotFoundError:
+        reason = f"check command not found: {argv0} — install it or fix `check:` in .claude/smartuse.local.md"
+        return reason, {"check": check, "exe": exe, "reason": reason, "at": utc_now()}
+    except Exception as e:
+        return f"check could not run: {type(e).__name__}", None
+    if cp.returncode != 0:
+        return f"check failed (exit {cp.returncode}): `{check}`\n" + redact(cp.stdout + "\n" + cp.stderr), None
+    return "", None
 
 
 def allow():
@@ -171,13 +241,13 @@ def main():
     if len(sys.argv) > 2 and sys.argv[1] == "--trust":
         trust(sys.argv[2]); return   # prints instructions only
     try:
-        data = json.load(sys.stdin)
+        data = stdin_json()
     except Exception:
         allow()
-    if data.get("stop_hook_active"):
+    if not isinstance(data, dict):
         allow()
     project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
-    rpath = HOME / ".claude" / "smartuse" / "projects" / project.name / "routing.json"
+    rpath = state_dir(project) / "routing.json"
     if not rpath.exists():
         allow()
     try:
@@ -196,23 +266,21 @@ def main():
     if left:
         reasons.append("units not finished: " + ", ".join(f"#{u.get('id')} {u.get('title', '')[:40]} [{u.get('status') or 'pending'}]" for u in left[:6]))
     check = adapter_check(project)  # never from routing.json
+    check_error = None
     if check and not left:
         argv, why = safe_argv(check, project)
         if argv is None:
             reasons.append(f"check command refused ({why}); fix `check:` in .claude/smartuse.local.md")
         else:
-            try:
-                cp = subprocess.run(argv, shell=False, cwd=str(project), capture_output=True, text=True, timeout=300)
-                if cp.returncode != 0:
-                    reasons.append(f"check failed (exit {cp.returncode}): `{check}`\n" + redact(cp.stdout + "\n" + cp.stderr))
-            except subprocess.TimeoutExpired:
-                reasons.append(f"check timed out: `{check}`")
-            except Exception as e:
-                reasons.append(f"check could not run: {type(e).__name__}")
+            why, check_error = run_check(check, argv, project, r.get("check_error"))
+            if why:
+                reasons.append(why)
     if not reasons:
         allow()
     r["blocks"] = blocks + 1
-    r["last_block"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    r["last_block"] = utc_now()
+    if check_error:
+        r["check_error"] = check_error
     try:
         rpath.write_text(json.dumps(r, indent=2), encoding="utf-8")
     except Exception:

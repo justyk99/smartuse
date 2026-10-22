@@ -22,19 +22,19 @@ one line (the ask) → ~8–10 clicks on options (most are "Recommended" = Claud
 | `!` shell preprocessing for date / branch / task folders | Claude Code commands + skills dynamic context (official plugin-dev docs) |
 
 ## What it guarantees / does not
-Guarantees: every slot filled, assumed or `unknown → who`; no invented fact; saved in the task folder; self-check table. Does not: the research after "go"; a wrong answer from the author; a vague ask in `quick` mode produces a prompt full of `assumed:` lines (that is the point — he corrects by exception).
+Guarantees: every slot filled, assumed or `unknown → who`; no invented fact; saved in the task folder; self-check table (14 lines; the receipt wrote `<n>/13` until 0.4.0 — the test log below keeps the scores as reported then). Does not: the research after "go"; a wrong answer from the author; a vague ask in `quick` mode produces a prompt full of `assumed:` lines (that is the point — he corrects by exception).
 
 ## Test log
 (appended after each run — see § below)
 
 ### Test A — 2026-10-15, the git repo, `quick dry`, ask = "PWA for the the customer web app. a colleague will build push on top after. Deadline 3-4 weeks. Reference: old system PWA + a colleague's docs in ~/Downloads/PWA"
 - Headless `claude -p`, bypass mode, 8 turns, 7 min 11 s, $2.53 (Explore subagent did the ground check).
-- Output: `task.md` 53 lines / 1,754 words + empty `decisions.md`; self-check 13/13; 5-line summary; 9 `assumed:` items; found that `~/Downloads/PWA` does not exist in WSL (real path `/mnt/c/Users/user/Downloads/PWA`) and read all 7 docs there.
+- Output: `task.md` 53 lines / 1,754 words + empty `decisions.md`; self-check 13/13 (against the receipt's /13 of the time; the list has 14 lines, denominator fixed in 0.4.0); 5-line summary; 9 `assumed:` items; found that `~/Downloads/PWA` does not exist in WSL (real path `/mnt/c/Users/user/Downloads/PWA`) and read all 7 docs there.
 - Versus the 2026-10-15 roast prompt: covered every item it listed (file:line reference code, both lockfiles, HTTPS unknown → the deploy owner, a colleague's boot-gate bug as a gate, cloudflared check, owners per file) plus items it lacked (appetite with the cut list, 5 rabbit holes with evidence, 8 open questions each with an owner, an end-to-end verification step, the iOS separate-storage re-login risk).
 - Weakness: 1,754 words against a 1-page target → rule changed to ≤ 1,200 words with overflow in `research.md`.
 
 ### Test B — 2026-10-15, the svn repo, `quick dry`, ask = "Balance transfer credits the account many times the amount when the rate is entered as a percentage like 80 instead of 0.8. A customer reported it on the account details page."
-- Headless, 6 turns, 7 min 51 s, $2.97. Output 82 lines / 1,282 words in the the svn repo task template (Status · Task · Research · Plan · Notes · Decisions); self-check 12/13 (two Jira screenshots not downloaded → marked unknown).
+- Headless, 6 turns, 7 min 51 s, $2.97. Output 82 lines / 1,282 words in the the svn repo task template (Status · Task · Research · Plan · Notes · Decisions); self-check 12/13 (two Jira screenshots not downloaded → marked unknown; /13 as reported then, see Test A).
 - The ground check found the bug was ALREADY FIXED: Jira a Jira ticket (read via the jira tool), the back-office fix, an earlier revision by the file owner 2026-09-25, deployed 2026-09-29 — and that the fix left two gaps (the sister system's `transfer` module has the same multiply with no cap; stored rows with rate > 1 never reset). The bug bank's "since when / where" slots were answered from svn + Jira, not from the author.
 - It mapped every caller of the sister system's transfer path (web, app, api), named the file owner (the file owner, 11 of the last 20 commits), turned the 2026-05-05 shared-SP incident into a gate, and wrote 4 rabbit holes (including that the sister system may under-credit rather than over-credit — "trace before assuming same bug").
 - Weakness: none blocking. Cost per quick run ≈ $2.5–3 (the Explore subagent reads a lot); fine for multi-day work, wrong for a one-file fix — which the size check refuses anyway.
