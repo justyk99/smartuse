@@ -31,6 +31,9 @@ Render (no model tokens):
   --statusline           for ~/.claude/settings.json statusLine: reads Claude Code's status JSON on stdin and prints
                          "[<model>] ctx <used>% · $<cost> · <line without the smartuse prefix>".
   --subagent-statusline  for the plugin's subagentStatusLine: one JSON line per task {"id", "content"}.
+Windows: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the JSON on
+stdin, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"); the renderers print UTF-8 ("·")
+whatever the console code page (stdout is reconfigured in main()).
 Never blocks a turn. Any error -> exit 0 silently (a heartbeat must never stop the work).
 """
 import json, os, sys, datetime, pathlib
@@ -57,6 +60,22 @@ def parse_ts(s):
         return t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
     except Exception:
         return None
+
+
+def native_path(p):
+    """A path string from the event JSON as this interpreter can open it. On Windows the hook runs through Git Bash, which
+    converts POSIX paths in arguments and environment variables for a Windows program but not inside JSON strings: given
+    "/c/Users/x/t.jsonl", Windows Python looks under <current drive>:/c/Users/x/ and finds nothing. So when the string starts
+    with "/" and nothing exists there, the MSYS drive form "/c/..." becomes "C:/..."; "/tmp/..." has no drive letter and stays
+    as it is. Anything else, and everything on other platforms, comes back unchanged. Never raises."""
+    try:
+        s = str(p or "")
+        if os.name == "nt" and s.startswith("/") and not os.path.exists(s):
+            if len(s) >= 2 and "a" <= s[1].lower() <= "z" and (len(s) == 2 or s[2] == "/"):
+                return s[1].upper() + ":" + (s[2:] or "/")
+    except Exception:
+        pass
+    return p
 
 
 def fmt_dur(seconds):
@@ -90,7 +109,7 @@ def to_int(v, default=0):
 
 
 def project_dir(data=None):
-    return pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or (data or {}).get("cwd") or os.getcwd())
+    return pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path((data or {}).get("cwd")) or os.getcwd())
 
 
 def state_dir(project, create=False):
@@ -341,7 +360,7 @@ def statusline():
         data = {}
     data = data if isinstance(data, dict) else {}
     ws = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
-    cwd = ws.get("project_dir") or ws.get("current_dir") or data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    cwd = native_path(ws.get("project_dir") or ws.get("current_dir") or data.get("cwd")) or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     hb = render(state_dir(pathlib.Path(str(cwd))))
     head = []
     model = data.get("model") if isinstance(data.get("model"), dict) else {}
@@ -379,7 +398,7 @@ def subagent_statusline():
         for t in tasks:
             if not isinstance(t, dict) or t.get("id") is None:
                 continue
-            cwd = str(t.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+            cwd = str(native_path(t.get("cwd")) or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
             if cwd not in steps:
                 steps[cwd] = ""
                 _, running = running_units(active_routing(state_dir(pathlib.Path(cwd))))
@@ -399,6 +418,11 @@ def subagent_statusline():
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):   # the renderers print "·": on Windows a pipe defaults to cp1252, which the reader shows as mojibake
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     args = sys.argv[1:]
     if "--line" in args:
         print(render(cli_sdir())["line"])

@@ -15,6 +15,9 @@ adapter `.claude/smartuse.local.md` (`check:`), is screened by the bash-guard ru
 hash in a ROOT-OWNED file (/etc/smartuse/trusted-checks.json, installed with sudo — `--trust` only prints the commands),
 contains no shell metacharacters, and runs with shell=False. A file-guard hook denies
 Claude's Write/Edit on the adapter and on the pin file. Its output is redacted (last 8 lines, secrets masked).
+Windows: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, never inside the event
+JSON, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"). The block decision is JSON with
+ASCII escapes (json.dumps), so stdout needs no re-encoding.
 0 model tokens. Any error -> allow the stop (a gate must never trap the session).
 """
 import json, os, sys, subprocess, pathlib, datetime, re, shlex
@@ -31,6 +34,22 @@ ARG_OK = re.compile(r"^[A-Za-z0-9_./:-]+$")
 TRUSTED = pathlib.Path("/etc/smartuse/trusted-checks.json")   # human-pinned `bash <script>` checks, ROOT-OWNED: the agent runs as the user and cannot write it
 META = re.compile(r"[;&|`$<>\\]|\$\(|\n")
 SECRET = re.compile(r"(?i)(token|password|passwd|secret|api[_-]?key|authorization)[^\n]{0,80}")
+
+
+def native_path(p):
+    """A path string from the event JSON as this interpreter can open it. On Windows the hook runs through Git Bash, which
+    converts POSIX paths in arguments and environment variables for a Windows program but not inside JSON strings: given
+    "/c/Users/x/t.jsonl", Windows Python looks under <current drive>:/c/Users/x/ and finds nothing. So when the string starts
+    with "/" and nothing exists there, the MSYS drive form "/c/..." becomes "C:/..."; "/tmp/..." has no drive letter and stays
+    as it is. Anything else, and everything on other platforms, comes back unchanged. Never raises."""
+    try:
+        s = str(p or "")
+        if os.name == "nt" and s.startswith("/") and not os.path.exists(s):
+            if len(s) >= 2 and "a" <= s[1].lower() <= "z" and (len(s) == 2 or s[2] == "/"):
+                return s[1].upper() + ":" + (s[2:] or "/")
+    except Exception:
+        pass
+    return p
 
 
 def adapter_check(project):
@@ -155,7 +174,7 @@ def main():
         allow()
     if data.get("stop_hook_active"):
         allow()
-    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd())
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or native_path(data.get("cwd")) or os.getcwd())
     rpath = HOME / ".claude" / "smartuse" / "projects" / project.name / "routing.json"
     if not rpath.exists():
         allow()
