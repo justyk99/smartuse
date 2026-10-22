@@ -67,7 +67,7 @@ Open `banks.md` (same folder) and use the bank for the task type. Rules that mak
 `quick` mode (also the only mode that works headless — `claude -p` cannot answer questions): no questions. Every slot gets the § 1 guess, each marked `assumed:` in the prompt and listed in the summary so the user corrects by exception.
 
 ## 3. Write the kickoff prompt
-Fill `templates/kickoff.md` (sections: where things are · people / scope / dates / appetite · non-goals · constraints + rabbit holes · deliverables with gates · process · open questions first · end-to-end verification). **≤ 1,200 words.** Overflow (long evidence lines, the audit of old code, attachment digests) goes to `research.md` beside it, and the prompt says `see research.md § n` — the executing session reads it when needed. Reference files by path, never paste contents. Plain sentences around exact names. Every fact traceable to § 1, § 2, or marked `unknown → who` / `assumed:`.
+Fill `templates/kickoff.md` (sections: where things are · people / scope / dates / appetite · non-goals · constraints + rabbit holes · deliverables with gates · process · open questions first · end-to-end verification). **≤ 1,200 words.** Overflow (long evidence lines, the audit of old code, attachment digests) goes to `research.md` beside it, and the prompt says `see research.md § n` — the executing session reads it when needed. Reference files by path, never paste contents. Plain sentences around exact names. Every fact traceable to § 1, § 2, or marked `unknown → who` / `assumed:`. A source you could not read (memory, a tool that is down, a denied path) is `not checked: <why>`, never "none found". Deliverables are work items only, each with its gate; the hand-off lines (run-plan, `/goal`, living-docs) belong to § 6, never to that list. People are named as the repo or the user names them (`git config user.name`, CODEOWNERS, the ask) — never an email address taken from the session's context (the prompt may be committed).
 
 ## 4. Save where it survives /clear
 - Task folder per the adapter: `task_root/<task>/task.md` (+ `decisions.md`); if `task_template` is set, start from it and put the prompt under `## Task`, leaving `## Decisions` empty.
@@ -76,13 +76,13 @@ Fill `templates/kickoff.md` (sections: where things are · people / scope / date
 - `dry` mode → `~/.claude/tmp/make-prompt/<task>/` only, nothing in the repo. If that path cannot be written (sandbox, permission denied), try `${TMPDIR:-/tmp}/smartuse/make-prompt/<task>/`; if that is refused too, **print the whole kickoff in the reply under `## Kickoff (unsaved)`** so nothing is lost — never answer with only the summary.
 
 ## 5. Self-check — the quality gate, shown with the hand-off
-Score the saved prompt, ✓ / ✗ per line (14 lines — the receipt says `<n>/14`); fix every ✗ with one more question (interview) or an explicit `unknown → who` (quick) before handing off:
+Score the saved prompt, ✓ / ✗ per line (14 lines — the receipt says `<n>/14`, an exact count, never "about"; the ✗ items you list are exactly the lines not counted); fix every ✗ with one more question (interview) or an explicit `unknown → who` (quick) before handing off:
 `≤ 1,200 words (overflow in research.md) · right repo · paths verified · owner named per file to touch · dates absolute · appetite stated · non-goals listed · deliverables ordered with a gate each · acceptance check for "done" · end-to-end verification step · open questions each with an owner · past incidents turned into gates · attachments read · nothing pasted that a path could reference`.
 
 ## 6. Hand-off (then WAIT — never start the work)
 Print, in this order:
-1. `Prompt saved: <path>` and the self-check line (✓ count, the ✗ items).
-2. **Human summary, 5 lines** (what · who · when · done · not) — ready to paste to the team or Jira.
+1. `Prompt saved: <path>` and the self-check line, exactly `Self-check: <n>/14 — ✗ <item> · <item>` with 14 − n items after the ✗ (none: `Self-check: 14/14`).
+2. **Human summary, 5 lines** (what · who · when · done · not) — ready to paste to the team or Jira. Never firmer than the kickoff: an `assumed:` date or scope stays marked there (`deadline 2026-11-12, assumed`), and "about three weeks" never becomes a "hard deadline".
 3. The `assumed:` list (quick mode) or the open questions (interview).
 4. Next step, paste-ready, in this order: (a) `/smartuse:run-plan <the saved task.md path> --routing safe` — add `--until-done` for the loop (no "go" between batches); this is where the receipt per plan step comes from. run-plan is manual-only: print the line for the user to type, never call it. (b) The no-receipts alternative: small task → `say "go" — I start deliverable 1 in plan mode here`; big task → `/clear, then "continue <task folder>" (fresh context beats this one)`. (c) When "done" is a checkable condition → `set it as /goal <condition> so the session cannot stop early`; design-heavy → "This needs a design pass — switch to your strongest model". (d) Always: `after your commit: /smartuse:living-docs <task folder> <commit>`.
 
