@@ -17,7 +17,8 @@
 - [x] M2 wait gate (Stop): no idle stop after a hand-off without an armed watcher or an honest `STOPPED:` (187 cases, the incident replayed, 57 mutations caught) · M3 the status line shows `STOPPED · handed off 20:41 (builder) — nothing will wake this session` or `waiting on builder · watcher armed 20:41` (heartbeat 105)
 - [ ] M4 steering: make-prompt `Runs on:`; run-plan pre-flight (`needs-machine`), a `command` tier (background task, no model), inputs by absolute path; README lead; eval cases `kickoff-two-sessions`, `run-plan-wrong-machine`
 - [x] heartbeat suite on a slow Windows laptop: 3 timing checks overshot (64 of 67 on 99eab34) — ages now checked against the clock read around each call (81e095b); the laptop confirms ALL PASS
-- [x] `py.sh` started Python twice per hook event, plus the Store stub on Windows: about 2 s per event on the laptop (a start there: 0.4–3.6 s). The launcher now remembers the interpreter it proved: one start per event · [ ] laptop timing after the change
+- [x] `py.sh` started Python twice per hook event, plus the Store stub on Windows: about 2 s per event on the laptop (a start there: 0.4–3.6 s). The launcher now remembers the interpreter it proved: one start per event; laptop 0.5–1.8 s per call after (median ~1.4 s)
+- [ ] Still ~3 s per Bash call on that laptop (two hook events, Python's own start): try `-S` (no site import; the hooks are stdlib only) and a lighter heartbeat (PostToolUse only) option; measure on the laptop before claiming
 
 ## 0.5.0 — also: measured
 - [x] The routed-vs-not A/B over the 5 bench asks × 3 dials (run 3: −24 % median cost, n=4) · [ ] at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"
