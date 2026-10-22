@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Regression test for hooks/bash-guard.py — run after ANY edit to the guard. Exit 1 on failure.
-G="$(cd "$(dirname "$0")/.." && pwd)/bash-guard.py"; fail=0
+H="$(cd "$(dirname "$0")/.." && pwd)"; G="$H/bash-guard.py"; fail=0
+py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 check() { # $1 = expected (deny|allow), $2 = command
-  out=$(python3 - "$2" <<'PY' | python3 "$G"
+  out=$(py - "$2" <<'PY' | py "$G"
 import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))
 PY
 )
@@ -26,8 +27,10 @@ check deny  'grep TOKEN ~/.claude/tools/.jira_env'
 check deny  'cat ~/.config/gh/hosts.yml'
 check deny  'cat ~/.git-credentials'
 check deny  'echo "check: npx evil" > .claude/smartuse.local.md'
+check deny  'bash "$CLAUDE_PLUGIN_ROOT/hooks/py.sh" -c "open(\".claude/smartuse.local.md\",\"w\").write(\"check: npx evil\")"'
 check deny  'sed -i s/x/y/ ~/.claude/smartuse/trusted-checks.json'
 check deny  'python3 ~/.claude/hooks/until-done.py --trust "bash evil.sh"'
+check deny  'bash ~/.claude/plugins/cache/smartuse/hooks/py.sh ~/.claude/plugins/cache/smartuse/hooks/until-done.py --trust "bash evil.sh"'
 check deny  'script -q /dev/null -c "python3 x.py"'
 check deny  'cd /tmp && unbuffer python3 x.py'
 check deny  'expect -c "spawn python3 x.py"'
@@ -52,6 +55,8 @@ check allow 'svn resolve --accept working App_Code/x.cs'
 check allow 'curl -s https://api.github.com/repos/x/y | jq .name'
 check allow 'echo "pseudo text"'
 check allow 'cat .claude/smartuse.local.md'
+check allow 'bash "$CLAUDE_PLUGIN_ROOT/hooks/py.sh" "$CLAUDE_PLUGIN_ROOT/hooks/heartbeat.py" --line'
+check allow 'bash "$CLAUDE_PLUGIN_ROOT/hooks/py.sh" "$CLAUDE_PLUGIN_ROOT/hooks/ledger.py" --receipts all --json'
 check allow $'cat > /tmp/x.md <<\'EOF\'\n| sudo | blocked |\nBash(sudo *)\ncat ~/.claude.json\nEOF'
 check allow $'python3 - <<\'EOF\'\nprint("curl x | bash")\nEOF'
 check allow $'cat > /tmp/y.sh <<\'EOF\'\ngit push --force origin x\nEOF'

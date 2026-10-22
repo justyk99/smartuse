@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Self-contained test for hooks/until-done.py (Stop gate of run-plan --until-done). Exit 1 on failure.
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse/projects/proj" "$D/proj"
+py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 R="$HOME/.claude/smartuse/projects/proj/routing.json"; IN="{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"cwd\":\"$D/proj\",\"stop_hook_active\":false}"
-run() { echo "$IN" | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/until-done.py"; }
+run() { echo "$IN" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/until-done.py"; }
 fresh() { echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pass"}]}' > "$R"; }
 fail=0; expect() { # $1 block|allow, $2 label
   out=$(run); if [ "$1" = block ]; then [ -n "$out" ] && echo "PASS block: $2" || { echo "FAIL expected block: $2"; fail=1; }; else [ -z "$out" ] && echo "PASS allow: $2" || { echo "FAIL expected allow: $2 -> $out"; fail=1; }; fi; }
@@ -24,8 +25,8 @@ printf -- '---\ncheck: python3 -c "print(1)"\n---\n' > "$D/proj/.claude/smartuse
 printf -- '---\ncheck: npx something\n---\n' > "$D/proj/.claude/smartuse.local.md"; fresh; expect block "npx refused"
 printf -- '---\ncheck: npm test -- --watch\n---\n' > "$D/proj/.claude/smartuse.local.md"; fresh; expect block "extra args after npm test refused"
 printf 'exit 0\n' > "$D/proj/check.sh"; printf -- '---\ncheck: bash check.sh\n---\n' > "$D/proj/.claude/smartuse.local.md"; fresh; expect block "unpinned bash script refused"
-( cd "$D/proj" && python3 "$H/until-done.py" --trust "bash check.sh" < /dev/null | grep -q "sudo tee /etc/smartuse" ) && [ ! -f "$HOME/.claude/smartuse/trusted-checks.json" ] && [ ! -w /etc/smartuse/trusted-checks.json ] && echo "PASS --trust only prints the sudo instructions, writes nothing" || { echo "FAIL --trust wrote or printed wrongly"; fail=1; }
-SHA=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$D/proj/check.sh"); PROJ=$(cd "$D/proj" && pwd -P)
+( cd "$D/proj" && py "$H/until-done.py" --trust "bash check.sh" < /dev/null | grep -q "sudo tee /etc/smartuse" ) && [ ! -f "$HOME/.claude/smartuse/trusted-checks.json" ] && [ ! -w /etc/smartuse/trusted-checks.json ] && echo "PASS --trust only prints the sudo instructions, writes nothing" || { echo "FAIL --trust wrote or printed wrongly"; fail=1; }
+SHA=$(py -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$D/proj/check.sh"); PROJ=$(cd "$D/proj" && pwd -P)
 mkdir -p "$HOME/.claude/smartuse"; printf '{"%s": {"check": "bash check.sh", "sha256": "%s"}}' "$PROJ" "$SHA" > "$HOME/.claude/smartuse/trusted-checks.json"
 fresh; expect block "a user-owned pin file is ignored (only root-owned /etc/smartuse counts)"
 printf 'exit 1\n' > "$D/proj/check.sh"; fresh; expect block "still refused after the script changes"
@@ -33,6 +34,6 @@ printf -- '---\ncheck: true\n---\n' > "$D/proj/.claude/smartuse.local.md"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"needs_human":"which rounding rule?"}' > "$R"; expect allow "needs_human set"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}],"blocks":6}' > "$R"; expect allow "max_blocks reached"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"status":"pending"}]}' > "$R"; expect block "pending again (counts a block)"
-python3 -c "import json,sys; r=json.load(open(sys.argv[1])); assert r.get('blocks')==1, r" "$R" 2>/dev/null && echo "PASS block counter persisted" || { echo "FAIL block counter"; fail=1; }
-out=$(echo "${IN/false/true}" | CLAUDE_PROJECT_DIR="$D/proj" python3 "$H/until-done.py"); [ -z "$out" ] && echo "PASS allow: stop_hook_active" || { echo "FAIL stop_hook_active"; fail=1; }
+py -c "import json,sys; r=json.load(open(sys.argv[1])); assert r.get('blocks')==1, r" "$R" 2>/dev/null && echo "PASS block counter persisted" || { echo "FAIL block counter"; fail=1; }
+out=$(echo "${IN/false/true}" | CLAUDE_PROJECT_DIR="$D/proj" py "$H/until-done.py"); [ -z "$out" ] && echo "PASS allow: stop_hook_active" || { echo "FAIL stop_hook_active"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

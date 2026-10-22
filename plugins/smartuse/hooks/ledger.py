@@ -9,17 +9,18 @@ SubagentStop: if ~/.claude/smartuse/projects/<project-dir-name>/routing.json exi
              that is "running" in routing.json (one receipt per plan step: tier, model, why, override, outcome, verify, tokens,
              tokens by model).
              When run-plan closes (pending.json skill == run-plan), the Stop hook archives routing.json to runs/<started_at>_<task>.json.
-Report:      python3 ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
-             python3 ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
-                                                        from routing.json + runs/, plus a summary line with the agent-output share
-                                                        by model (used by /smartuse:receipts).
-             python3 ledger.py --receipts [task|all] --json -> the same run(s) as JSON for scripts: one object (a list for "all")
-                                                        with the steps verbatim and totals {input, output, by_model}.
+Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
+             bash py.sh ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
+                                                           from routing.json + runs/, plus a summary line with the agent-output share
+                                                           by model (used by /smartuse:receipts).
+             bash py.sh ledger.py --receipts [task|all] --json -> the same run(s) as JSON for scripts: one object (a list for "all")
+                                                           with the steps verbatim and totals {input, output, by_model}.
+             (py.sh = the plugin's launcher: python3, else python, else py -3 — on stock Windows python3 is only the Store stub.)
 Never blocks a turn. Any error -> exit 0 silently (a receipt must never stop the work).
 """
 import json, os, sys, re, time, datetime, pathlib, statistics
 
-HOME = pathlib.Path(os.path.expanduser("~"))
+HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 LEDGER = HOME / ".claude" / "smartuse" / "ledger.jsonl"
 
 

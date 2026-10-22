@@ -14,7 +14,7 @@ jobs:
         run: |
           python3 -c "import json; json.load(open('.claude-plugin/marketplace.json')); json.load(open('plugins/smartuse/.claude-plugin/plugin.json')); json.load(open('plugins/smartuse/hooks/hooks.json'))"
       - name: Shell syntax
-        run: for f in plugins/smartuse/hooks/tests/*.sh bench/run.sh bench/ab.sh bench/fake-claude.sh bench/tests/ab-test.sh; do bash -n "$f"; done
+        run: for f in plugins/smartuse/hooks/py.sh plugins/smartuse/hooks/tests/*.sh bench/run.sh bench/ab.sh bench/fake-claude.sh bench/tests/ab-test.sh; do bash -n "$f"; done
       - name: bash-guard regression
         run: bash plugins/smartuse/hooks/tests/run.sh
       - name: file-guard regression
