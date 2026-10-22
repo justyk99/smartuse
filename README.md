@@ -66,6 +66,9 @@ Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tool
 - Subagents cannot ask you questions. Unknowns come back as `unknown: … → who`.
 - Token savings from `run-plan` routing are **not yet measured**; the A/B on 20 real tasks is on the roadmap. The ledger exists so that the number, when published, has a line of evidence per task.
 
+## Windows
+The hooks run through `plugins/smartuse/hooks/py.sh`, which picks `python3`, `python` or `py -3` (on a stock Windows install `python3` is the Microsoft Store stub). Git Bash is required: Claude Code runs hook commands through it on Windows. `HOME` from Git Bash is honoured; state lives under `~/.claude/smartuse/`.
+
 ## Configure per repo (optional)
 `.claude/smartuse.local.md` with YAML frontmatter: `vcs`, `task_root`, `archive_root`, `docs_root`, `task_template`, `svn_flags`, `author`, `jira_cli`, `check` (the runnable check `run-plan --until-done` must pass, e.g. `npm test`). Without it the skills detect git/svn and the usual folders. Receipts live under `~/.claude/smartuse/` (`ledger.jsonl`, and per repo `routing.json` · `receipts.jsonl` · `runs/`), never inside your repo.
 
