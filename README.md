@@ -91,8 +91,8 @@ scripts/               2: term-scan.py — private-term scan before a public pus
 
 ## Roadmap
 - **0.2**: make-prompt · run-plan · living-docs · reply-style · ledger · bash-guard · evals · bench.
-- **0.3** (this release): a receipt per plan step with the user-override field, `/smartuse:receipts` per task, `run-plan --until-done` with its deterministic Stop gate, `file-guard`.
-- **0.4** (in progress): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model. Then: the measured A/B numbers, "30 days of receipts", the measured post.
+- **0.3** (released 2026-10-22): a receipt per plan step with the user-override field, `/smartuse:receipts` per task, `run-plan --until-done` with its deterministic Stop gate, `file-guard`.
+- **0.4** (this release): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model. Then: the measured A/B numbers, "30 days of receipts", the measured post.
 
 ## Contributing
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Every change to a hook needs its test (`plugins/smartuse/hooks/tests/`; `bash plugins/smartuse/hooks/tests/all.sh` runs every suite). Security reports: [SECURITY.md](SECURITY.md).
