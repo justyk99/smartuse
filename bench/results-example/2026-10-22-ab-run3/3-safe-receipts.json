@@ -1,0 +1,130 @@
+{
+  "active": false,
+  "task": "persistent-store-decision",
+  "dial": "safe",
+  "until_done": true,
+  "started_at": "2026-10-22T08:05:55Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Audit table of every db read/write",
+      "tier": "mechanical",
+      "model": "haiku",
+      "why": "grep inventory into a table; checkable by line refs",
+      "budget_turns": 15,
+      "check": "ok orders.js:12 … ok db.js:12 (7/7) · Tests: 2 passed",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 8,
+      "agent_input": 244072,
+      "agent_output": 12118,
+      "agent_models": [
+        "claude-haiku-5-5"
+      ],
+      "agents": [
+        "af985281c2bba186a"
+      ],
+      "agent_by_model": {
+        "claude-haiku-5-5": {
+          "calls": 8,
+          "input": 244072,
+          "output": 12118
+        }
+      },
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/audit.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Requirements check (persistence, instances, deploy, concurrency)",
+      "tier": "judgment",
+      "model": "session",
+      "why": "weighs unknowns that drive the engine choice",
+      "budget_turns": 0,
+      "check": "9 requirements: 4 answered, 5 unknown -> user",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/requirements.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Decision note in docs/features/persistent-store/DEV.md",
+      "tier": "judgment",
+      "model": "session",
+      "why": "design options + recommendation; money and ID decisions",
+      "budget_turns": 0,
+      "check": "6/6 rabbit holes addressed in DEV.md · Tests: 2 passed",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        "docs/features/persistent-store/DEV.md"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Hand-off for the orders.js owner",
+      "tier": "judgment",
+      "model": "session",
+      "why": "another developer's file - rule gate, write only, no edit",
+      "budget_turns": 0,
+      "check": "handoff written; git diff orders.js/db.js empty (0 lines)",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/handoff-orders-owner.md"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Phased migration plan as separate task folder",
+      "tier": "judgment",
+      "model": "session",
+      "why": "writing a plan with owners/dates/test plan",
+      "budget_turns": 0,
+      "check": "4 phases with dates+owners; 6 kick_ test cases",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-migration/task.md"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Task folder + decisions.md lines (living-docs after commit)",
+      "tier": "judgment",
+      "model": "session",
+      "why": "records the run's decisions; living-docs only runs post-commit",
+      "budget_turns": 0,
+      "check": "6 dated decisions lines; task.md status line ticked; living-docs deferred to post-commit",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/persistent-store-decision/decisions.md",
+        ".task/ACTIVE/persistent-store-decision/task.md"
+      ]
+    }
+  ],
+  "needs_human": "§ 7 Q1: where will this run, and will more than one instance run at once? (decides better-sqlite3 vs pg) — then approve DEV.md decision",
+  "closed_at": "2026-10-22T08:10:08Z"
+}

@@ -13,7 +13,7 @@
 - [ ] Release 0.4.0 (laptop publishes; notes in `docs/releases/0.4.0.md`)
 
 ## 0.5.0 — measured
-- [ ] The routed-vs-not A/B over the 5 bench asks × 3 dials, and over at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"
+- [x] The routed-vs-not A/B over the 5 bench asks × 3 dials (run 3: −24 % median cost, n=4) · [ ] at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"
 - [ ] `claude plugin eval` for all 5 cases in CI (needs an API key secret: YK) — until then, run locally before each release
 - [ ] The subagentStatusLine verified live on the laptop (runtime loading of plugin settings)
 - [ ] until-done on Windows: `--trust` pin path without /etc (pins under a root-equivalent the user owns: documented, not faked)

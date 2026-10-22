@@ -1,0 +1,11 @@
+{
+  "n": 4,
+  "ask": "add request logging to every route",
+  "kickoff": null,
+  "note": "no kickoff",
+  "dials": [
+    "off",
+    "safe",
+    "aggressive"
+  ]
+}

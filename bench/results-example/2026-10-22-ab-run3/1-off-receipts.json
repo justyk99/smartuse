@@ -1,0 +1,132 @@
+{
+  "active": false,
+  "task": "orders-csv-export",
+  "dial": "off",
+  "until_done": true,
+  "started_at": "2026-10-22T07:36:20Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Design note in decisions.md",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "design choices + scope of another dev's file; session model in-conversation",
+      "budget_turns": 5,
+      "check": "decisions.md: 7 design lines written",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": [
+        ".task/ACTIVE/orders-csv-export/decisions.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "toCsv helper + Jest tests",
+      "tier": "build",
+      "model": "opus",
+      "why": "well-specified pure function with runnable tests (routing off: session model)",
+      "budget_turns": 15,
+      "check": "Tests: 10 passed, 10 total; lint clean",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 7,
+      "agent_input": 156179,
+      "agent_output": 4141,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "aaf5365f347c4e3bb",
+        "a4a15cd16b2126184"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 7,
+          "input": 156179,
+          "output": 4141
+        }
+      },
+      "files": [
+        "src/csv.js",
+        "tests/csv.test.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "GET /orders/export.csv route + mount + route test",
+      "tier": "build",
+      "model": "opus",
+      "why": "spec'd route, checkable via ephemeral-port fetch test + curl (routing off: session model)",
+      "budget_turns": 20,
+      "check": "Tests: 13 passed, 13 total; lint clean; curl 200 text/csv",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 7,
+      "agent_input": 165664,
+      "agent_output": 4351,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "afda97237503dd773",
+        "aff0aa797862a7be4"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 7,
+          "input": 165664,
+          "output": 4351
+        }
+      },
+      "files": [
+        "src/routes/orders-export.js",
+        "src/server.js",
+        "tests/orders-export.test.js"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "DEV.md / USER.md summary lines",
+      "tier": "mechanical",
+      "model": "opus",
+      "why": "doc update, checkable by grep (routing off: session model)",
+      "budget_turns": 8,
+      "check": "grep export.csv: DEV 1, USER 1; itemCount: 1",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "agent_calls": 4,
+      "agent_input": 93025,
+      "agent_output": 2498,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "af2431a1660d35def"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 4,
+          "input": 93025,
+          "output": 2498
+        }
+      },
+      "files": [
+        "docs/features/orders-csv-export/DEV.md",
+        "docs/features/orders-csv-export/USER.md"
+      ]
+    }
+  ],
+  "closed_at": "2026-10-22T07:40:49Z"
+}

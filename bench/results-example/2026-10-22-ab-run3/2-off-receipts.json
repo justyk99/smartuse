@@ -1,0 +1,90 @@
+{
+  "active": false,
+  "task": "order-total-rounding",
+  "dial": "off",
+  "until_done": true,
+  "started_at": "2026-10-22T07:51:41Z",
+  "units": [
+    {
+      "id": 1,
+      "title": "Audit table + invoice rounding rule",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "money rule; the kickoff gives no default for the invoice rule",
+      "budget_turns": 10,
+      "check": "table built; 4 of 9 cases wrong today; invoice rule unconfirmed",
+      "blocked_by": null,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "Failing tests in tests/orders.test.js",
+      "tier": "build",
+      "model": "opus",
+      "why": "well-specified test change with a runnable check (routing off -> session model)",
+      "budget_turns": 15,
+      "check": "PASS tests/orders.test.js · 5 passed; lint clean; proof run: 3 new tests fail on current code",
+      "blocked_by": null,
+      "status": "pass",
+      "override": null,
+      "escalated": false,
+      "verify": "no gaps",
+      "agent_calls": 8,
+      "agent_input": 181154,
+      "agent_output": 5254,
+      "agent_models": [
+        "claude-opus-5-5"
+      ],
+      "agents": [
+        "a96386fd914e1b7ed",
+        "abdcb78d3b162568c"
+      ],
+      "agent_by_model": {
+        "claude-opus-5-5": {
+          "calls": 8,
+          "input": 181154,
+          "output": 5254
+        }
+      },
+      "files": [
+        "tests/orders.test.js"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Fix computeTotal() with exact decimal math",
+      "tier": "judgment",
+      "model": "opus",
+      "why": "money + src/routes/orders.js is owned by another developer; diff needs user OK",
+      "budget_turns": 10,
+      "check": "not started: needs the invoice rule (unit 1) + orders.js owner sign-off + user OK of the diff",
+      "blocked_by": 1,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "decisions.md line, living-docs, move folder",
+      "tier": "mechanical",
+      "model": "opus",
+      "why": "follows the fix + the user's commit",
+      "budget_turns": 10,
+      "check": "not started: depends on unit 3 and the user's commit",
+      "blocked_by": 3,
+      "status": "blocked",
+      "override": null,
+      "escalated": false,
+      "verify": null,
+      "files": []
+    }
+  ],
+  "needs_human": "Which rounding rule does the invoice service use: half-up or half-even, per line or on the total? Also, who owns src/routes/orders.js, and do they sign off on the fix?",
+  "closed_at": "2026-10-22T07:54:40Z"
+}
