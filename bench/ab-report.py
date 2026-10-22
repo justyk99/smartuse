@@ -267,7 +267,7 @@ def main():
     L.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     per_ask = []  # (meta, {dial: rec})
     for meta in metas:
-        n, ask = meta.get("n"), cell(meta.get("ask") or "")
+        n, ask = meta.get("n"), cell(str(meta.get("ask") or "").rstrip("\r"))
         if not meta.get("kickoff"):
             L.append(f"| {n} | {ask} | — | n/a | no kickoff | n/a | n/a | n/a | n/a | n/a | n/a | n/a | {cell(meta.get('note') or 'no task.md after stage 1')} |")
             per_ask.append((meta, {}))
@@ -286,7 +286,7 @@ def main():
     L.append("")
     deltas = {d: {"out": [], "cost": []} for d in dials}
     for meta, recs in per_ask:
-        n, ask = meta.get("n"), cell(meta.get("ask") or "")
+        n, ask = meta.get("n"), cell(str(meta.get("ask") or "").rstrip("\r"))
         s1 = load_json(os.path.join(out, f"{n}-stage1.json"))
         s1m = session_models(s1)
         if isinstance(s1, dict):
