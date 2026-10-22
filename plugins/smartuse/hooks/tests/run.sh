@@ -115,4 +115,44 @@ check allow 'hash=$(curl -s https://x/sums.txt)'
 check allow $'cat <<\'EOF\' > notes.md\nsudo ls\nEOF'
 check allow 'npm test'
 check allow 'bash check.sh'
+# --- a heredoc fed to a shell SCRIPT is that script's input (data): the skills write their state with
+#     bash "<plugin>/hooks/py.sh" "<plugin>/hooks/ledger.py" --put routing.json <<'JSON' … JSON, and a plan step may say
+#     "force-push cleanup" or mention sudo. A heredoc that a shell reads as COMMANDS is still checked, and so is the opener line.
+check allow $'bash "/p/py.sh" "/p/ledger.py" --put routing.json <<\'JSON\'\n{"task":"cleanup","units":[{"id":1,"title":"git push --force the cleanup branch","why":"needs sudo ls on the box"}]}\nJSON'
+check allow $'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --put pending.json <<\'JSON\'\n{"notes":"sudo rm -rf / came up; so did git push -f origin x"}\nJSON'
+check allow $'bash check.sh <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash -s <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash /dev/stdin <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash "/p/py.sh" "/p/ledger.py" --put pending.json <<\'JSON\' && sudo ls\n{}\nJSON'
+check deny  $'bash -xs arg <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'sh -c "cat | sh" <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash - <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash /proc/self/fd/0 <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash "$f" <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash -o pipefail <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'bash "/p/py.sh" x <<\'EOF\' | bash\nsudo ls\nEOF'
+# --- audit: shells the old receiver regex did not see (leading blanks, a path, after then, source / eval, a pipe or a line
+#     continuation around the body, a quoted remote shell)
+check deny  $'  bash <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'/bin/bash <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'if true; then bash <<\'EOF\'\nsudo ls\nEOF\nfi'
+check deny  $'source /dev/stdin <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'eval "$(cat)" <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'cat <<\'EOF\' |\nsudo ls\nEOF\nbash'
+check deny  $'bash \\\n  <<\'EOF\'\nsudo ls\nEOF'
+check deny  $'ssh host "bash -s" <<\'EOF\'\nsudo ls\nEOF'
+# --- the skills pass their state as single-quoted ARGUMENTS of the plugin's ledger.py (Claude Code's own Bash check refuses a
+#     JSON heredoc in default mode: "Contains brace with quote character"). In exactly that one-command shape the quoted words
+#     are ledger.py's data; a second command, an expansion or another script around them is still checked.
+check allow $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --put routing.json \'{"task":"cleanup","units":[{"id":1,"title":"git push --force the cleanup branch","why":"needs sudo ls; pin it in trusted-checks.json"}]}\''
+check allow $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --run needs_human=\'may I run sudo apt install foo?\''
+check allow $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --unit 3 status=blocked note=\'git push --force was refused\' files=\'["a.js"]\''
+check allow $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --unit 3 tier=build \'override={"from":"mechanical","to":"build","by":"user"}\' "note=can\'t sudo here"'
+check allow $'bash "C:\\Users\\me\\hooks\\py.sh" "C:\\Users\\me\\hooks\\ledger.py" --put pending.json \'{"notes":"sudo ls"}\''
+check deny  $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --put pending.json \'{}\' && sudo ls'
+check deny  'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --put pending.json "$(sudo ls)"'
+check deny  $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --put pending.json \'{}\'\nbash -c \'sudo ls\''
+check deny  $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --receipts \'sudo ls\''
+check deny  $'bash "/p/hooks/py.sh" "/p/hooks/other.py" --put pending.json \'sudo ls\''
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
