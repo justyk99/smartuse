@@ -1,6 +1,7 @@
 node_modules/
 .claude/*.local.md
 .claude/settings.local.json
+.claude/worktrees/
 *.log
 plugins/smartuse/evals/results/*
 !plugins/smartuse/evals/results/2026-10-15-final/
