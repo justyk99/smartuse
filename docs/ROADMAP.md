@@ -13,10 +13,11 @@
 - [x] 0.4.0 on `main` (5b3dbed, 2026-10-22); a fresh `claude plugin install smartuse@smartuse` gets 0.4.0 · [ ] release page + tag (YK: the harness blocks the Brain; notes in `docs/releases/0.4.0.md`)
 
 ## 0.5.0 — one session that delegates, the main pattern (YK 2026-10-22, case study 8; design and replay tests in `docs/notes/one-session-design.md`)
-- [ ] M1 `watch.py`: a push / file / exit code wakes the session, 0 model tokens while waiting
+- [x] M1 `watch.py`: a push or a file wakes the session, 0 model tokens while waiting; `--since` survives a late arm or a restart (63 cases)
 - [ ] M2 wait gate (Stop): no idle stop after a hand-off without an armed watcher or an honest `STOPPED:`; M3 the status line shows `STOPPED`
 - [ ] M4 steering: make-prompt `Runs on:`; run-plan pre-flight (`needs-machine`), a `command` tier (background task, no model), inputs by absolute path; README lead; eval cases `kickoff-two-sessions`, `run-plan-wrong-machine`
-- [ ] heartbeat suite on a slow Windows laptop: 3 timing checks overshoot as the run gets slower (64 of 67 on 99eab34; CI's Windows runner passes) — fix in progress
+- [x] heartbeat suite on a slow Windows laptop: 3 timing checks overshot (64 of 67 on 99eab34) — ages now checked against the clock read around each call (81e095b) · [ ] laptop re-run to confirm
+- [ ] `py.sh` starts Python twice per hook event (a probe, then the hook): measure on the laptop; if a start costs more than ~0.2 s there, cache the probed interpreter so each event pays one start
 
 ## 0.5.0 — also: measured
 - [x] The routed-vs-not A/B over the 5 bench asks × 3 dials (run 3: −24 % median cost, n=4) · [ ] at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"

@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Python syntax (all hooks + scripts)
-        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/file-guard.py plugins/smartuse/hooks/ledger.py plugins/smartuse/hooks/until-done.py plugins/smartuse/hooks/heartbeat.py scripts/term-scan.py bench/ab-report.py
+        run: python3 -m py_compile plugins/smartuse/hooks/bash-guard.py plugins/smartuse/hooks/file-guard.py plugins/smartuse/hooks/ledger.py plugins/smartuse/hooks/until-done.py plugins/smartuse/hooks/heartbeat.py plugins/smartuse/hooks/watch.py scripts/term-scan.py bench/ab-report.py
       - name: JSON manifests parse
         run: |
           python3 -c "import json; json.load(open('.claude-plugin/marketplace.json')); json.load(open('plugins/smartuse/.claude-plugin/plugin.json')); json.load(open('plugins/smartuse/hooks/hooks.json'))"
@@ -39,6 +39,8 @@ jobs:
         run: bash plugins/smartuse/hooks/tests/until-done-test.sh
       - name: heartbeat regression
         run: bash plugins/smartuse/hooks/tests/heartbeat-test.sh
+      - name: watch regression
+        run: bash plugins/smartuse/hooks/tests/watch-test.sh
       - name: A/B runner dry run (fake claude, spends nothing)
         run: bash bench/tests/ab-test.sh
       - name: term scan (generic patterns; the private list is never in the repo)
