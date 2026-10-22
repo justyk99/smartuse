@@ -1,4 +1,4 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 02:05 UTC)
+# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 02:40 UTC)
 
 Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2. Dev branch: `claude/inspiring-galileo-8icw6s` (= main + 0.4.0-dev work).
 
@@ -8,8 +8,10 @@ Gate: **23 Oct** — 0.3.0 released · demo gif · LinkedIn post #2. Dev branch:
 
 - 0.4.0-dev on the branch: `bench/ab.sh` A/B runner (dry-run tested in CI; the real run waits on your spend decision) · receipts view with the agent-output share by model + `--json` (ledger-test 17/17) · design notes for receipts-per-step and the heartbeat.
 
-## In progress (0.4.0-dev, spends nothing)
-- **Heartbeat** (your "is it working or AFK?" weakness): hooks on every tool call / agent start-stop / prompt / stop / notification write `status.json`; `/smartuse:status` renders one line (`working · waiting on agent general-purpose 4m12s · step 3/6 build·opus`, `waiting on you`, `NEEDS YOU: …`, `stalled? no activity 6m`); `install` puts it in the terminal status line; a plugin `subagentStatusLine` names the plan step on each agent row. Worker building + tests; design: `docs/notes/heartbeat-design.md`.
+- **Heartbeat shipped on the branch** (your "is it working or AFK?" weakness): `hooks/heartbeat.py` on every event → `status.json`; `/smartuse:status` → one line (`working · waiting on agent: general-purpose 4m12s · step 3/6 build·opus "tests"`, `waiting on you · 3m`, `NEEDS YOU: …`, `stalled? no activity 6m`); `/smartuse:status install` → terminal status line with model, context %, cost; plugin `subagentStatusLine` names the plan step per agent row. 54-case test; one live headless session verified every event lands; ~45 ms per event. Design: `docs/notes/heartbeat-design.md`.
+
+## In progress
+- Nothing running. Next candidates, your call: (1) cut **0.4.0 = heartbeat** now, A/B numbers later as 0.5; (2) run the A/B first (spend) and ship both as 0.4.0.
 
 ## Blocked (needs YK, 2 clicks)
 - **Release page**: the harness refuses to let the agent create a GitHub release, even a draft ("create public surface"), and GitHub returned 403 on the agent's tag push. You: Releases → Draft new release → tag `v0.3.0` (create on publish, target `main`) → title `smartuse 0.3.0 — a receipt per plan step` → paste `docs/releases/0.3.0.md` → Publish.

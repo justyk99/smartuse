@@ -1,5 +1,5 @@
 {
-  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop), all deterministic",
+  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, or stalled?), all deterministic",
   "hooks": {
     "PreToolUse": [
       {
@@ -21,6 +21,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
@@ -35,6 +45,11 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/until-done.py\"",
             "timeout": 330
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
           }
         ]
       }
@@ -46,6 +61,79 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt|permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "timeout": 5
           }
         ]
       }

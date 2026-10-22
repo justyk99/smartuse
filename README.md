@@ -9,7 +9,7 @@
 
 > gstack gives you roles. Ruflo gives you a swarm. **smartuse gives you a receipt.**
 
-A planner needs paths, owners, absolute dates, non-goals, gated deliverables and open questions with owners. Nobody types that by hand every time. Half of it is in your repo; the other half is in your head. `make-prompt` greps the first half and asks you a few multiple-choice questions for the second. The result is a spec a fresh session can execute. The other pieces keep the work honest afterwards: docs that update themselves after each commit, a reply voice you choose, a safety floor that fires even in bypass mode, and a ledger that shows what every run — and every step of the plan — cost.
+A planner needs paths, owners, absolute dates, non-goals, gated deliverables and open questions with owners. Nobody types that by hand every time. Half of it is in your repo; the other half is in your head. `make-prompt` greps the first half and asks you a few multiple-choice questions for the second. The result is a spec a fresh session can execute. The other pieces keep the work honest afterwards: docs that update themselves after each commit, a reply voice you choose, a safety floor that fires even in bypass mode, a ledger that shows what every run — and every step of the plan — cost, and a heartbeat that says whether Claude is working, waiting on an agent, waiting on you, or stalled.
 
 ![demo: one line in, kickoff out, the receipts table](docs/media/demo.gif)
 <p align="center"><sub>Replay of the real 2026-10-21 bench run (<code>bench/results-example/2026-10-21-csv-export/</code>); rendered from the captured output by <code>scripts/render-demo.py</code>, nothing mocked.</sub></p>
@@ -31,6 +31,7 @@ Or from your shell: `claude plugin marketplace add justyk99/smartuse && claude p
 | `reply-style` | `/smartuse:reply-style` | 7 voices (lcd · bluf · engineer · teacher · minimal · plain · memo) with who-they-are-for and pros/cons, installed as a Claude Code output style |
 | `ledger` | `/smartuse:ledger` | every run's minutes, fresh vs cached input, output tokens and self-check, with medians. Written by a Stop hook from the session transcript; costs 0 model tokens |
 | `receipts` | `/smartuse:receipts [task]` | one row per plan step of a run: `# · step · tier · model · override · outcome · esc · verify · calls · in · out · check`, plus the delegated share. Tokens come from the SubagentStop hook, never estimated; closed runs are archived so a task's receipts survive the next run. 0 model tokens |
+| `status` | `/smartuse:status` (add `install` for the terminal status line) | one deterministic line from the heartbeat hook: `working · waiting on agent: general-purpose 4m12s · step 3/6 build·opus "tests"`, `waiting on you · 3m`, `NEEDS YOU: which rounding rule?`, `stalled? no activity 6m`. Hooks on every tool call, agent start/stop, prompt, stop and notification write `status.json`; 0 model tokens, ~45 ms per event. The plugin also ships a `subagentStatusLine` that names the plan step on each agent row |
 | `bash-guard` | always on | denies pipe-to-shell, `sudo`, recursive deletes of a tree, world-writable chmod, credential-file reads, destructive SQL through shell tools, force-push, svn revert, writes to the human-only adapter — and names the safe alternative. 44 regression cases. `file-guard` keeps the adapter and the pin file read-only for the model |
 
 ## How it works
@@ -70,7 +71,7 @@ Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --allow-tool
 
 ## Repository map
 ```
-plugins/smartuse/      the plugin: skills/ · output-styles/ · hooks/ (bash-guard, file-guard, ledger, until-done, tests/) · evals/ · docs/
+plugins/smartuse/      the plugin: skills/ · output-styles/ · hooks/ (bash-guard, file-guard, ledger, until-done, heartbeat, tests/) · evals/ · docs/
 bench/                 reproducible mini-benchmark: sample repo + 5 asks + runner
 docs/research/         the reading behind the design (reply styles, security profiles, the routing landscape)
 docs/notes/            design notes with test logs (make-prompt, living-docs)
@@ -81,7 +82,7 @@ scripts/               term-scan.py — private-term scan before a public push
 ## Roadmap
 - **0.2**: make-prompt · run-plan · living-docs · reply-style · ledger · bash-guard · evals · bench.
 - **0.3** (this release): a receipt per plan step with the user-override field, `/smartuse:receipts` per task, `run-plan --until-done` with its deterministic Stop gate, `file-guard`.
-- **0.4**: the 20-task routed-vs-not A/B with the per-step receipts as evidence. Then: "30 days of receipts", the measured post.
+- **0.4** (in progress): the heartbeat (`/smartuse:status`, status line, agent rows) · `bench/ab.sh`, the routed-vs-not A/B runner with the per-step receipts as evidence · receipts by model. Then: the measured A/B numbers, "30 days of receipts", the measured post.
 
 ## Contributing
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Every change to a hook needs its test (`plugins/smartuse/hooks/tests/`). Security reports: [SECURITY.md](SECURITY.md).
