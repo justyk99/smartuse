@@ -8,7 +8,7 @@
 
 ## 2. People, scope split, dates, appetite
 - Asked by: <name>. Reviewer / lead: <name>. Working alongside: <name — what they own>.
-- YK owns: <scope>. Not YK: <scope → who>.
+- The user owns: <scope>. Not the user: <scope → who>.
 - Dates: target <YYYY-MM-DD>, hard <YYYY-MM-DD>. Review with <name>: <date or unknown → who>.
 - Appetite: <a day / a week / …> → scope sized to it (what is cut if it runs over: <item>).
 

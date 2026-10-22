@@ -5,8 +5,12 @@ Stop:        if ~/.claude/smartuse/projects/<project-dir-name>/pending.json exis
              in this session's transcript since pending.started_at, append one line to ~/.claude/smartuse/ledger.jsonl,
              delete pending.json. No pending file -> do nothing.
 SubagentStop: if ~/.claude/smartuse/projects/<project-dir-name>/routing.json exists (written by run-plan), append one receipt line per
-             finished agent to that folder's receipts.jsonl with its model and tokens.
+             finished agent to that folder's receipts.jsonl with its model and tokens, and attach those tokens to the plan step
+             that is "running" in routing.json (one receipt per plan step: tier, model, why, override, outcome, verify, tokens).
+             When run-plan closes (pending.json skill == run-plan), the Stop hook archives routing.json to runs/<started_at>_<task>.json.
 Report:      python3 ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
+             python3 ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
+                                                        from routing.json + runs/ (used by /smartuse:receipts).
 Never blocks a turn. Any error -> exit 0 silently (a receipt must never stop the work).
 """
 import json, os, sys, time, datetime, pathlib, statistics
@@ -83,6 +87,30 @@ def append(path, obj):
         fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
+def write_json(path, obj):
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def safe_name(s):
+    return "".join(c if c.isalnum() or c in "-_." else "-" for c in str(s or ""))[:80] or "run"
+
+
+def archive_run(sdir, p):
+    """run-plan closed: keep its routing.json (the receipt per plan step) under runs/ so /smartuse:receipts can show it later."""
+    routing = sdir / "routing.json"
+    if p.get("skill") != "run-plan" or not routing.exists():
+        return
+    try:
+        r = json.loads(routing.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    runs = sdir / "runs"; runs.mkdir(exist_ok=True)
+    r.setdefault("closed_at", iso_now()); r["active"] = False
+    write_json(runs / f"{safe_name(r.get('started_at') or p.get('started_at'))}_{safe_name(r.get('task') or p.get('task'))}.json", r)
+
+
 def state_dir(project):
     """Per-project receipt state lives under the user's home, never inside the repo (team repos stay clean)."""
     d = HOME / ".claude" / "smartuse" / "projects" / project.name
@@ -157,6 +185,34 @@ def on_stop(data):
             pass
     append(LEDGER, rec)
     pending.unlink(missing_ok=True)
+    try:
+        archive_run(state_dir(project), p)
+    except Exception:
+        pass
+
+
+def attach_to_step(sdir, rec):
+    """One receipt per plan step: the agent's tokens land on the unit that run-plan marked "running" in routing.json.
+    Exactly one running unit -> attach; none or several -> the receipt line stays unattached (never guess)."""
+    routing = sdir / "routing.json"
+    try:
+        r = json.loads(routing.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    running = [u for u in r.get("units", []) if u.get("status") == "running"]
+    if len(running) != 1:
+        return None
+    u = running[0]
+    u["agent_calls"] = int(u.get("agent_calls") or 0) + int(rec["assistant_calls"])
+    u["agent_input"] = int(u.get("agent_input") or 0) + int(rec["total_input"])
+    u["agent_output"] = int(u.get("agent_output") or 0) + int(rec["total_output"])
+    u["agent_models"] = sorted(set(u.get("agent_models") or []) | set(rec["models"]))
+    u["agents"] = (u.get("agents") or []) + [rec["agent_id"]]
+    try:
+        write_json(routing, r)
+    except Exception:
+        return None
+    return u.get("id")
 
 
 def on_subagent_stop(data):
@@ -188,6 +244,10 @@ def on_subagent_stop(data):
         "total_input": f["input"] + f["cache_read"] + f["cache_create"],
         "total_output": f["output"],
     }
+    try:
+        rec["unit"] = attach_to_step(state_dir(project), rec)
+    except Exception:
+        rec["unit"] = None
     append(state_dir(project) / "receipts.jsonl", rec)
 
 
@@ -212,6 +272,59 @@ def report(n=10):
     for r in rows:
         k = f"{r.get('skill')}/{r.get('mode')}"; by.setdefault(k, []).append(r.get("total_output", 0))
     print("by skill/mode (median out): " + " · ".join(f"{k} {int(statistics.median(v)):,} (n={len(v)})" for k, v in by.items()))
+
+
+def fmt_k(n):
+    n = int(n or 0)
+    return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+
+def receipts(which=None):
+    """One row per plan step. which: None -> the latest run (routing.json, else newest archived run); a task name -> the newest
+    archived run whose task contains it; "all" -> every archived run, newest first."""
+    project = pathlib.Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    sdir = HOME / ".claude" / "smartuse" / "projects" / project.name
+    runs = sorted((sdir / "runs").glob("*.json"), reverse=True) if (sdir / "runs").is_dir() else []
+    picks = []
+    if which == "all":
+        picks = runs
+    elif which:
+        picks = [p for p in runs if which.lower() in p.name.lower()][:1]
+        if not picks and (sdir / "routing.json").exists():
+            picks = [sdir / "routing.json"]
+    else:
+        picks = [sdir / "routing.json"] if (sdir / "routing.json").exists() else runs[:1]
+    if not picks:
+        print(f"receipts: no run-plan run recorded for {project.name} ({sdir})"); return
+    for path in picks:
+        try:
+            r = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            print(f"receipts: cannot read {path}"); continue
+        units = r.get("units") or []
+        state = "active" if r.get("active") else "closed"
+        print(f"receipts: {r.get('task')} · dial {r.get('dial')} · started {r.get('started_at')} · {state} · {len(units)} steps  ({path})")
+        print("| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        tot_in = tot_out = del_in = del_out = 0
+        for u in units:
+            ov = u.get("override") or {}
+            ov_s = f"{ov.get('from')}→{ov.get('to')}" if ov else ""
+            ai, ao = int(u.get("agent_input") or 0), int(u.get("agent_output") or 0)
+            tot_in += ai; tot_out += ao
+            if u.get("tier") != "judgment":
+                del_in += ai; del_out += ao
+            print(f"| {u.get('id')} | {str(u.get('title') or '')[:36]} | {u.get('tier') or ''} | {u.get('model') or ''} | {ov_s} | "
+                  f"{u.get('status') or u.get('outcome') or 'pending'} | {'yes' if u.get('escalated') else ''} | {u.get('verify') or ''} | "
+                  f"{u.get('agent_calls') or ''} | {fmt_k(ai) if ai else ''} | {fmt_k(ao) if ao else ''} | {str(u.get('check') or '')[:40]} |")
+        n_done = sum(1 for u in units if u.get("status") in ("pass", "blocked"))
+        n_pass = sum(1 for u in units if u.get("status") == "pass")
+        models = sorted({m for u in units for m in (u.get("agent_models") or [])})
+        print(f"steps {n_pass} pass · {n_done - n_pass} blocked · {len(units) - n_done} open · agent tokens in {fmt_k(tot_in)} / out {fmt_k(tot_out)}"
+              + (f" · delegated out {fmt_k(del_out)} ({(100 * del_out // tot_out) if tot_out else 0}% of agent output) on {', '.join(models)}" if models else "")
+              + (f" · needs_human: {r['needs_human']}" if r.get("needs_human") else ""))
+        if len(picks) > 1:
+            print()
 
 
 def recompute():
@@ -242,6 +355,8 @@ def recompute():
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--recompute":
         recompute(); return
+    if len(sys.argv) > 1 and sys.argv[1] == "--receipts":
+        receipts(sys.argv[2] if len(sys.argv) > 2 else None); return
     if len(sys.argv) > 1 and sys.argv[1] == "--report":
         report(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
         return

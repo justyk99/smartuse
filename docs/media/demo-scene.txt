@@ -1,0 +1,35 @@
+$ claude
+> /smartuse:make-prompt quick add a CSV export of orders (a GET endpoint that returns the orders as CSV, with a test). Deadline next week, I sign off.
+@pause 0.8
+Prompt saved: .task/ACTIVE/csv-export-orders/task.md (1,018 words, plus research.md and decisions.md beside it)
+Self-check: 14/14 ✓. No ✗ items.
+Summary
+- What: GET /orders/export.csv returns all orders as an RFC 4180 CSV download, totals identical to the JSON API, plus a Jest HTTP test with no new dependencies.
+- Who: built and signed off by you. The owner of src/routes/orders.js is not touched because the new router mounts in server.js ahead of the orders router.
+- When: target 2026-10-28, review 2026-10-27, appetite one day.
+- Done: npm test green with the new assertions, and a curl against the running server yields a two-row CSV whose order 1 total matches GET /orders/1.
+- Not: no filters or pagination, no rounding fix, no Accept-header negotiation, no line-item rows, no edits to db.js or orders.js.
+receipt: pending → ledger
+@pause 2.5
+@clear
+> /smartuse:run-plan .task/ACTIVE/csv-export-orders/task.md --until-done --routing safe
+@pause 1.5
+# 6.4 minutes later, 22 turns, no "go" typed in between …
+The plan ran to completion with safe routing. Five of six units passed, no escalations, no retiers.
+Unit 6 is blocked by rule: run-plan never commits. Nothing is staged or committed.
+@pause 2
+> /smartuse:receipts
+@pause 0.6
+receipts: csv-export-orders · dial safe · started 2026-10-21T15:16:00Z · closed · 6 steps
+| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Route decision confirmed (path, colu | judgment | fable |  | pass |  |  |  |  |  | decisions.md: decision line written 2026 |
+| 2 | src/routes/orders-export.js: toCsv() | build | fable |  | pass |  | no gaps | 5 | 110.7k | 2.7k | npm run lint: clean (exit 0); sanity row |
+| 3 | Mount export router in src/server.js | build | fable |  | pass |  | no gaps | 5 | 107.6k | 1.2k | curl export.csv: 200 text/csv, header +  |
+| 4 | tests/orders-export.test.js (unit +  | build | fable |  | pass |  | no gaps | 3 | 64.6k | 1.6k | npm test: Tests 6 passed, 6 total (2 sui |
+| 5 | Docs: DEV.md + USER.md + README line | mechanical | haiku |  | pass |  |  | 3 | 72.8k | 4.5k | grep 'orders/export.csv' README.md:5 hit |
+| 6 | Commit by path, move task folder, /l | judgment | fable |  | blocked |  |  |  |  |  | blocked: run-plan never commits; user's  |
+steps 5 pass · 1 blocked · 0 open · agent tokens in 355.8k / out 10.0k · delegated out 10.0k (100% of agent output) on claude-fable-5-1, claude-haiku-5-5, claude-sonnet-5-5
+@pause 1
+# tokens = the SubagentStop hook's, read from the agent transcripts. Nothing estimated.
+# smartuse 0.3.0 — /plugin install smartuse --marketplace justyk99/smartuse

@@ -1,0 +1,1 @@
+/smartuse:receipts
