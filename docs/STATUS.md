@@ -2,8 +2,6 @@
 
 Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisions; the laptop session Smartuse-Worker does laptop-only steps. Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s`.
 
-**Rule (YK, 2026-10-23): no paid run without YK's go for that exact run and a cap** — `claude -p`, `claude plugin eval`, `bench/ab.sh`, any headless session, by the Brain or any agent it starts. Ask first, every time.
-
 ## Done
 - **0.4.0 released:** on `main` at 5b3dbed (a merge of e4b678c, CI green on Linux, macOS, Windows, Python 3.9 and strict validate); a fresh `claude plugin install smartuse@smartuse` gets 0.4.0. Evals 8 of 8 (+0.88 over no plugin).
 - Laptop re-test of the release's hooks (99eab34, Python 3.13): everything passes except 3 heartbeat timing checks (64 of 67) that overshoot as the slow run goes on; CI's Windows runner passes. The worker's report never reached the Brain (sent 12:39 to a name that does not route); found in its transcript at 13:08.
