@@ -911,6 +911,8 @@ PHRASES = [
     ("paste this into your command line", 0), ("Paste this into PowerShell.", 0), ("paste that into a Jira ticket", 0),
     ("Paste this into the builder terminal", 1), ("Paste the prompt into the laptop session's terminal", 1),
     ("Paste this into another terminal", 1), ("Paste it into another chat", 1),
+    ("Don't paste the prompt into the builder; I ran it here.", 0), ("Do not paste this into the other session.", 0),
+    ("No need to paste it into the builder: step 3 is done.", 0),
 ]
 with open(os.path.join(OUT, "phrases.tsv"), "w", encoding="utf-8") as fh:
     for i, (text, blocks) in enumerate(PHRASES):

@@ -2,6 +2,7 @@
 
 ## 1. Where things are (verified <date>)
 - Work repo: <path> — open Claude THERE. Branch <branch>. Gates that apply: <the rules from CLAUDE.md that bite here>.
+- Runs on: <this machine | the machine with <tool or files>> — verified: `command -v <tool>` <found | not found here>, repo <here | at <path>> (or assumed: …).
 - Target code: <paths with line counts>. Reference code (the real thing, not guides): <paths>.
 - Existing work on the same thing: <task folders / docs / commits / memory lines, or "none found">.
 - Attachments read: <file → one line each>.

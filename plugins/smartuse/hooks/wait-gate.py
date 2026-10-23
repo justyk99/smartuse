@@ -107,6 +107,7 @@ PHRASES = [
     re.compile(_I + r"let\s+you\s+know\b", re.I),
     re.compile(_I + r"(?:check|come|report)\s+back\b", re.I),
 ]
+NEGATED = re.compile(r"\b(?:don['’]?t|do\s+not|never|no\s+need\s+to)\s+$", re.I)   # "don't paste the prompt into the builder" hands nothing over
 STOPPED = re.compile(r"^[ \t\r\u00a0>*_`]*STOPPED(?:\*\*|__)?[ \t]*:", re.M)   # a line that starts "STOPPED:" (markdown bold / quote marks before it are fine); no class crosses a line end, so the search is linear
 
 
@@ -527,12 +528,10 @@ def handoffs(f, answered, agents, reply):
             who = clean(inp.get("to") or inp.get("recipient") or "another session", 40)
             out.append({"i": c["i"], "ts": c["ts"] or iso(), "what": who, "how": "SendMessage to " + who})
     prose = re.sub(r"`[^`\n]*`", " ", re.sub(r"```.*?```", " ", reply[-200000:], flags=re.S))   # a promise in prose counts, one inside code does not
-    for p in PHRASES:
-        m = p.search(prose)
-        if m:
-            q = clean(m.group(0), 60)
-            out.append({"i": float("inf"), "ts": f["reply_ts"] or iso(), "what": '"' + q + '"', "how": 'your reply says "' + q + '"'})
-            break
+    m = next((m for p in PHRASES for m in p.finditer(prose) if not NEGATED.search(prose[max(0, m.start() - 30):m.start()])), None)
+    if m:
+        q = clean(m.group(0), 60)
+        out.append({"i": float("inf"), "ts": f["reply_ts"] or iso(), "what": '"' + q + '"', "how": 'your reply says "' + q + '"'})
     return out
 
 

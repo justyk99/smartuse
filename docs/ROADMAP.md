@@ -15,14 +15,17 @@
 ## 0.5.0 — one session that delegates, the main pattern (YK 2026-10-22, case study 8; design and replay tests in `docs/notes/one-session-design.md`)
 - [x] M1 `watch.py`: a push or a file wakes the session, 0 model tokens while waiting; `--since` survives a late arm or a restart (63 cases)
 - [x] M2 wait gate (Stop): no idle stop after a hand-off without an armed watcher or an honest `STOPPED:` (187 cases, the incident replayed, 57 mutations caught) · M3 the status line shows `STOPPED · handed off 20:41 (builder) — nothing will wake this session` or `waiting on builder · watcher armed 20:41` (heartbeat 105)
-- [ ] M4 steering: make-prompt `Runs on:`; run-plan pre-flight (`needs-machine`), a `command` tier (background task, no model), inputs by absolute path; README lead; eval cases `kickoff-two-sessions`, `run-plan-wrong-machine`
+- [x] M4 steering: make-prompt `Runs on:` + a hand-off that names one session (and no ping); run-plan pre-flight (`needs-machine`, "run this plan on <machine>"), a `command` tier (background task, no model), inputs by absolute path; eval cases `kickoff-two-sessions` and `run-plan-wrong-machine` (they fail on the pre-M4 skills, 3 of 3 with M4; the full suite is 10 of 10, run with `--scaffold`: `evals/results/2026-10-22-0.5.0-m4/`) · [ ] the README lead (YK words it)
+- [x] until-done gate vs a running `command` unit: it counted the unit as unfinished and spent its 6 blocks (a long render would switch the gate off for the rest of the run); it now lets the turn end, without a block, while a `command` unit runs and the Stop input's `background_tasks` lists a live task (until-done 40)
+- [x] wait gate: "don't paste the prompt into it" matched its hand-off phrase and blocked once; a phrase after don't / do not / never / no need to is no hand-off now (3 phrases added to its table; mutation-checked)
+- [ ] the 8 older eval cases declare `max_turns` / `timeout_seconds` / `allowed_tools` at the top level of `case.yaml`, where Claude Code 2.1.308 drops them; move them under `execution:` and re-run the suite
 - [x] heartbeat suite on a slow Windows laptop: 3 timing checks overshot (64 of 67 on 99eab34) — ages now checked against the clock read around each call (81e095b); the laptop confirms ALL PASS
 - [x] `py.sh` started Python twice per hook event, plus the Store stub on Windows: about 2 s per event on the laptop (a start there: 0.4–3.6 s). The launcher now remembers the interpreter it proved: one start per event; laptop 0.5–1.8 s per call after (median ~1.4 s)
 - [ ] Still ~3 s per Bash call on that laptop (two hook events, Python's own start): try `-S` (no site import; the hooks are stdlib only) and a lighter heartbeat (PostToolUse only) option; measure on the laptop before claiming
 
 ## 0.5.0 — also: measured
 - [x] The routed-vs-not A/B over the 5 bench asks × 3 dials (run 3: −24 % median cost, n=4) · [ ] at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"
-- [ ] `claude plugin eval` for all 8 cases in CI (needs an API key secret: YK) — until then, run locally before each release (0.4.0: 8 of 8, +0.88 over no plugin, 2026-10-22)
+- [ ] `claude plugin eval` for all 10 cases in CI (needs an API key secret: YK; the two relay cases need `--scaffold`) — until then, run locally before each release (0.4.0: 8 of 8, +0.88 over no plugin, 2026-10-22; 0.5.0 working tree: 10 of 10, 2026-10-22)
 - [ ] The subagentStatusLine verified live on the laptop (runtime loading of plugin settings)
 - [ ] until-done on Windows: `--trust` pin path without /etc (pins under a root-equivalent the user owns: documented, not faked)
 - [ ] bash-guard false positive: `curl … | python3 -c '…'` is denied as pipe-to-shell, though `-c` (or a script file) makes stdin data — apply the heredoc rule's "what reads stdin as code" test to pipes (found 2026-10-22)

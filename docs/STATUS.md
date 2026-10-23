@@ -1,4 +1,4 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-22 14:30 UTC)
+# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-23 02:40 UTC)
 
 Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisions; the laptop session Smartuse-Worker does laptop-only steps. Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s`.
 
@@ -9,8 +9,9 @@ Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisio
 - 0.5 started: `watch.py` built (a push or a file wakes the session; `--since` survives a late arm or a restart; 63 cases), heartbeat test timing fixed (81e095b, ALL PASS on the laptop); CI green on all jobs at 3321ed9 (watch suite included). The laptop measured ~2 s per hook event (`python3` there is the Store stub, probed first): the launcher now remembers the interpreter it proved, one start per event: 0.5–1.8 s per call there after the change (the laptop was low on memory).
 
 ## In progress
-- On the dev branch: the wait gate (`hooks/wait-gate.py`, a Stop hook: a hand-off with nothing armed to wake the session is blocked once; `wait_gate: off` in the adapter) and the `STOPPED` status line (M2, M3); `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 105 · ab 36 · watch 63 · wait 187`.
-- Next build: the one-session steering (M4).
+- On the dev branch, CI green: the wait gate (`hooks/wait-gate.py`, a Stop hook: a hand-off with nothing armed to wake the session is blocked once; `wait_gate: off` in the adapter) and the `STOPPED` status line (M2, M3); `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 105 · ab 36 · watch 63 · wait 187`.
+- M4, the one-session steering, built and merged: make-prompt writes `Runs on:` and hands a relay ask to ONE session on the right machine; run-plan pre-flights each unit's tools (`needs-machine`), adds a `command` tier (a background command, no model) and briefs inputs by path; two eval cases that fail on the incident; all 10 evals 1.00. Two bugs it found are fixed: until-done no longer spends its blocks on a running background command; the wait gate ignores negated phrases.
+- Next: migrate the 8 older eval cases to `execution:` (their max_turns / timeouts are ignored today), then the paid-call guard; the README lead line waits for YK.
 
 ## Blocked on YK
 - Release pages and tags for v0.3.0 and v0.4.0: one paste on the laptop (in the Brain's message of 2026-10-22 ~12:55 UTC).

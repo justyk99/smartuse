@@ -1,0 +1,1 @@
+Write me a kickoff brief for this work, quick mode, no questions: plan the next step of the room renders. I'll paste your prompt into my laptop session, which has the renderer (roomrender), and you ping me when it's done.

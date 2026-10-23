@@ -110,4 +110,14 @@ os.name = "nt"
 print("nt-false" if ns["pins_are_trustworthy"]() is False else "nt-true")
 PY
 ) 2>/dev/null; [ "$out" = "nt-false" ] && echo "PASS pins are never trusted on Windows (st_uid is meaningless there)" || { echo "FAIL Windows pin check: $out"; fail=1; }
+# --- a `command` unit (run-plan's no-model tier, a background task): while it runs, ending the turn is waiting, not quitting —
+# the gate lets it through without spending a block (a long render would otherwise use all six and switch the gate off)
+rm -f "$D/proj/.claude/smartuse.local.md"
+CMD='{"active":true,"until_done":true,"units":[{"id":1,"tier":"command","title":"render","status":"running"},{"id":2,"tier":"build","title":"compare","status":"pending"}]}'
+bg() { printf '{"hook_event_name":"Stop","session_id":"s","cwd":"%s","stop_hook_active":false,"background_tasks":[{"id":"b1","type":"local_bash","status":"%s"}]}' "$PW" "$1" | CLAUDE_PROJECT_DIR="$PW" py "$H/until-done.py"; }
+blocks() { py -c "import json,sys; print(json.load(open(sys.argv[1])).get('blocks', 0))" "$(wp "$R")"; }
+echo "$CMD" > "$R"; out=$(bg running); [ -z "$out" ] && [ "$(blocks)" = 0 ] && echo "PASS allow: a running command unit with a live background task (no block spent)" || { echo "FAIL running command + live task: '$out', blocks $(blocks)"; fail=1; }
+echo "$CMD" > "$R"; out=$(bg completed); [ -n "$out" ] && echo "PASS block: a running command unit whose background task has ended (record its result)" || { echo "FAIL command + finished task should block"; fail=1; }
+echo "$CMD" > "$R"; expect block "a running command unit and no background task at all"
+echo '{"active":true,"until_done":true,"units":[{"id":1,"tier":"build","title":"code","status":"running"}]}' > "$R"; out=$(bg running); [ -n "$out" ] && echo "PASS block: a live background task does not excuse a running build unit" || { echo "FAIL build unit excused by a background task"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
