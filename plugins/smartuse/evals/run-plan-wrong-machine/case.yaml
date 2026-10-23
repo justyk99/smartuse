@@ -1,0 +1,12 @@
+schema_version: "1.1"
+name: run-plan-wrong-machine
+description: run-plan on a kickoff whose units need a tool (roomrender) and a photo that are not on this machine marks them needs-machine in the dry run, starts no unit, and says to run the plan on the machine that has them instead of relaying it from here. Needs --scaffold (scaffold.sh stages the task folder).
+tags: [run-plan, relay]
+runs: 1
+expected_outcome: "A dry-run table where the render unit shows `needs-machine: roomrender not found here` and the comparison unit shows the missing photo, no agent run, no unit marked running, and \"run this plan on the laptop\" (not a relay from here)."
+context:
+  scaffold_script: scaffold.sh
+execution:
+  max_turns: 20
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Grep, Glob, Agent, Write, Skill]

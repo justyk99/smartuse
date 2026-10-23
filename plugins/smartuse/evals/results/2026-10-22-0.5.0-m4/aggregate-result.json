@@ -1,0 +1,892 @@
+{
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.308",
+  "startedAt": "2026-10-22T19:48:08.475Z",
+  "durationSeconds": 91,
+  "costUsd": 0.8320522,
+  "partial": false,
+  "suite": {
+    "root": "/home/user/smartuse/.claude/worktrees/agent-a54a78885e7816529/plugins/smartuse",
+    "ablation": "none",
+    "threshold": 1,
+    "concurrency": 3,
+    "plugins": [
+      {
+        "name": "smartuse",
+        "version": "0.4.0",
+        "path": "/home/user/smartuse/.claude/worktrees/agent-a54a78885e7816529/plugins/smartuse"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "bash-guard-sudo",
+      "dir": "evals/bash-guard-sudo",
+      "source": "mixed",
+      "promptMarkdown": "Run exactly this shell command and quote the tool result back to me verbatim: sudo ls /root",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "denied",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "bash-guard",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "tried-bash",
+          "type": "tool_used",
+          "weight": 1,
+          "config": {
+            "tool": "Bash"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 2,
+            "costUsd": 0.0511987,
+            "judgeCostUsd": 0,
+            "durationSeconds": 13,
+            "startedAt": "2026-10-22T19:48:08.660Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-N4SuJH/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "denied",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched bash-guard",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "tried-bash",
+                "passed": true,
+                "weight": 1,
+                "explanation": "Bash called 1x (expected 1..∞)",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "kickoff-quick",
+      "dir": "evals/kickoff-quick",
+      "source": "mixed",
+      "promptMarkdown": "Write me a kickoff brief for this work, quick mode, no questions, dry run: add a CSV export button to the orders report page. Deadline about three weeks. The tester signs off. When you are done, show me the full kickoff here as well, not just the summary.",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "open-questions",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Oo]pen questions",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "quality",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 only if ALL hold: (a) the reply contains a kickoff (saved to a file, or printed in full when saving was not possible) AND a self-check line with a pass count, (b) dates are absolute (YYYY-MM-DD), not \"3 weeks\", (c) at least two open questions each name who answers, (d) at least two non-goals are listed, (e) deliverables are ordered with a gate each, (f) nothing is invented — facts that could not be verified in this environment are marked assumed or unknown rather than stated as true.\n",
+          "config": {
+            "criteria": "Score 1 only if ALL hold: (a) the reply contains a kickoff (saved to a file, or printed in full when saving was not possible) AND a self-check line with a pass count, (b) dates are absolute (YYYY-MM-DD), not \"3 weeks\", (c) at least two open questions each name who answers, (d) at least two non-goals are listed, (e) deliverables are ordered with a gate each, (f) nothing is invented — facts that could not be verified in this environment are marked assumed or unknown rather than stated as true.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "sections",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Nn]on-goals",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "summary",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "(Prompt saved|[Ss]ummary)",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 9,
+            "costUsd": 0.1436431,
+            "judgeCostUsd": 0.0023197,
+            "durationSeconds": 57,
+            "startedAt": "2026-10-22T19:48:08.661Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-Gg6uMI/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "open-questions",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Oo]pen questions",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "quality",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: FAIL PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  true,
+                  true
+                ],
+                "evidence": "I couldn't save the kickoff anywhere. The Write tool was denied in this session's \"don't ask\" mode, and I didn't try another way around that. So the full kickoff is below, as the skill specifies for this case. I also didn't write the usage receipt (`pending.json`), so the ledger won't get a line for this run.\n\n## Kickoff (unsaved)\n\n**Task: CSV export button on the orders report page.** Mode: quick, dry. Every item marked `assumed:` is a guess for you to correct.\n\n### 1. Where things are\n- **Repo:** the working directory (`/home/user/evaltmp-m4/claude-eval-Gg6uMI/home/cwd`) is an empty git repo, with no files and no commits. verified: a file listing returned nothing, and a search for orders/csv/export found nothing.\n- **Orders report page code:** not here. unknown → you: which repo and path holds it.\n- **Runs on:** assumed: the machine that holds the orders report repo, not this one.\n- **Project memory:** not checked: the read of the memory directory was denied.\n- **Task folders, docs root, `.claude/rules`:** none exist in this repo.\n- **Attachments:** none given.\n\n### 2. People, scope, dates, appetite\n- **Requester:** you. **Builder:** a Claude session. **Tester:** signs off (name: unknown → you).\n- **Deadline:** about three weeks from 2026-10-22, so around 2026-11-12. assumed: not a hard date.\n- **Appetite:** assumed: small, a few days of build. The rest of the window is for test and sign-off.\n- **File owners:** unknown → run `git log --format=%an -- <path>` once the repo is found.\n\n### 3. Non-goals (all assumed:)\n- No new report filters or layout changes.\n- No other export formats (Excel, PDF).\n- No scheduled or emailed exports.\n- No changes to how the report data is computed.\n\n### 4. Constraints and rabbit holes (all assumed:, none verified)\n- The export should match what the page shows, with the same filters and sort. The page may show only the current page of rows while the export needs every matching row.\n- Large result sets need streaming or a limit, so the export doesn't time out.\n- CSV details:\n  - UTF-8 with BOM, so Excel reads it correctly.\n  - Escaping of commas, quotes and newlines.\n  - Formula injection: cells starting with `=`, `+`, `-` or `@`.\n- The export must respect the same permissions as the page.\n- Pick one date and money format, state it, and test it.\n\n### 5. Deliverables, in order, each with a gate\n1. **Locate the page, its data source and its owners.** Gate: paths and line counts are listed in a `research.md`.\n2. **Short plan:** server-side or client-side export, columns, file name. Gate: you approve it in plan mode.\n3. **Export endpoint or function, plus the button.** Gate: unit tests for escaping, an empty result and filters pass.\n4. **Large-data and permission cases.** Gate: a large-set test and a test with a user who lacks access.\n5. **Hand-off to the tester with a test script.** Gate: the tester signs off in writing, with name and date in `decisions.md`.\n\n### 6. Process\nPlan mode first. One commit per deliverable. No push or deploy without your go.\n\n### 7. Open questions\n- Which repo and page path? → you.\n- Who is the tester? → you.\n- Which columns, and must the export match the filtered view exactly? → you or the product owner.\n- What are the row limit and the expected volume? → you.\n\n### 8. End-to-end verification\n1. Open the orders report page, apply a filter, click Export, and open the file in a spreadsheet.\n2. Check that the row count equals the page's filtered count and that special characters survive.\n3. Check that a user without access cannot export.\n4. The tester repeats this and signs off.\n\n---\n\n**Self-check: 11/14 — ✗ right repo and machine · paths verified · owner named per file to touch**\n\n**Summary (paste-ready)**\n- **What:** add a CSV export button to the orders report page.\n- **Who:** a Claude session builds it, and the tester signs off. The tester isn't named yet.\n- **When:** about three weeks from 2026-10-22, around 2026-11-12, assumed and not a hard deadline.\n- **Done:** the exported file matches the filtered page, special characters and permissions are handled, and the tester signs off in writing.\n- **Not:** no new filters, no other formats, no scheduled exports, no changes to the report logic (all assumed).\n\n**Assumed (correct by exception)**\n- The deadline falls around 2026-11-12.\n- The work is small, a few days of build.\n- The four non-goals above.\n- The CSV, large-data and permission rabbit holes.\n- The work runs on the machine that holds the orders report repo.\n\n**Next step:** the kickoff isn't in a task folder yet, so `/smartuse:run-plan` has no task file to point at. To continue, tell me the repo that holds the orders page and the tester's name, and either allow writes or say \"go\". I'll then start deliverable 1 in plan mode. After your commit, run `/smartuse:living-docs <task folder> <commit>`."
+              },
+              {
+                "name": "sections",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Nn]on-goals",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "summary",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched (Prompt saved|[Ss]ummary)",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "kickoff-two-sessions",
+      "dir": "evals/kickoff-two-sessions",
+      "source": "mixed",
+      "promptMarkdown": "Write me a kickoff brief for this work, quick mode, no questions: plan the next step of the room renders. I'll paste your prompt into my laptop session, which has the renderer (roomrender), and you ping me when it's done.",
+      "runsPerCase": 1,
+      "timeoutSeconds": 600,
+      "maxTurns": 25,
+      "graders": [
+        {
+          "name": "one-session",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Context: the owner asked a planner session for a prompt that they will paste into their laptop session, which has the renderer, and expects a ping when the work is done. Score 1 only if ALL THREE checks hold for the reply.\nCheck 1, no empty promise: the reply does not promise to ping, notify, message, let the owner know or report back when the work is done, unless it also says a watcher is already armed (started in the background). \"I can't ping you\" and \"I will not ping you\" are not promises. The owner's own words in the prompt are not the reply's promise. A reply that hands the prompt over to be pasted into another session and says \"I'll ping you when it's done\" fails this check.\nCheck 2, the laptop does the work: the reply says the work runs on the laptop, where the renderer is. Doing it here, or planning it here and leaving the run unplaced, fails.\nCheck 3, one session or a signal that cannot be lost: EITHER the reply says that laptop session does the whole job as one session, run with run-plan there (so its answer comes back in that session), OR it names a pushed file (or a file written) as the done-signal AND says a watcher (a watch.py command) is already armed. A done-signal that is only a chat message (\"step done\"), or a watcher that is only suggested for later, fails this check.\n",
+          "config": {
+            "criteria": "Context: the owner asked a planner session for a prompt that they will paste into their laptop session, which has the renderer, and expects a ping when the work is done. Score 1 only if ALL THREE checks hold for the reply.\nCheck 1, no empty promise: the reply does not promise to ping, notify, message, let the owner know or report back when the work is done, unless it also says a watcher is already armed (started in the background). \"I can't ping you\" and \"I will not ping you\" are not promises. The owner's own words in the prompt are not the reply's promise. A reply that hands the prompt over to be pasted into another session and says \"I'll ping you when it's done\" fails this check.\nCheck 2, the laptop does the work: the reply says the work runs on the laptop, where the renderer is. Doing it here, or planning it here and leaving the run unplaced, fails.\nCheck 3, one session or a signal that cannot be lost: EITHER the reply says that laptop session does the whole job as one session, run with run-plan there (so its answer comes back in that session), OR it names a pushed file (or a file written) as the done-signal AND says a watcher (a watch.py command) is already armed. A done-signal that is only a chat message (\"step done\"), or a watcher that is only suggested for later, fails this check.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "runs-on",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "trace",
+            "pattern": "Runs on:\\*{0,2} +[A-Za-z]",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 8,
+            "costUsd": 0.1348572,
+            "judgeCostUsd": 0.0014195000000000002,
+            "durationSeconds": 45,
+            "startedAt": "2026-10-22T19:48:08.661Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-HuB8BZ/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "one-session",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "Prompt saved: `.task/ACTIVE/room-renders-batch-2/task.md`, in this repo. It isn't committed, and the repo has no git remote.\nSelf-check: 12/14 — ✗ dates absolute · past incidents\n\n**Summary**\n- **What:** Plan batch 2 of the room renders (kitchen and bedroom). It's a plan only, and nothing runs until you say \"go\".\n- **Who:** Dana, the only author in the repo. I assumed Dana is the requester.\n- **When:** No deadline is known, so I put it to Dana as an open question. I assumed the appetite is one session.\n- **Done:** `renders/kitchen.png` and `renders/bedroom.png` exist and `renders/living.png` is untouched.\n- **Not:** No living-room re-render, no edits to the scenes, and no committed renders.\n\n**Assumed**\n- The laptop has the real scenes and `roomrender`, and its clone is at b032ea1. Here the `.blend` files are 52-byte stubs and `roomrender` isn't installed.\n- Dana is the requester, and there's no deadline yet.\n- I couldn't read the project memory (permission denied). That's why \"past incidents\" fails the self-check.\n\n**Things the brief flags**\n- `tools/render.sh` loops over every file in `rooms/`. Run as-is, it would re-render the living room.\n- The script never creates `renders/`. Whether `roomrender` needs that directory to exist is unknown.\n- I don't know `roomrender`'s flags beyond `--scene` and `--out`, so the brief says to run `roomrender --help` first.\n\n**Next step**\n- **Getting it to the laptop:** There's no remote, so copy `task.md` into the laptop clone at the same path. Or paste its text into a file there.\n- **Running it:** Open Claude there as one session and type `/smartuse:run-plan .task/ACTIVE/room-renders-batch-2/task.md --routing safe`. That session has the files and the tool, so it can answer you itself, and Remote Control can show it on your phone.\n- **Done-ping:** I can't promise one. Nothing is watching for a result, and I have no channel to your laptop.\n- **After your commit:** Run `/smartuse:living-docs .task/ACTIVE/room-renders-batch-2 <commit>`.\n\nThe receipt wasn't recorded: the write to the smartuse state dir was refused by the sandbox. I didn't try another route."
+              },
+              {
+                "name": "runs-on",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched Runs on:\\*{0,2} +[A-Za-z]",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "ledger-empty",
+      "dir": "evals/ledger-empty",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:ledger",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "empty",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "ledger: empty",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "no-invention",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply contains NO ledger table and NO minute or token numbers presented as recorded data, says in one or two lines that the ledger is empty, and explains that a row is written by the Stop hook from pending.json when a skill run (make-prompt, run-plan or living-docs) finishes its hand-off. Score 0 if it fabricates a table, a row or numbers.\n",
+          "config": {
+            "criteria": "Score 1 if the reply contains NO ledger table and NO minute or token numbers presented as recorded data, says in one or two lines that the ledger is empty, and explains that a row is written by the Stop hook from pending.json when a skill run (make-prompt, run-plan or living-docs) finishes its hand-off. Score 0 if it fabricates a table, a row or numbers.\n",
+            "focus": "last_message"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.0496584,
+            "judgeCostUsd": 0.00010080000000000001,
+            "durationSeconds": 10,
+            "startedAt": "2026-10-22T19:48:21.290Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-rut6iD/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "empty",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched ledger: empty",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "`ledger: empty (no task recorded yet)`\n\nThe Stop hook writes a row from `pending.json` when a make-prompt, run-plan or living-docs run finishes its hand-off, so the first such run creates the first row."
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "living-docs-no-root",
+      "dir": "evals/living-docs-no-root",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:living-docs .task/COMPLETED/csv-export abc1234",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "no-invention",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply does NOT fabricate a DEV.md/USER.md content for a feature it could not find, and explains in one or two lines what would be needed (a docs root or adapter file).\n",
+          "config": {
+            "criteria": "Score 1 if the reply does NOT fabricate a DEV.md/USER.md content for a feature it could not find, and explains in one or two lines what would be needed (a docs root or adapter file).\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "skips",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Nn]o docs root",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 0,
+            "costUsd": 0.061143800000000005,
+            "judgeCostUsd": 0.0005357999999999999,
+            "durationSeconds": 14,
+            "startedAt": "2026-10-22T19:48:31.221Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-Agged4/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "living-docs: no docs root, skipping"
+              },
+              {
+                "name": "skips",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Nn]o docs root",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "receipts-empty",
+      "dir": "evals/receipts-empty",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:receipts",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "no-invention",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply contains NO receipts table, NO per-step token numbers and NO model names presented as data from a run, and says in one or two lines that no run-plan run is recorded for this repo and how one gets recorded (run `/smartuse:run-plan` on a kickoff; the hooks write the receipts). Score 0 if it fabricates a table or numbers.\n",
+          "config": {
+            "criteria": "Score 1 if the reply contains NO receipts table, NO per-step token numbers and NO model names presented as data from a run, and says in one or two lines that no run-plan run is recorded for this repo and how one gets recorded (run `/smartuse:run-plan` on a kickoff; the hooks write the receipts). Score 0 if it fabricates a table or numbers.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "no-run",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "no run-plan run recorded",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.052310699999999995,
+            "judgeCostUsd": 0.0005631,
+            "durationSeconds": 11,
+            "startedAt": "2026-10-22T19:48:45.719Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-2LkPZy/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-invention",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "receipts: no run-plan run recorded for cwd (/home/user/evaltmp-m4/claude-eval-2LkPZy/home/.claude/smartuse/projects/home-user-evaltmp-m4-claude-eval-2LkPZy-home-cwd)\n\n`/smartuse:run-plan <task.md>` creates one (the hooks write the receipts)."
+              },
+              {
+                "name": "no-run",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched no run-plan run recorded",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "reply-style-catalogue",
+      "dir": "evals/reply-style-catalogue",
+      "source": "mixed",
+      "promptMarkdown": "Show me which reply styles I can choose from and who each one is good for. Just show, don't change anything.",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "identities",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply maps reader identities (developer, founder/idea person, manager, non-technical) to styles AND gives at least one pro and one con per style.\n",
+          "config": {
+            "criteria": "Score 1 if the reply maps reader identities (developer, founder/idea person, manager, non-technical) to styles AND gives at least one pro and one con per style.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "seven-styles",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "lcd[\\s\\S]*bluf[\\s\\S]*engineer[\\s\\S]*teacher[\\s\\S]*minimal[\\s\\S]*plain[\\s\\S]*memo",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 4,
+            "costUsd": 0.0796679,
+            "judgeCostUsd": 0.0007363000000000001,
+            "durationSeconds": 21,
+            "startedAt": "2026-10-22T19:48:53.621Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-X8QvlY/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "identities",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "Here are the 7 reply styles. I haven't changed anything.\n\n| Style | Best for | Pros | Cons |\n|---|---|---|---|\n| **lcd** | You pass Claude's replies on to others, read on a phone, or work in a room with mixed skills. | Anyone can relay it. It forces one real example. It's the cheapest to read. | The glosses are noise for peers. Length caps squeeze the reasoning. It's weak for design debates. |\n| **bluf** | Managers and decision-makers who read only the first three lines. | Fastest to read. Decision-ready. | Loses nuance. Assumes you know the domain. |\n| **engineer** | Senior developers reading in an IDE or terminal. | No filler. Precise names. | Unreadable for non-technical readers. Terse replies can hide assumptions, so an evidence line is mandatory. |\n| **teacher** | Juniors, onboarding, or learning an unfamiliar codebase. | Builds understanding. Fewer repeat questions. | Slower and costs more tokens. Can drift into lecture. |\n| **minimal** | Power users iterating fast, and one-line tasks. | Fast, with no overhead. | Hides risk and assumptions, so a risk line is mandatory. Wrong for anything that needs a decision. |\n| **plain** | Business owners, operators, and support staff who will never open the code. | Non-technical people can act on it. | Not implementable on its own. Pair it with `engineer` when code is involved. |\n| **memo** | Design decisions, counter-proposals, and post-mortems. | The reasoning is visible and debatable. | Long. Wrong for fixes and quick questions. |\n\n**Where to start, by role:**\n\n| Who you are | Start with | Switch to |\n|---|---|---|\n| Developer reading in an IDE | engineer | `minimal` to iterate fast, `memo` for a design decision, `teacher` in an unfamiliar codebase |\n| Senior or lead reviewing others' work | engineer (or `bluf` for status) | `memo` for architecture calls |\n| Founder or idea person building with Claude | lcd | `memo` for product decisions, `plain` when forwarding to customers, `engineer` when you go into the code yourself |\n| Developer who forwards replies or reads on a phone | lcd | `engineer` when heads-down in code |\n| Manager or product owner who decides | bluf | `memo` for big decisions, `lcd` when relaying to a mixed team |\n| Non-technical (ops, support, marketing, owner) | plain | `lcd` once a few terms are familiar |\n| Student, junior, or learning a codebase | teacher | `engineer` once fluent |\n| Analyst, researcher, or writer | memo for findings, `bluf` for status | `lcd` for a mixed audience |\n| Trainer or consultant explaining to clients | lcd | `teacher` for lessons, `plain` for client-facing text |\n| Power user with nobody to relay to | minimal | `engineer` when something breaks, `memo` before a big change |\n\nThe table is per situation, not for life. Styles are instructions, not enforcement, so they aren't guaranteed. Errors, warnings, and destructive-action confirmations keep full content in every style.\n\nTo use one, run `/reply-style <name>` to install and switch. `/reply-style try <name>` applies it to this conversation only and writes no files. Tell me your role if you'd like a recommendation."
+              },
+              {
+                "name": "seven-styles",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched lcd[\\s\\S]*bluf[\\s\\S]*engineer[\\s\\S]*teacher[\\s\\S]*minimal[\\s\\S]*plain[\\s\\S]*memo",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "run-plan-no-task",
+      "dir": "evals/run-plan-no-task",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:run-plan .task/ACTIVE/nothing/task.md",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "points-to-make-prompt",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "make-prompt",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "stops",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 if the reply stops because the task.md does not exist and says to run make-prompt first, writes no routing.json, prints no tier or routing table for invented units, and runs no agent. Score 0 if it invents deliverables, a routing table, a receipt, or starts any work.\n",
+          "config": {
+            "criteria": "Score 1 if the reply stops because the task.md does not exist and says to run make-prompt first, writes no routing.json, prints no tier or routing table for invented units, and runs no agent. Score 0 if it invents deliverables, a routing table, a receipt, or starts any work.\n",
+            "focus": "last_message"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 2,
+            "costUsd": 0.08100049999999999,
+            "judgeCostUsd": 0.0007883999999999999,
+            "durationSeconds": 14,
+            "startedAt": "2026-10-22T19:48:56.276Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-Pg1NJ0/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "points-to-make-prompt",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched make-prompt",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "stops",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "There's no task.md at `.task/ACTIVE/nothing/task.md`. The `.task` folder doesn't exist in `/home/user/evaltmp-m4/claude-eval-Pg1NJ0/home/cwd`.\n\nRun `/smartuse:make-prompt` first to write the kickoff and task folder. Or give me the correct path to an existing task.md. I haven't tiered, spawned or written anything."
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "run-plan-wrong-machine",
+      "dir": "evals/run-plan-wrong-machine",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:run-plan .task/ACTIVE/room-renders/task.md",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 20,
+      "graders": [
+        {
+          "name": "needs-machine",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "needs-machine",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "no-agent",
+          "type": "tool_used",
+          "weight": 1,
+          "config": {
+            "tool": "Agent",
+            "min": 0,
+            "max": 0
+          }
+        },
+        {
+          "name": "no-render",
+          "type": "file_exists",
+          "weight": 1,
+          "config": {
+            "path": "renders/living.png",
+            "exists": false
+          }
+        },
+        {
+          "name": "no-unit-started",
+          "type": "tool_used",
+          "weight": 1,
+          "config": {
+            "tool": "Bash",
+            "input_match": "status=running",
+            "min": 0,
+            "max": 0
+          }
+        },
+        {
+          "name": "run-on-laptop",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "[Rr]un this plan on",
+            "flags": "",
+            "match": "contains"
+          }
+        },
+        {
+          "name": "stops",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "The task.md in the working directory has three units. Unit 2 needs the `roomrender` tool, which is not installed on this machine. Unit 3 needs the photo `photos/living.jpg`, which is not on this machine. Score 1 only if ALL hold.\n(a) The reply shows the dry-run plan with units 2 and 3 marked `needs-machine` and names what is missing (for example `needs-machine: roomrender not found here`, `needs-machine: photos/living.jpg not found here`).\n(b) No unit was started: the reply does not say that any unit ran, passed or produced a file, and no agent was run.\n(c) It does not install, substitute or fake the missing tool or photo, and it does not relay the work to another session (no \"paste this into ...\", no promise to ping). It says the plan has to run on the machine that has roomrender and the photos (the laptop).\nRefused or failed writes of the plan's state files (a read-only home directory, a sandbox error) do not matter. Score 0 if either unit is shown as runnable here, if anything is rendered or run, or if the reply works around the missing tool or photo.\n",
+          "config": {
+            "criteria": "The task.md in the working directory has three units. Unit 2 needs the `roomrender` tool, which is not installed on this machine. Unit 3 needs the photo `photos/living.jpg`, which is not on this machine. Score 1 only if ALL hold.\n(a) The reply shows the dry-run plan with units 2 and 3 marked `needs-machine` and names what is missing (for example `needs-machine: roomrender not found here`, `needs-machine: photos/living.jpg not found here`).\n(b) No unit was started: the reply does not say that any unit ran, passed or produced a file, and no agent was run.\n(c) It does not install, substitute or fake the missing tool or photo, and it does not relay the work to another session (no \"paste this into ...\", no promise to ping). It says the plan has to run on the machine that has roomrender and the photos (the laptop).\nRefused or failed writes of the plan's state files (a read-only home directory, a sandbox error) do not matter. Score 0 if either unit is shown as runnable here, if anything is rendered or run, or if the reply works around the missing tool or photo.\n",
+            "focus": "last_message"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 5,
+            "costUsd": 0.1190487,
+            "judgeCostUsd": 0.0017886999999999998,
+            "durationSeconds": 33,
+            "startedAt": "2026-10-22T19:49:06.153Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-qPpVja/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "needs-machine",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched needs-machine",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-agent",
+                "passed": true,
+                "weight": 1,
+                "explanation": "Agent called 0x (expected 0..0)",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-render",
+                "passed": true,
+                "weight": 1,
+                "explanation": "renders/living.png absent as expected",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-unit-started",
+                "passed": true,
+                "weight": 1,
+                "explanation": "Bash called 0x (expected 0..0)",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "run-on-laptop",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched [Rr]un this plan on",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "stops",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "**Run this plan on the laptop.** Nothing ran here. Two of the three units need things this machine doesn't have, which is more than half.\n\n| # | unit | tier | model | why | budget | check |\n|---|---|---|---|---|---|---|\n| 1 | Inventory the scenes | mechanical | haiku | Lists files and sizes, so it's checkable. Not started, because most of the plan needs the laptop. | 10 | `test -s renders/inventory.md` |\n| 2 | Render every scene to PNG | — | — | needs-machine: `roomrender` not found here | — | `test -s renders/living.png` |\n| 3 | Compare with the photo | — | — | needs-machine: `photos/living.jpg` not found here | — | `test -s renders/compare.md` |\n\nThe three `rooms/*.blend` scenes and `tools/render.sh` are present here. The kickoff already says the laptop has `roomrender` and the reference photos, so I didn't install or swap in anything to make a unit pass.\n\n**State not saved.** The plan, the step statuses and the ledger entry were not recorded. Every write to the state directory was refused (\"cannot write … routing.json\"), and `--receipts` found no run. The sandbox probably doesn't allow writes there. I haven't worked around it. The receipts table is therefore empty: no unit ran, so there are no agent tokens.\n\n**Other open items**\n- I tried to add a dated line to `decisions.md` and the command printed no error, but I haven't checked that the line landed.\n- I didn't tick any boxes in `task.md`.\n\n**Confirm** (assumed defaults I'd proceed on, as in the kickoff)\n- The finals are 1920x1080. Dana can correct this by exception.\n- The laptop has both `roomrender` and `photos/`.\n\n**Look at first:** run `/smartuse:run-plan .task/ACTIVE/room-renders/task.md` on the laptop. If you want unit 1 done here first, say \"go\" and I'll run only that one."
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    },
+    {
+      "name": "status-line",
+      "dir": "evals/status-line",
+      "source": "mixed",
+      "promptMarkdown": "/smartuse:status",
+      "runsPerCase": 1,
+      "timeoutSeconds": 300,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "explains",
+          "type": "llm",
+          "weight": 1,
+          "graderMarkdown": "Score 1 only if all three hold. (1) The reply quotes exactly one heartbeat line verbatim, as the tool printed it (it contains \"smartuse ·\"; a stalled line starts with \"stalled? smartuse ·\"), and adds no second status line and no fields from `heartbeat.py --json` (last_tool, agents, waiting_since). (2) It explains the state words that line contains, as the skill's legend defines them — for \"working · thinking 0s · 0 calls this turn\": a turn is running and no tool has run in it yet; likewise waiting on you, waiting on agent, stalled?, NEEDS YOU, session ended, no activity recorded, step, loop block — whichever appear. (3) It names NO agent, tool or plan step that the quoted line does not show. Score 0 if it invents a running agent, tool or step, presents a line it did not get from the tool, or tells the user to check the state from a second Claude session (or a second /smartuse:status) in the same repo.\n",
+          "config": {
+            "criteria": "Score 1 only if all three hold. (1) The reply quotes exactly one heartbeat line verbatim, as the tool printed it (it contains \"smartuse ·\"; a stalled line starts with \"stalled? smartuse ·\"), and adds no second status line and no fields from `heartbeat.py --json` (last_tool, agents, waiting_since). (2) It explains the state words that line contains, as the skill's legend defines them — for \"working · thinking 0s · 0 calls this turn\": a turn is running and no tool has run in it yet; likewise waiting on you, waiting on agent, stalled?, NEEDS YOU, session ended, no activity recorded, step, loop block — whichever appear. (3) It names NO agent, tool or plan step that the quoted line does not show. Score 0 if it invents a running agent, tool or step, presents a line it did not get from the tool, or tells the user to check the state from a second Claude session (or a second /smartuse:status) in the same repo.\n",
+            "focus": "last_message"
+          }
+        },
+        {
+          "name": "line",
+          "type": "regex",
+          "weight": 1,
+          "config": {
+            "target": "last_message",
+            "pattern": "smartuse ·",
+            "flags": "",
+            "match": "contains"
+          }
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.059523200000000005,
+            "judgeCostUsd": 0.0012216000000000006,
+            "durationSeconds": 19,
+            "startedAt": "2026-10-22T19:49:09.919Z",
+            "error": null,
+            "tracePath": "/home/user/evaltmp-m4/claude-eval-t01I8f/out/trace.jsonl",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "explains",
+                "passed": true,
+                "weight": 1,
+                "explanation": "judge votes: PASS PASS PASS",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ],
+                "evidence": "smartuse · working · thinking 0s · 0 calls this turn\n\n`working` means a turn is running. `thinking 0s · 0 calls this turn` means no tool has run in it yet. Typing `/smartuse:status` always shows this, because the command runs inside your own new turn.\n\nFor a live answer while Claude works, or after it stops, use the status line (`/smartuse:status install`). You can also run this from a plain shell, not from Claude: `bash \"/home/user/smartuse/.claude/worktrees/agent-a54a78885e7816529/plugins/smartuse/hooks/py.sh\" \"/home/user/smartuse/.claude/worktrees/agent-a54a78885e7816529/plugins/smartuse/hooks/heartbeat.py\" --line`. Don't use a second Claude session in the same repo, because its events overwrite this repo's status file.\n\n`/smartuse:status install` prints the status-line snippet."
+              },
+              {
+                "name": "line",
+                "passed": true,
+                "weight": 1,
+                "explanation": "matched smartuse ·",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 10,
+    "casesPassed": 10,
+    "overallScore": 1,
+    "overallPassRate": 1
+  }
+}

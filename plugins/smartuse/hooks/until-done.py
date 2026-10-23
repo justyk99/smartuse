@@ -7,7 +7,11 @@ left: 3, 4 · check failed: …"), so the session keeps working. It lets the tur
   - routing.needs_human is set (the model wrote the question it needs answered),
   - every unit is pass / blocked and the check passes (or no check is configured),
   - the hook has blocked `max_blocks` times for this run (default 6; the counter `blocks` lives in routing.json),
-  - routing.active is false.
+  - routing.active is false,
+  - a `command` unit (run-plan's no-model tier: one shell command run as a background task) is running and the Stop input's
+    own `background_tasks` (Claude Code 2.1.308: [{id, type, status, …}]) lists a live task: ending the turn is waiting, not
+    quitting — the command's end notification wakes the session to record it — and no block is spent (a long render would
+    otherwise use up max_blocks and switch the gate off for the rest of the run).
 Claude Code sets stop_hook_active=true on EVERY Stop that follows a block, so the gate ignores that flag on purpose:
 allowing on it would push exactly once per user prompt. The loop is bounded by `max_blocks` instead.
 State dir: ~/.claude/smartuse/projects/<key>/ (shared with heartbeat.py and ledger.py). <key> is the repo's full resolved
@@ -223,6 +227,16 @@ def run_check(check, argv, project, prior):
     return "", None
 
 
+LIVE = {"running", "pending", "started", "starting", "in_progress", "in-progress", "active", "queued"}   # a background task status that is not final
+
+
+def live_background(data):
+    """True when the Stop input lists a background task that is still running (an entry without a status counts as running:
+    letting the turn end is this gate's fail-open side)."""
+    v = data.get("background_tasks")
+    return isinstance(v, list) and any(isinstance(x, dict) and str(x.get("status") or "running").lower() in LIVE for x in v)
+
+
 def allow():
     sys.exit(0)
 
@@ -257,6 +271,8 @@ def main():
     if blocks >= int(r.get("max_blocks") or 6):
         allow()
     left = [u for u in r.get("units", []) if (u.get("status") or "pending") in ("pending", "running", "fail")]
+    if any(u.get("tier") == "command" and u.get("status") == "running" for u in left) and live_background(data):
+        allow()                                   # a command is running in the background: its end notification wakes the session
     reasons = []
     if left:
         reasons.append("units not finished: " + ", ".join(f"#{u.get('id')} {u.get('title', '')[:40]} [{u.get('status') or 'pending'}]" for u in left[:6]))

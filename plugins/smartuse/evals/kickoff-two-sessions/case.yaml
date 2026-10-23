@@ -1,0 +1,12 @@
+schema_version: "1.1"
+name: kickoff-two-sessions
+description: A planner asked for a prompt that the owner will paste into a laptop session ("ping me when it's done") moves the work to one session on the machine with the renderer, or keeps two sessions with a pushed result file as the done-signal and a watcher armed. It never promises a ping with nothing armed (the "step done" incident). Needs --scaffold (scaffold.sh stages the repo, where the renderer is not installed).
+tags: [make-prompt, relay]
+runs: 1
+expected_outcome: "A kickoff with a `Runs on:` line that names the laptop, and a hand-off that says to run it there as one session with run-plan (or, for two sessions, the push of a result file as the done-signal and an armed watcher). No ping promised with nothing armed."
+context:
+  scaffold_script: scaffold.sh
+execution:
+  max_turns: 25
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Grep, Glob, Agent, Write, Skill]
