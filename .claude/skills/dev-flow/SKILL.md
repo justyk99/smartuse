@@ -24,7 +24,7 @@ The planner runs on the strongest model the account can use, so the same skill w
 2. The spawn errors, or the planner's first line shows a weaker model than asked → re-spawn on the next rung and tell the user in one line ("planner on Opus: Fable isn't available on this account").
 3. The planner's report starts with `Model: <the model id it runs on>`, so you can check rung 2.
 4. Only the planner climbs the ladder. The reviewer stays on Opus · xhigh: when the planner ran on a different model, the review gets a second model's eyes.
-5. A design or "which approach" question in the middle of a build goes to the planner the same way. Suggest a different main model only for a brand-new product direction; say why in one line and never switch it yourself.
+5. A design or "which approach" question in the middle of a build goes to the planner the same way. The menu model never changes, not even for a new product direction: that is the planner's job too.
 
 ## Project rules beat this flow
 Read the project's CLAUDE.md and rules before phase 0. Where they forbid something this flow does (commits, worktrees, a file type such as `.sql`, tests against a shared server, touching code someone else wrote), follow the project and say in one line which step changed. Put those limits in every builder's and tester's brief.
