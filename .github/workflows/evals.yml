@@ -1,0 +1,54 @@
+name: evals
+# claude plugin eval over every case in plugins/smartuse/evals/, on Linux (the Windows laptop has no sandbox backend for a
+# Bash grant). Auth: the repo secret CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token` (subscription usage, no API bill).
+# Without the secret the job says so and passes; it never reports a score it did not run.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'claude/**']
+    paths:
+      - 'plugins/smartuse/skills/**'
+      - 'plugins/smartuse/evals/**'
+      - 'plugins/smartuse/hooks/**'
+      - '.github/workflows/evals.yml'
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Token present?
+        id: token
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "ok=1" >> "$GITHUB_OUTPUT"
+          else echo "::warning::CLAUDE_CODE_OAUTH_TOKEN is not set — evals not run, nothing scored"; echo "ok=0" >> "$GITHUB_OUTPUT"; fi
+      - name: Sandbox backend (bubblewrap + socat; Ubuntu 24.04 AppArmor allows user namespaces on this throwaway runner)
+        if: steps.token.outputs.ok == '1'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null)" = 1 ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+      - name: Install Claude Code
+        if: steps.token.outputs.ok == '1'
+        run: curl -fsSL https://claude.ai/install.sh | bash
+      - name: claude plugin eval (all cases, one arm, cost cap)
+        if: steps.token.outputs.ok == '1'
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          unset ANTHROPIC_API_KEY   # it would outrank the subscription token
+          export TMPDIR="$RUNNER_TEMP/evaltmp"; mkdir -p "$TMPDIR"   # the eval sandbox denies /tmp
+          claude --version
+          claude plugin eval plugins/smartuse --trust-plugin --scaffold --ablation none \
+            --allow-tools Bash Skill Read Grep Glob Agent Write \
+            --max-cost-usd 3 --no-publish --output-dir "$RUNNER_TEMP/eval-out"
+      - name: Upload results
+        if: always() && steps.token.outputs.ok == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: ${{ runner.temp }}/eval-out
+          if-no-files-found: warn
