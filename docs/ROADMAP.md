@@ -29,6 +29,7 @@
 - [ ] The subagentStatusLine verified live on the laptop (runtime loading of plugin settings)
 - [ ] until-done on Windows: `--trust` pin path without /etc (pins under a root-equivalent the user owns: documented, not faked)
 - [ ] bash-guard false positive: `curl … | python3 -c '…'` is denied as pipe-to-shell, though `-c` (or a script file) makes stdin data — apply the heredoc rule's "what reads stdin as code" test to pipes (found 2026-10-22)
+- [ ] bash-guard human-only rule stops at `;`: `python3 -c "import os; os.remove('.claude/smartuse.local.md')"` is not denied (file-guard covers Write/Edit only) — found by the paid-guard F2 builder 2026-10-24
 - [ ] Sandbox mode: the skills' state writes are refused (sandboxed Bash cannot write `~/.claude`); move the skill → hook hand-off off the filesystem (the hooks read it from the transcript), so it works sandboxed and prompt-free
 
 ## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches
