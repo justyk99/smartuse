@@ -14,18 +14,22 @@ on:
 concurrency:
   group: evals-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
   evals:
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Token present?
         id: token
+        env:
+          HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
         run: |
-          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "ok=1" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_TOKEN" = true ]; then echo "ok=1" >> "$GITHUB_OUTPUT"
           else echo "::warning::CLAUDE_CODE_OAUTH_TOKEN is not set — evals not run, nothing scored"; echo "ok=0" >> "$GITHUB_OUTPUT"; fi
       - name: Sandbox backend (bubblewrap + socat; Ubuntu 24.04 AppArmor allows user namespaces on this throwaway runner)
         if: steps.token.outputs.ok == '1'
@@ -37,6 +41,8 @@ jobs:
         run: curl -fsSL https://claude.ai/install.sh | bash
       - name: claude plugin eval (all cases, one arm, cost cap)
         if: steps.token.outputs.ok == '1'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}   # this step only
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           unset ANTHROPIC_API_KEY   # it would outrank the subscription token
@@ -45,10 +51,21 @@ jobs:
           claude plugin eval plugins/smartuse --trust-plugin --scaffold --ablation none \
             --allow-tools Bash Skill Read Grep Glob Agent Write \
             --max-cost-usd 3 --no-publish --output-dir "$RUNNER_TEMP/eval-out"
-      - name: Upload results
+      - name: Leak check (the agent under test has Bash; the artifact is public)
+        id: leak
         if: always() && steps.token.outputs.ok == '1'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -d "$RUNNER_TEMP/eval-out" ] && grep -rqF -- "$CLAUDE_CODE_OAUTH_TOKEN" "$RUNNER_TEMP/eval-out"; then
+            rm -rf "$RUNNER_TEMP/eval-out"; echo "::error::the token appears in the eval output — not uploaded; revoke and re-issue it"; exit 1
+          fi
+          echo "clean=1" >> "$GITHUB_OUTPUT"
+      - name: Upload results
+        if: always() && steps.leak.outputs.clean == '1'
         uses: actions/upload-artifact@v4
         with:
           name: eval-results
-          path: ${{ runner.temp }}/eval-out
+          path: ${{ runner.temp }}/eval-out/aggregate-result.json
           if-no-files-found: warn
+          retention-days: 3
