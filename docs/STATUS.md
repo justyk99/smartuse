@@ -1,22 +1,26 @@
-# STATUS — smartuse (owner: Smartuse-Brain · updated 2026-10-23 02:40 UTC)
+# STATUS — smartuse (updated 2026-10-24 by Smartuse-Brain, handing off to ONE new session)
 
-Mandate (YK, 2026-10-22): the Brain drives to 1.0 and asks only for real decisions; the laptop session Smartuse-Worker does laptop-only steps. Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s`.
+Mandate (YK): drive smartuse to 1.0, ask only for real decisions. One session from now on: the cloud brain + laptop worker pair is closed (case study 8: two peer sessions drop files and signals). Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s` (main merged in at b0bd7d5). Run work with the repo's dev-flow skill (`.claude/skills/dev-flow/`); repo permissions in `.claude/settings.json`.
 
-## Done
-- **0.4.0 released:** on `main` at 5b3dbed (a merge of e4b678c, CI green on Linux, macOS, Windows, Python 3.9 and strict validate); a fresh `claude plugin install smartuse@smartuse` gets 0.4.0. Evals 8 of 8 (+0.88 over no plugin).
-- Laptop re-test of the release's hooks (99eab34, Python 3.13): everything passes except 3 heartbeat timing checks (64 of 67) that overshoot as the slow run goes on; CI's Windows runner passes. The worker's report never reached the Brain (sent 12:39 to a name that does not route); found in its transcript at 13:08.
-- Case studies 7 and 8 added to YK's training case studies (private repo, dev branch). Designs: `docs/notes/relay-design.md` (relay guards) and `docs/notes/one-session-design.md` (one session that delegates, the 0.5 main pattern).
-- 0.5 started: `watch.py` built (a push or a file wakes the session; `--since` survives a late arm or a restart; 63 cases), heartbeat test timing fixed (81e095b, ALL PASS on the laptop); CI green on all jobs at 3321ed9 (watch suite included). The laptop measured ~2 s per hook event (`python3` there is the Store stub, probed first): the launcher now remembers the interpreter it proved, one start per event: 0.5–1.8 s per call there after the change (the laptop was low on memory).
+## State
+- `main` = 0.4.0, released 2026-10-22; `claude plugin install smartuse@smartuse` serves it. Evals 8 of 8 (+0.88 over no plugin).
+- Dev branch = 0.5 work, unreleased (manifests still say 0.4.0): `hooks/watch.py`; the wait gate + `STOPPED` status line; the launcher remembers its Python (one start per event); one-session steering (make-prompt `Runs on:`, run-plan pre-flight `needs-machine` + no-model `command` tier); evals 10 of 10. Tests: `run 126 · ledger 46 · until-done 40 · file-guard 10 · heartbeat 105 · ab 36 · watch 63 · wait 187`.
 
-## In progress
-- On the dev branch, CI green: the wait gate (`hooks/wait-gate.py`, a Stop hook: a hand-off with nothing armed to wake the session is blocked once; `wait_gate: off` in the adapter) and the `STOPPED` status line (M2, M3); `run 126 · ledger 46 · until-done 36 · file-guard 10 · heartbeat 105 · ab 36 · watch 63 · wait 187`.
-- M4, the one-session steering, built and merged: make-prompt writes `Runs on:` and hands a relay ask to ONE session on the right machine; run-plan pre-flights each unit's tools (`needs-machine`), adds a `command` tier (a background command, no model) and briefs inputs by path; two eval cases that fail on the incident; all 10 evals 1.00. Two bugs it found are fixed: until-done no longer spends its blocks on a running background command; the wait gate ignores negated phrases.
-- Next: migrate the 8 older eval cases to `execution:` (their max_turns / timeouts are ignored today), then the paid-call guard; the README lead line waits for YK.
+## Next, in order
+0. Check CI on the branch head (the merge of main was pushed with this file).
+1. YK's `docs/notes/input-2026-10-24-claude-system.md` is not pushed yet. When it lands: pick its 1.0 candidates, answer its 6 open questions with a reason each, update ROADMAP.
+2. Move the 8 older eval cases' `max_turns` / `timeout_seconds` / `allowed_tools` under `execution:` (Claude Code 2.1.308 ignores them at the top level), re-run the suite.
+3. Release 0.5.0: version bump, `docs/releases/0.5.0.md`, merge to main, check the marketplace serves it.
+4. Paid-call guard (relay-design rule 4): low priority — YK: test runs on his Max plan need no asking; keep a cost cap on each run.
 
-## Blocked on YK
-- Release pages and tags for v0.3.0 and v0.4.0: one paste on the laptop (in the Brain's message of 2026-10-22 ~12:55 UTC).
-- LinkedIn post #2: his one line + "post", Friday 23 Oct 13:00 MYT. A wake-up is armed, but it is the kind that was refused at delivery today: YK should not rely on it.
+## Needs YK
+- Release pages + tags for v0.3.0 / v0.4.0 (the `gh release create` paste from 2026-10-22).
+- README's new lead line (one session that delegates): he words it.
+- LinkedIn automation: connect Typefully (typefully.com + its claude.ai connector); then posts are scheduled with the first comment, no manual step.
 
-## Next (mine)
-- 0.5 in the design's order: `watch.py` ✓ → the wait gate + `STOPPED` status ✓ → the one-session steering (make-prompt, run-plan, README, two eval cases) → the paid-call guard.
-- Every hand-off to the laptop session gets a watcher. Scheduled check-ins into this session were refused at delivery (2026-10-22 15:27, ACCESS_DENIED), so the watcher is an in-session background loop; messages from the laptop do not arrive either, its transcript is read instead.
+## Traps learned the hard way
+- Scheduled check-ins (`send_later`) into a session were refused at delivery (ACCESS_DENIED, 2 of 2): wake yourself with an in-session background task (`hooks/watch.py`, a bash loop) instead.
+- `SendMessage` to a session by name does not reach a cloud session; read the other session's transcript with `list_events`.
+- Evals on Linux: `TMPDIR` outside `/tmp`, `--scaffold`, `--allow-tools Bash Skill Read Grep Glob Agent Write`.
+- The laptop's Python starts slowly (0.4–3.6 s); a full suite there takes 10+ minutes and low memory can kill it. CI's Windows runner is the routine Windows check; ask YK for a laptop session only for Windows-only checks or his logins (gh, LinkedIn).
+- Skills write `~/.claude` state only through `ledger.py --put/--unit/--run` (Write/Edit there prompts every time).
