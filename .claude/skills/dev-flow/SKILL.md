@@ -20,6 +20,11 @@ Priority: **quality and accuracy → speed → tokens.** The user keeps one sett
 
 Suggest Fable (never switch to it yourself) only for a brand-new product direction or a strategy call; say why in one line.
 
+## Your own past work first (every brief, research and plan)
+- Read `my-work.md` next to this file: it says where the user's reuse map, lessons and decisions live on this machine. Pass those paths to `flow-planner` and `flow-researcher` in their brief.
+- Before anything from outside, search the user's own work for the task's keywords: lessons (mistakes not to repeat), decisions (already made, don't re-decide), past projects and patterns (code shapes to copy), design systems (UI work).
+- In the build-vs-reuse note, every candidate from the user's own work gets a verdict: **reuse as-is**, **adapt** (copy the structure, own code) or **avoid** (the lesson or reason). If `my-work.md` is missing or still a template, ask once where their past work lives.
+
 ## Rules that are never skipped
 - Find the project's own files first: its status file, plan, decisions log, test gate (CLAUDE.md, README, `tests/`). Use them; never create a parallel set.
 - No build without an approved plan. The plan names, for every feature: acceptance criteria as user actions, unit tests, one integration test, one interactive scenario, what must not change.
@@ -35,7 +40,7 @@ Say it at these moments, never in the middle of a feature:
 3. This session has been compacted once (you see a summary of earlier work at the top).
 4. The user changes direction or starts another project.
 
-First do the handoff: rewrite the status file (≤ 25 lines: phase, done, next, locked decisions, must not change, open questions) and write the next brief. Commit them. Then print exactly:
+First do the handoff: write back what this phase taught (a mistake → one dated line in the lessons file; a reusable piece → one row in the reuse map; a decision → the decisions file; paths in `my-work.md`), then rewrite the status file (≤ 25 lines: phase, done, next, locked decisions, must not change, open questions) and write the next brief. Commit them. Then print exactly:
 
 ```
 ▶ Phase <n> done: <one line>. Next: phase <n+1> <name>.
