@@ -25,7 +25,7 @@
 
 ## 0.5.0 — also: measured
 - [x] The routed-vs-not A/B over the 5 bench asks × 3 dials (run 3: −24 % median cost, n=4) · [ ] at least 5 real tasks on YK's repos (his laptop, `bench/ab.sh`); the table in README replaces "not yet measured"
-- [ ] `claude plugin eval` for all 10 cases in CI (needs an API key secret: YK; the two relay cases need `--scaffold`) — until then, run locally before each release (0.4.0: 8 of 8, +0.88 over no plugin, 2026-10-22; 0.5.0 working tree: 10 of 10, 2026-10-22)
+- [ ] `claude plugin eval` for all 10 cases in CI — `.github/workflows/evals.yml` (2026-10-24: Linux, bubblewrap sandbox, `--scaffold`, one arm, `--max-cost-usd 3`; on dispatch and on pushes that touch skills, evals or hooks); waits on the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (YK: `claude setup-token`), and the first run proves the token works for `plugin eval` (its docs name only API keys) — until then, run locally before each release (0.4.0: 8 of 8, +0.88 over no plugin, 2026-10-22; 0.5.0 working tree: 10 of 10, 2026-10-22)
 - [ ] The subagentStatusLine verified live on the laptop (runtime loading of plugin settings)
 - [ ] until-done on Windows: `--trust` pin path without /etc (pins under a root-equivalent the user owns: documented, not faked)
 - [ ] bash-guard false positive: `curl … | python3 -c '…'` is denied as pipe-to-shell, though `-c` (or a script file) makes stdin data — apply the heredoc rule's "what reads stdin as code" test to pipes (found 2026-10-22)

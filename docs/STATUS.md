@@ -8,10 +8,10 @@ Mandate (YK): drive smartuse to 1.0, ask only for real decisions. One session fr
 
 ## Next, in order
 0. Check CI on the branch head (the merge of main was pushed with this file).
-1. YK's `docs/notes/input-2026-10-24-claude-system.md` is not pushed yet. When it lands: pick its 1.0 candidates, answer its 6 open questions with a reason each, update ROADMAP.
-2. Move the 8 older eval cases' `max_turns` / `timeout_seconds` / `allowed_tools` under `execution:` (Claude Code 2.1.308 ignores them at the top level), re-run the suite. Moved 2026-10-24; the re-run waits on YK (evals cannot run on the laptop, see Traps).
+1. Parked (YK 2026-10-24: he does not know where the note is). `docs/notes/input-2026-10-24-claude-system.md` is on no machine searched and the cloud Brain's log is gone (404). If it turns up: pick its 1.0 candidates, answer its 6 open questions with a reason each, update ROADMAP. Nothing in 0.5.0 depends on it.
+2. Move the 8 older eval cases' `max_turns` / `timeout_seconds` / `allowed_tools` under `execution:` (Claude Code 2.1.308 ignores them at the top level), re-run the suite. Moved 2026-10-24. The re-run goes to CI (YK chose it 2026-10-24): `.github/workflows/evals.yml` on Linux with the repo secret `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`; Max-plan usage, no API bill). Evals cannot run on the laptop, see Traps.
 3. Release 0.5.0: version bump, `docs/releases/0.5.0.md` (drafted 2026-10-24; its eval line waits on step 2), merge to main, check the marketplace serves it.
-4. Paid-call guard (relay-design rule 4): low priority — YK: test runs on his Max plan need no asking; keep a cost cap on each run. Scope question open (2026-10-24): the design note asks the owner's go per paid script; YK's line asks only a cap.
+4. Paid-call guard (relay-design rule 4): low priority — YK: test runs on his Max plan need no asking; keep a cost cap on each run. Scope (YK 2026-10-24): paid-API calls (image, LLM APIs billed per call) are denied until the owner's go per script, with a cap and one test output first; Claude runs on the Max plan are not paid calls. Needs a plan and YK's yes before the build.
 
 ## Needs YK
 - Release pages + tags for v0.3.0 / v0.4.0 (the `gh release create` paste from 2026-10-22).
