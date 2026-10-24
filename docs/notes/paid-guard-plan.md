@@ -95,6 +95,7 @@ Depends on: F1–F3 merged and `all.sh` green.
 - **Unit / integration / interactive:** `all.sh -q` prints the new summary line; CI green on ubuntu (3.9 and 3.12), macOS, Windows; `claude plugin validate --strict plugins/smartuse` passes; a person reads the README section aloud to the LCD test.
 
 ## 4. Decisions that need YK (recommendation first)
+**Answered 2026-10-24: YK said yes to the plan and to all five recommendations** (Anthropic API key calls count as paid; they are not part of the Max plan).
 - **D-YK1 `api.anthropic.com` and `ANTHROPIC_API_KEY` in the paid list.** Recommend **yes**: a script that calls the API with a key bills per call even on a Max plan; `claude -p`, `claude plugin eval` and subagents never name them, so they stay free. Alternative: leave them out and add later on first sight.
 - **D-YK2 Keep the typed (in-session) go in 1.0.** Recommend **yes** (F3, about one day): it is the phone path and the incident's third replay. Alternative: adapter-only for 0.6.0, F3 in 0.7.0.
 - **D-YK3 Money is echoed, not measured.** Recommend **accept**, and set the vendor's hard limit as the backstop (OpenAI project hard limit; fal's lock threshold; Replicate's existing-account limit). Alternative: require `cap` to be a number and multiply by a per-script price in the adapter — more config, still an estimate.
