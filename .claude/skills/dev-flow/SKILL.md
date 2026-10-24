@@ -3,22 +3,37 @@ name: dev-flow
 description: Run a software project or feature start to end with quality first — brief, research, plan, contract, build, integrate, interactive test, review, ship, handoff — delegating each phase to the right model through the flow-* subagents, and telling the user exactly when to /clear. Use for "/dev-flow <ask>", "/dev-flow continue", or when the user starts a new project, a new feature or a new build phase.
 ---
 
-# dev-flow (v0, 2026-10-24)
+# dev-flow (v1, 2026-10-24)
 
 Priority: **quality and accuracy → speed → tokens.** The user keeps one setting in the menu (Opus, high). You switch models by delegating to the subagents below; never ask the user to change the model.
 
 ## Who does what
 | Phase | Agent (model · effort) | You (the orchestrator) |
 |---|---|---|
-| 0 Brief · 1 Research · 2 Plan | `flow-planner` (Opus · xhigh); bulk reading by `flow-researcher` (Sonnet · medium) | collect the ask, show the plan, get the user's yes |
+| 0 Brief · 1 Research · 2 Plan | `flow-planner` (strongest model on the account · xhigh, see the ladder); bulk reading by `flow-researcher` (Sonnet · medium) | collect the ask, show the plan, get the user's yes |
 | 3 Contract | you (Opus · high) | interfaces, data shapes, fixtures, their tests |
-| 4 Build | `flow-builder` (Sonnet · high, own worktree), one per feature, in parallel when independent | brief each one: feature, contract, files in scope, test command |
+| 4 Build | `flow-builder` (Sonnet · high), one per feature; own worktree and in parallel only in git repos (see version control) | brief each one: feature, contract, files in scope, test command |
 | 5 Integrate | you | merge one feature at a time; full gate after each merge |
 | 6 Use it | `flow-tester` (Sonnet · high) | fix nothing yourself without a failing scenario to point at |
 | 7 Review | `flow-reviewer` (Opus · xhigh), fresh | majors go back to a builder; then 5 and 6 again |
-| 8 Ship · 9 Handoff | you | docs, status, commit, push; the handoff below |
+| 8 Ship · 9 Handoff | you | docs, status, commit, push (or hand the diff over, see version control); the handoff below |
 
-Suggest Fable (never switch to it yourself) only for a brand-new product direction or a strategy call; say why in one line.
+## Model ladder (planner)
+The planner runs on the strongest model the account can use, so the same skill works for anyone who installs it.
+1. Spawn `flow-planner` with the Agent tool's `model` set to the first rung: **`fable` → `opus`**. (Edit this one line when a stronger model ships.)
+2. The spawn errors, or the planner's first line shows a weaker model than asked → re-spawn on the next rung and tell the user in one line ("planner on Opus: Fable isn't available on this account").
+3. The planner's report starts with `Model: <the model id it runs on>`, so you can check rung 2.
+4. Only the planner climbs the ladder. The reviewer stays on Opus · xhigh: when the planner ran on a different model, the review gets a second model's eyes.
+5. A design or "which approach" question in the middle of a build goes to the planner the same way. Suggest a different main model only for a brand-new product direction; say why in one line and never switch it yourself.
+
+## Project rules beat this flow
+Read the project's CLAUDE.md and rules before phase 0. Where they forbid something this flow does (commits, worktrees, a file type such as `.sql`, tests against a shared server, touching code someone else wrote), follow the project and say in one line which step changed. Put those limits in every builder's and tester's brief.
+
+## Version control
+Detect it before phase 4: a `.svn` folder or a working `svn info` → SVN; `git rev-parse` works → git; neither → no VCS.
+- **git:** builders get the Agent tool's `isolation: "worktree"` and can run in parallel on independent features; you merge one at a time in phase 5.
+- **SVN or no VCS:** no worktrees. Builders run one at a time in the same working copy, each told its exact files. Nobody commits: phase 8 shows the diff (`svn diff`) and the user commits. A stray `.git` inside an SVN working copy doesn't make it git: SVN wins.
+- **Either:** the project says the user commits → same as SVN for phase 8.
 
 ## Your own past work first (every brief, research and plan)
 - Read `my-work.md` next to this file: it says where the user's reuse map, lessons and decisions live on this machine. Pass those paths to `flow-planner` and `flow-researcher` in their brief.
