@@ -3,7 +3,8 @@ name: kickoff-quick
 description: A thin one-line ask becomes a planner-grade kickoff (quick mode, no questions).
 tags: [make-prompt]
 runs: 1
-max_turns: 25
-timeout_seconds: 600
 expected_outcome: An 8-section kickoff with verified facts, absolute dates, non-goals, gated deliverables, open questions with owners, a self-check and a 5-line summary.
-allowed_tools: [Bash, Read, Grep, Glob, Agent, Write, Skill]
+execution:
+  max_turns: 25
+  timeout_seconds: 600
+  allowed_tools: [Bash, Read, Grep, Glob, Agent, Write, Skill]
