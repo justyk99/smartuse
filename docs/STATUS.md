@@ -1,6 +1,6 @@
-# STATUS — smartuse (updated 2026-10-24 by Smartuse-Brain, handing off to ONE new session)
+# STATUS — smartuse (updated 2026-10-24 by Smartuse-Brain, handing off to Smartuse-Worker, the one session from now on)
 
-Mandate (YK): drive smartuse to 1.0, ask only for real decisions. One session from now on: the cloud brain + laptop worker pair is closed (case study 8: two peer sessions drop files and signals). Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s` (main merged in at b0bd7d5). Run work with the repo's dev-flow skill (`.claude/skills/dev-flow/`); repo permissions in `.claude/settings.json`.
+Mandate (YK): drive smartuse to 1.0, ask only for real decisions. One session from now on: Smartuse-Worker on YK's laptop (the cloud brain is closed) (case study 8: two peer sessions drop files and signals). Plan: `docs/ROADMAP.md`. Dev branch: `claude/inspiring-galileo-8icw6s` (main merged in at b0bd7d5). Run work with the repo's dev-flow skill (`.claude/skills/dev-flow/`); repo permissions in `.claude/settings.json`.
 
 ## State
 - `main` = 0.4.0, released 2026-10-22; `claude plugin install smartuse@smartuse` serves it. Evals 8 of 8 (+0.88 over no plugin).
