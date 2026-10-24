@@ -3,5 +3,6 @@ name: living-docs-no-root
 description: With no docs root the living-docs skill says so and stops instead of inventing docs.
 tags: [living-docs]
 runs: 1
-max_turns: 8
-allowed_tools: [Bash, Read, Grep, Glob, Skill]
+execution:
+  max_turns: 8
+  allowed_tools: [Bash, Read, Grep, Glob, Skill]

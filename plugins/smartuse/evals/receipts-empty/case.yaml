@@ -3,5 +3,6 @@ name: receipts-empty
 description: With no run-plan run recorded, the receipts skill says so and invents no table, no model names and no token numbers.
 tags: [receipts, ledger]
 runs: 1
-max_turns: 6
-allowed_tools: [Bash, Read, Skill]
+execution:
+  max_turns: 6
+  allowed_tools: [Bash, Read, Skill]

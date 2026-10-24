@@ -9,7 +9,7 @@ Mandate (YK): drive smartuse to 1.0, ask only for real decisions. One session fr
 ## Next, in order
 0. Check CI on the branch head (the merge of main was pushed with this file).
 1. YK's `docs/notes/input-2026-10-24-claude-system.md` is not pushed yet. When it lands: pick its 1.0 candidates, answer its 6 open questions with a reason each, update ROADMAP.
-2. Move the 8 older eval cases' `max_turns` / `timeout_seconds` / `allowed_tools` under `execution:` (Claude Code 2.1.308 ignores them at the top level), re-run the suite.
+2. Move the 8 older eval cases' `max_turns` / `timeout_seconds` / `allowed_tools` under `execution:` (Claude Code 2.1.308 ignores them at the top level), re-run the suite. Moved 2026-10-24; the re-run waits on YK (evals cannot run on the laptop, see Traps).
 3. Release 0.5.0: version bump, `docs/releases/0.5.0.md`, merge to main, check the marketplace serves it.
 4. Paid-call guard (relay-design rule 4): low priority — YK: test runs on his Max plan need no asking; keep a cost cap on each run.
 
@@ -22,5 +22,6 @@ Mandate (YK): drive smartuse to 1.0, ask only for real decisions. One session fr
 - Scheduled check-ins (`send_later`) into a session were refused at delivery (ACCESS_DENIED, 2 of 2): wake yourself with an in-session background task (`hooks/watch.py`, a bash loop) instead.
 - `SendMessage` to a session by name does not reach a cloud session; read the other session's transcript with `list_events`.
 - Evals on Linux: `TMPDIR` outside `/tmp`, `--scaffold`, `--allow-tools Bash Skill Read Grep Glob Agent Write`.
+- Evals on the Windows laptop: not possible (Claude Code 2.1.310, 2026-10-24). Every case that grants Bash is refused ("the Windows sandbox is not active on this session (feature gate off)"); the two `--scaffold` cases fail with `Executable not found in $PATH: "bash"`. 20 of 20 runs refused, $0.00, nothing scored. No WSL installed.
 - The laptop's Python starts slowly (0.4–3.6 s); a full suite there takes 10+ minutes and low memory can kill it. CI's Windows runner is the routine Windows check; ask YK for a laptop session only for Windows-only checks or his logins (gh, LinkedIn).
 - Skills write `~/.claude` state only through `ledger.py --put/--unit/--run` (Write/Edit there prompts every time).
