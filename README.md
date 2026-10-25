@@ -3,7 +3,7 @@
 <p align="center">
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img alt="Claude Code 2.1.300+" src="https://img.shields.io/badge/Claude%20Code-2.1.300%2B-black">
-<img alt="plugin evals 10/10 (0.5.0 dev)" src="https://img.shields.io/badge/plugin%20evals-10%2F10%20%280.5.0%20dev%29-brightgreen">
+<img alt="plugin evals 10/10 (0.5.0)" src="https://img.shields.io/badge/plugin%20evals-10%2F10%20%280.5.0%29-brightgreen">
 <img alt="tests 577 hook + 36 bench cases" src="https://img.shields.io/badge/tests-577%20hook%20%2B%2036%20bench-brightgreen">
 <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/justyk99/smartuse/actions/workflows/ci.yml/badge.svg"></a>
 </p>
@@ -52,6 +52,7 @@ flowchart LR
 
 | What | Result |
 |---|---|
+| `claude plugin eval`, all 10 cases, each with its own turn and time limits (0.5.0, 2026-10-25, Claude Code 2.1.310, Linux CI, `--ablation none --scaffold`, one run per case) | **10 of 10 pass** (1.00 each) · $0.93 per full run, 213 s. `plugins/smartuse/evals/results/2026-10-25-0.5.0-ci/` |
 | `claude plugin eval`, all 10 cases (0.5.0 working tree, 2026-10-22, Claude Code 2.1.308, `--ablation none --scaffold`, one run per case) | **10 of 10 pass** (1.00 each) · $0.83 per full run. The two new cases for the one-session pattern (`kickoff-two-sessions`, `run-plan-wrong-machine`) pass 3 of 3 runs each with the 0.5 skills and score 0.00 and 0.67 on 3 of 3 without the new text; the incident's reply ("paste this into the builder; I'll ping you when it's done") fails the judge on every vote of a control case. `plugins/smartuse/evals/results/2026-10-22-0.5.0-m4/` |
 | `claude plugin eval`, all 8 cases, with vs without the plugin (0.4.0, 2026-10-22, Claude Code 2.1.308, one run per case) | **8 of 8 pass with it** (1.00 each); without: 0.50 for `bash-guard-sudo` and `living-docs-no-root`, 0.00 for the other six · mean gain **+0.88** · $1.01 per full run (both arms). Scoring first found three skill defects, fixed before this run: make-prompt's template had a deliverable with no gate and its self-check could read "about 9/14"; reply-style never told the model where its catalogue is. The two fixed cases then passed 3 of 3 runs each. `plugins/smartuse/evals/results/2026-10-22-0.4.0/` (0.2.0: 4 of 4, +0.88) |
 | `make-prompt quick` on three real asks (two production repos + the bench repo) | 0.9 – 1.8 min · 3.1k – 3.9k output tokens · 130k – 205k cached reads each · self-check 11/13 – 12/13 (the receipt's denominator at the time; the list has 14 lines and the receipt says /14 since 0.4.0) |
