@@ -29,12 +29,14 @@ RULES = [
      r"|\.ssh[\\/]?(\*|\s|[\"']|$)|\.ssh[\\/]config|gh[\\/]hosts\.yml|\.git-credentials|\.netrc|recovery-codes|[\\/]secrets[\\/]"
      r"|\.claude[\\/]\.credentials\.json|\.aws[\\/]credentials|\.npmrc(?![\w.-])|\.pypirc(?![\w.-])|\.kube[\\/]config|\.docker[\\/]config\.json)",
      "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
-    (r"(?=.*\b(sqlcmd|osql|tsql|sqlq|spapply|mssql)\b)(?=.*\b(DROP\s+(TABLE|DATABASE|PROC|PROCEDURE|LOGIN|USER)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b)",
+    # anchored with ^: rules are searched with re.I | re.S, so `.` crosses newlines and one try at position 0 sees the whole text.
+    # Unanchored, every position rescanned the rest (quadratic), a long command outlasted the hook's timeout and a timed-out hook allows it.
+    (r"^(?=.*\b(sqlcmd|osql|tsql|sqlq|spapply|mssql)\b)(?=.*\b(DROP\s+(TABLE|DATABASE|PROC|PROCEDURE|LOGIN|USER)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b)",
      "destructive SQL through the shell — SQL in chat, a human runs it"),
     # git [options] push … --force / -f (also bundled: -fu) / --force-with-lease / --mirror / +ref
     (r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*(\s--force\b|\s-[a-z]*f[a-z]*\b|--force-with-lease|--mirror|\s[\"']?\+\S)",
      "force push"),
-    (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json|\.claude[/\\]smartuse[/\\]interpreter(?![\w.-]))",
+    (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json|\.claude[/\\]smartuse[/\\]interpreter(?![\w-]|\.\w))",   # Windows drops a trailing dot and reads x::$DATA as x: both are the file, interpreter.md is not
      "human-only file (it decides what the until-done gate may run, or which Python runs the hooks) — ask the user to edit it"),
     (r"(^|[;&|]\s*)(unbuffer|expect|script)\s",
      "faking an interactive terminal (script / unbuffer / expect) is not allowed"),

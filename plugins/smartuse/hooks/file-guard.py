@@ -6,9 +6,10 @@
 The path is normalised before the match (backslashes, `x/..`, case): APFS and NTFS are case-insensitive, so
 `.claude/SmartUse.Local.MD` is the adapter too. stdin is read as bytes and decoded as UTF-8 here: on Windows a piped stdin
 is decoded in the ANSI code page, where a non-ASCII path makes json.load raise — and a guard that raises fails OPEN.
+Windows drops a trailing dot or space and `x::$DATA` is the file itself, so `interpreter.`, `interpreter ` and `interpreter::$DATA` match too.
 """
 import json, os, re, sys
-HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter$)", re.I)
+HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter[. ]*(:.*)?$)", re.I)
 
 def main():
     try:

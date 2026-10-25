@@ -332,4 +332,26 @@ case "$OSTYPE" in
      OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); T5=""; read -r T5 < "$D/target"
      [ "$OUT" = ran ] && [ "$T5" = junk ] && echo "PASS the launcher never writes through a symlinked cache file" || { echo "FAIL symlinked cache: out '$OUT', target '$T5'"; fail=1; };;
 esac
+# N6: the remembered name is on PATH but that file cannot be run (no exec bit): the old launcher exec'd it and bash exited 2 (126 on Linux), and an exit 2 blocks a PreToolUse hook. Now it is probed instead.
+rm -f "$CF"; mkdir -p "$D/nx"; printf 'fi\n' > "$D/nx/python"; chmod -x "$D/nx/python"; printf 'python\n' > "$CF"; RC=0
+OUT=$(PATH="$D/nx:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
+[ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS a remembered name whose file on PATH is not executable is probed again, rc 0 (was exit 2 / 126)" || { echo "FAIL non-executable hit: out '$OUT', rc $RC"; fail=1; }
+# N7: an environment variable named like the remembered word (python=...). On bash >= 4 this passes with or without the fix; on macOS /bin/bash 3.2 (CI) it is the regression check: there BASH_CMDS does not exist and $W was read as arithmetic.
+printf 'python\n' > "$CF"; RC=0
+OUT=$(python=/usr/bin/python3.11 PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
+[ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an env var named python does not abort the launcher (bash >= 4: passes either way; the bash 3.2 check runs on macOS /bin/bash in CI)" || { echo "FAIL env var named python: out '$OUT', rc $RC"; fail=1; }
+# N8: the cache path is a FIFO: reading it is skipped ([ -f ] is false) and the write must not open it (a write to a FIFO with no reader blocks for ever). A watchdog turns a hang into a FAIL.
+case "$OSTYPE" in
+  msys*|cygwin*) echo "PASS (skipped on Windows: no FIFOs)";;
+  *) rm -f "$CF"; mkfifo "$CF"; n=0
+     (PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" > "$D/fifo.out" 2>&1) & W8=$!
+     while kill -0 "$W8" 2>/dev/null && [ $n -lt 100 ]; do sleep 0.2; n=$((n + 1)); done   # up to 20 s
+     if kill -0 "$W8" 2>/dev/null; then kill "$W8" 2>/dev/null || true; pkill -P "$W8" 2>/dev/null || true; echo "FAIL FIFO cache file: the launcher is still running after 20 s (hung on the FIFO)"; fail=1
+     else wait "$W8" 2>/dev/null || true; OUT=$(cat "$D/fifo.out"); [ "$OUT" = ran ] && echo "PASS the launcher never opens a FIFO cache file: it finished and ran" || { echo "FAIL FIFO cache file: out '$OUT'"; fail=1; }; fi
+     rm -f "$CF";;
+esac
+# N9: a Store alias in another spelling of the folder name (WINDOWSAPPS): matched in any case, so it is never exec'd from the cache. (On a case-insensitive disk this is the same folder as WindowsApps; the PATH spelling is what is matched.)
+mkdir -p "$D/WINDOWSAPPS"; cp "$D/stub/python3" "$D/WINDOWSAPPS/python3"; chmod +x "$D/WINDOWSAPPS/python3"; rm -f "$CF"; printf 'python3\n' > "$CF"
+OUT=$(PATH="$D/WINDOWSAPPS:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
+[ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias under WINDOWSAPPS (upper case) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WINDOWSAPPS alias: out '$OUT', cached '$P5'"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
