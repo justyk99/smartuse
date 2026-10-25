@@ -23,5 +23,6 @@ chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter.","content":"python"}}' "Write the interpreter file with a trailing dot"
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter ","content":"python"}}' "Write the interpreter file with a trailing space"
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude.\\smartuse \\interpreter","content":"python"}}' "Write the interpreter file through folder names with a trailing dot or space"
-chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/x/.. /interpreter"}}' "Edit the interpreter file through a '.. ' part (Windows reads it as ..)"
+chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/x/.. /interpreter"}}' "Edit the interpreter file through a '.. ' part (also read as .., fail closed)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/.. /../interpreter","content":"python"}}' "Write the interpreter file through a POSIX folder named '.. ' (a name there, so the path as written is the file)"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
