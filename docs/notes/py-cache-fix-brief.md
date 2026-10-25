@@ -1,0 +1,22 @@
+# Brief: build and ship 0.5.1, the launcher remembers a name (2026-10-25, for the next session)
+
+Read first: `docs/notes/py-cache-fix-plan.md` (approved; §3 is the contract, §5 the tests, §7 the release). Then run the phases below with the repo's dev-flow skill.
+
+## Phases
+- **3 Contract:** the plan's §3 is the contract (py.sh rules, the two regex additions, the reason texts). A name the builder cannot find → stop and ask; never invent one.
+- **4 Build:** one `flow-builder`, in a worktree made by hand: `git -C C:/Users/zero_/smartuse worktree add -b fix/py-cache .claude/worktrees/py-cache claude/inspiring-galileo-8icw6s`. Six files only: `plugins/smartuse/hooks/py.sh`, `hooks/file-guard.py`, `hooks/bash-guard.py`, `hooks/tests/heartbeat-test.sh`, `hooks/tests/file-guard-test.sh`, `hooks/tests/run.sh`. It runs `run.sh`, `file-guard-test.sh` and `heartbeat-test.sh` one at a time and quotes each last line. One commit, no push.
+- **5 Integrate:** fast-forward the local dev branch to the builder's commit, on top of the local docs commit (plan, brief, STATUS). Push all of it together. Gate: `ci.yml`, the four test jobs and validate green; the Linux job's `all.sh` line is `run 134 · ledger 46 · until-done 40 · file-guard 14 · heartbeat 110 · ab 36 · watch 63 · wait 187`.
+- **6 Use it:** `flow-tester` runs the plan's two interactive scenarios. For step 5 of the Windows one, load the dev checkout with `claude --plugin-dir`, not the installed 0.5.0. It saves the outputs.
+- **7 Review:** a fresh `flow-reviewer` (Opus, xhigh) on the fix diff against the plan, plus a security review of the whole 0.5.1 diff (lesson 2026-10-25). Majors go back to a builder, then phases 5 and 6 again.
+- **8 Ship:** the release commit (plan §7: manifests 0.5.1, `docs/releases/0.5.1.md`, CHANGELOG, STATUS, README lines 36/63/76, ROADMAP). CI green, then **YK's go**, then fast-forward main, tag `v0.5.1` with its release page, `claude plugin marketplace update smartuse`, `claude plugin update smartuse@smartuse`, and verify the version.
+- **9 Handoff:** rebase `paid-guard`, then `paid-f3` (plan §7, one suite at a time after each), rewrite STATUS, then the `/clear` line.
+
+## Restate in every agent brief (subagents don't carry these rules)
+- Only the files named. Edit tool for changes, no whole-file pastes. The paid branches stay untouched until phase 9.
+- One command per shell call; `git -C <dir> …`; no `cd`.
+- Laptop suites run one at a time (each Python start takes 0.4–3.6 s, and low memory kills parallel runs).
+- Public repo: comments, commit messages and release notes describe the class of problem, never the steps to exploit it.
+- Done means the suite's own last line, quoted. Commits end with the session's Co-Authored-By and Claude-Session lines.
+
+## Keep-running line (print once at the start of phase 4)
+`/goal smartuse 0.5.1 (launcher remembers a name; file human-only in both guards): CI ci.yml green and all.sh prints run 134 · ledger 46 · until-done 40 · file-guard 14 · heartbeat 110 · ab 36 · watch 63 · wait 187, both interactive scenarios pass with outputs saved, nothing outside the six files plus the plan §7 release files changed, or stop after 12 turns`
