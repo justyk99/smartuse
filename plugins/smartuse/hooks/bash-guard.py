@@ -30,7 +30,7 @@ RULES = [
      r"|\.claude[\\/]\.credentials\.json|\.aws[\\/]credentials|\.npmrc(?![\w.-])|\.pypirc(?![\w.-])|\.kube[\\/]config|\.docker[\\/]config\.json)",
      "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
     # anchored with ^: rules are searched with re.I | re.S, so `.` crosses newlines and one try at position 0 sees the whole text.
-    # Unanchored, every position rescanned the rest (quadratic), a long command outlasted the hook's timeout and a timed-out hook allows it.
+    # Unanchored, every position rescanned the rest: quadratic in the command's length.
     (r"^(?=.*\b(sqlcmd|osql|tsql|sqlq|spapply|mssql)\b)(?=.*\b(DROP\s+(TABLE|DATABASE|PROC|PROCEDURE|LOGIN|USER)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b)",
      "destructive SQL through the shell — SQL in chat, a human runs it"),
     # git [options] push … --force / -f (also bundled: -fu) / --force-with-lease / --mirror / +ref

@@ -28,8 +28,15 @@ chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smart
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\q\\... \\interpreter","content":"python"}}' "Write under smartuse through a part of only dots and spaces ('... ' may be read as a name, . or ..: fail closed)"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/.../notes.md","content":"x"}}' "Write a path with a '...' part that names no smartuse file"
 case "$OSTYPE" in   # the path the OS resolves is matched too (links here; Windows short 8.3 names the same way)
-  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)"; echo "PASS (skipped on Windows: no symlinks; a leading //)";;
   *) T=$(mktemp -d); mkdir -p "$T/h/.claude/smartuse"; : > "$T/h/.claude/smartuse/interpreter"; ln -s "$T/h/.claude/smartuse" "$T/lnk"
-     chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$T/lnk/interpreter\",\"content\":\"python\"}}" "Write the interpreter file through a symlinked folder (the resolved path is matched)"; rm -rf "$T";;
+     chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$T/lnk/interpreter\",\"content\":\"python\"}}" "Write the interpreter file through a symlinked folder (the resolved path is matched)"
+     chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/$T/lnk/interpreter\",\"content\":\"python\"}}" "the same with a leading // (a local path on POSIX: resolved too)"; rm -rf "$T";;
 esac
+# a share that does not answer (192.0.2.7 is a documentation address) must not hold the guard past the hook's 10 s timeout: the text
+# forms decide first, and resolving the path gives up after 3 s
+t0=$(date +%s); out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"//192.0.2.7/share/proj/.claude/smartuse.local.md","content":"x"}}' | bash "$H/py.sh" "$H/file-guard.py"); t1=$(date +%s)
+[ -n "$out" ] && [ $((t1 - t0)) -lt 10 ] && echo "PASS deny Write the adapter on a network share that does not answer, in $((t1 - t0)) s (the text match decides; no network call)" || { echo "FAIL network share: $((t1 - t0)) s, output '${out:0:40}'"; fail=1; }
+t0=$(date +%s); out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"//192.0.2.7/share/proj/notes.md","content":"x"}}' | bash "$H/py.sh" "$H/file-guard.py"); t1=$(date +%s)
+[ -z "$out" ] && [ $((t1 - t0)) -lt 10 ] && echo "PASS allow Write an ordinary file on a network share that does not answer, in $((t1 - t0)) s (resolving gives up after 3 s)" || { echo "FAIL network share, ordinary file: $((t1 - t0)) s, output '${out:0:40}'"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
