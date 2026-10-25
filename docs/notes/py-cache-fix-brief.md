@@ -2,6 +2,12 @@
 
 Read first: `docs/notes/py-cache-fix-plan.md` (approved; §3 is the contract, §5 the tests, §7 the release). Then run the phases below with the repo's dev-flow skill.
 
+## Test tiers (dev-flow v1.1)
+- **T1, builder, after every change:** the touched suite only (`bash plugins/smartuse/hooks/tests/run.sh`, `file-guard-test.sh`, or `heartbeat-test.sh`).
+- **T2, before every commit:** those three suites one at a time on the laptop, each printing ALL PASS. `all.sh` takes 10+ minutes there.
+- **T3, before the push of each batch:** CI `ci.yml` green (the full `all.sh` on 4 systems) plus phase 6's two interactive scenarios.
+- **T4, before ship:** YK reads the scenario outputs and the release notes and says go.
+
 ## Phases
 - **3 Contract:** the plan's §3 is the contract (py.sh rules, the two regex additions, the reason texts). A name the builder cannot find → stop and ask; never invent one.
 - **4 Build:** one `flow-builder`, in a worktree made by hand: `git -C C:/Users/zero_/smartuse worktree add -b fix/py-cache .claude/worktrees/py-cache claude/inspiring-galileo-8icw6s`. Six files only: `plugins/smartuse/hooks/py.sh`, `hooks/file-guard.py`, `hooks/bash-guard.py`, `hooks/tests/heartbeat-test.sh`, `hooks/tests/file-guard-test.sh`, `hooks/tests/run.sh`. It runs `run.sh`, `file-guard-test.sh` and `heartbeat-test.sh` one at a time and quotes each last line. One commit, no push.
