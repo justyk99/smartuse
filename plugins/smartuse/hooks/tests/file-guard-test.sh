@@ -34,9 +34,10 @@ case "$OSTYPE" in   # the path the OS resolves is matched too (links here; Windo
      chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/$T/lnk/interpreter\",\"content\":\"python\"}}" "the same with a leading // (a local path on POSIX: resolved too)"; rm -rf "$T";;
 esac
 # a share that does not answer (192.0.2.7 is a documentation address) must not hold the guard past the hook's 10 s timeout: the text
-# forms decide first, and resolving the path gives up after 3 s
+# forms decide first, and resolving the path gives up after 3 s (then the path cannot be checked: denied with its own reason)
 t0=$(date +%s); out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"//192.0.2.7/share/proj/.claude/smartuse.local.md","content":"x"}}' | bash "$H/py.sh" "$H/file-guard.py"); t1=$(date +%s)
 [ -n "$out" ] && [ $((t1 - t0)) -lt 10 ] && echo "PASS deny Write the adapter on a network share that does not answer, in $((t1 - t0)) s (the text match decides; no network call)" || { echo "FAIL network share: $((t1 - t0)) s, output '${out:0:40}'"; fail=1; }
 t0=$(date +%s); out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"//192.0.2.7/share/proj/notes.md","content":"x"}}' | bash "$H/py.sh" "$H/file-guard.py"); t1=$(date +%s)
-[ -z "$out" ] && [ $((t1 - t0)) -lt 10 ] && echo "PASS allow Write an ordinary file on a network share that does not answer, in $((t1 - t0)) s (resolving gives up after 3 s)" || { echo "FAIL network share, ordinary file: $((t1 - t0)) s, output '${out:0:40}'"; fail=1; }
+case "$out" in ""|*"could not be resolved"*) ok=1;; *) ok=0;; esac   # allowed (resolved, or refused at once) or not checkable; never human-only
+[ $ok = 1 ] && [ $((t1 - t0)) -lt 10 ] && echo "PASS an ordinary file on a network share that does not answer is decided in $((t1 - t0)) s: $([ -z "$out" ] && echo allowed || echo 'denied as not checkable')" || { echo "FAIL network share, ordinary file: $((t1 - t0)) s, output '${out:0:60}'"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

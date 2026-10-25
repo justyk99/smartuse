@@ -11,8 +11,8 @@ cut back that way (`.claude./smartuse /interpreter::$DATA` is the launcher file)
 named `.. ` is a name, not `..`. A path that names smartuse and has a part of only dots and spaces (other than `.` and `..`)
 is denied outright: an OS may read such a part as a name, `.` or `..` (fail closed). The path the OS resolves (`os.path.realpath`:
 links, junctions, Windows short 8.3 names like `CLAUDE~1` of what exists) is matched last, when the text forms miss, in a worker
-thread for at most 3 s: a network share that does not answer must not hold the hook. When it gives up, a path that may be one of
-the files (`smartuse`, `~` or `interp` in it) is denied (fail closed).
+thread for at most 3 s: a network share that does not answer must not hold the hook. A path that cannot be resolved (it took
+longer, or resolving failed) cannot be checked, so it is denied with its own reason (fail closed).
 """
 import json, os, re, sys, threading
 HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter[. ]*(:.*)?$)", re.I)
@@ -49,14 +49,18 @@ def main():
     path = path.replace("\\", "/")
     deny = human_only(path) or human_only("/".join(win_part(p) for p in path.split("/"))) \
         or (re.search("smartuse", path, re.I) and any(odd_part(p) for p in path.split("/")))   # as written, as Windows reads it, odd parts
+    why = "file-guard: this file is human-only (it decides what the until-done gate may execute, or which Python runs the hooks). Ask the user to edit it."
     stuck = False
     if not deny and path:   # then as the OS resolves it (links, junctions, 8.3 names of what exists), for at most 3 s
         r = resolved(path)
         stuck = r is None
-        deny = human_only(r) if r else (stuck and re.search(r"smartuse|~|interp", path, re.I))   # gave up: fail closed
+        if r:
+            deny = human_only(r)
+        else:   # timed out or failed: the target cannot be checked, so it is not written (fail closed)
+            deny, why = True, "file-guard: this path could not be resolved within 3 s, so it cannot be checked against the human-only files. Retry, or ask the user."
     if deny:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-              "permissionDecisionReason": "file-guard: this file is human-only (it decides what the until-done gate may execute, or which Python runs the hooks). Ask the user to edit it."}}))
+              "permissionDecisionReason": why}}))
     if stuck:   # the worker may still be waiting on the network: leave without it
         sys.stdout.flush(); os._exit(0)
 
