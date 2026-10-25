@@ -13,4 +13,9 @@ chk deny  '{"tool_name":"MultiEdit","tool_input":{"file_path":"/etc/smartuse/tru
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/features/x/DEV.md","content":"x"}}' "Write a doc"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/Docs/SmartUse/Notes.md","content":"x"}}' "Write a doc under a SmartUse/ folder"
 chk allow '{"tool_name":"Bash","tool_input":{"command":"cat .claude/smartuse.local.md"}}' "not a write tool"
+# --- the launcher's remembered interpreter name (~/.claude/smartuse/interpreter): human-only too, anchored to .claude/smartuse/ and the end
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter","content":"python"}}' "Write the launcher's interpreter file"
+chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\Interpreter"}}' "Edit the interpreter file with backslashes and mixed case"
+chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/x/../interpreter"}}' "Edit the interpreter file through x/.."
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/smartuse/interpreter.md","content":"x"}}' "Write a doc named interpreter.md under a smartuse/ folder"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
