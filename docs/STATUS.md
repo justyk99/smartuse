@@ -1,4 +1,4 @@
-# STATUS — smartuse (2026-10-25, Smartuse-Worker · phase: 0.5.1 plan approved, build next · resume with `/dev-flow continue`)
+# STATUS — smartuse (2026-10-25, Smartuse-Worker · phase: 0.5.1 release commit on the dev branch, waiting for YK's go to main · resume with `/dev-flow continue`)
 
 Mandate (YK): drive smartuse to 1.0, ask only for real decisions; one session, Smartuse-Worker on YK's laptop. Plan `docs/ROADMAP.md`. Dev branch `claude/inspiring-galileo-8icw6s`. Flow: the repo's dev-flow skill (`.claude/skills/dev-flow/`); permissions in `.claude/settings.json`.
 
@@ -7,7 +7,7 @@ Mandate (YK): drive smartuse to 1.0, ask only for real decisions; one session, S
 - CI evals run on the secret `CLAUDE_CODE_OAUTH_TOKEN` (re-issued by YK 2026-10-25; the "Token works?" step checks it before the suite).
 
 ## Next, in order
-1. **0.5.1, the launcher fix** (push security review 2026-10-25, HIGH). Plan `docs/notes/py-cache-fix-plan.md`, YK's yes 2026-10-25 with both defaults (Store Python stays at 0.4.0 speed; the `;` gap waits for 0.6.0). Brief: `docs/notes/py-cache-fix-brief.md`. Plan and brief are committed locally only: push them with the fix, never before (public repo).
+1. **0.5.1, the launcher fix** — built, both scenarios run (outputs with YK), fresh review + security review done, their fixes and YK's three answers in plan §8 (`docs/notes/py-cache-fix-plan.md`). Gate: CI green on the release commit, then **YK's go**, then plan §7: ff `main`, tag `v0.5.1` + release page, `claude plugin marketplace update smartuse`, `claude plugin update smartuse@smartuse`, verify the version. The Linux scenario ran as CI's launcher cases + a laptop simulation (no Linux box here).
 2. Paid-call guard as 0.6.0 (plan `docs/notes/paid-guard-plan.md`, YK's yes 2026-10-24; local branches `paid-guard`, `paid-f3`; resume state in that plan's §7). Rebase both onto 0.5.1 first.
 3. Parked: `docs/notes/input-2026-10-24-claude-system.md` is on no machine searched (YK 2026-10-24); if it turns up, pick its 1.0 candidates and update ROADMAP.
 
