@@ -6,7 +6,8 @@
 The path is normalised before the match (backslashes, `x/..`, case): APFS and NTFS are case-insensitive, so
 `.claude/SmartUse.Local.MD` is the adapter too. stdin is read as bytes and decoded as UTF-8 here: on Windows a piped stdin
 is decoded in the ANSI code page, where a non-ASCII path makes json.load raise — and a guard that raises fails OPEN.
-Windows drops a trailing dot or space and `x::$DATA` is the file itself, so `interpreter.`, `interpreter ` and `interpreter::$DATA` match too.
+Windows drops a trailing dot or space of every path part (`.. ` is `..`) and `x::$DATA` is the file itself, so each part is cut back
+that way before normpath: `.claude./smartuse /interpreter::$DATA` is the launcher file too.
 """
 import json, os, re, sys
 HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter[. ]*(:.*)?$)", re.I)
@@ -20,7 +21,8 @@ def main():
         return
     ti = data.get("tool_input") or {}
     path = ti.get("file_path") or ti.get("notebook_path") or ""
-    path = os.path.normcase(os.path.normpath(path.replace("\\", "/"))).replace("\\", "/")   # normpath/normcase give backslashes on Windows
+    path = "/".join(p.split(":")[0].rstrip(". ") or p.strip(" ") for p in path.replace("\\", "/").split("/"))   # each part as Windows reads it
+    path = os.path.normcase(os.path.normpath(path)).replace("\\", "/")   # normpath/normcase give backslashes on Windows
     if HUMAN_ONLY.search(path):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
               "permissionDecisionReason": "file-guard: this file is human-only (it decides what the until-done gate may execute, or which Python runs the hooks). Ask the user to edit it."}}))
