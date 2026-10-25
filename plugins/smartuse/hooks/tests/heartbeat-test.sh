@@ -295,20 +295,41 @@ OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\
 mkdir -p "$D/home4"   # a HOME with no remembered interpreter: the probe is the only way to find one
 OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
 [ "$OUT" = "rc=0" ] && echo "PASS launcher with no usable interpreter: prints nothing, exit 0 (a hook never blocks)" || { echo "FAIL launcher without an interpreter: $OUT"; fail=1; }
-# --- the launcher remembers the interpreter it proved (~/.claude/smartuse/interpreter): one start per event instead of a probe +
-# a start (+ the stub's own start on stock Windows, 2 s per event on the author's laptop). Remembered only once ~/.claude/smartuse
-# exists; a path that is gone, or not named python*, is never run.
+# --- the launcher remembers the NAME of the candidate it proved (python3, python or py -3, never a path) in
+# ~/.claude/smartuse/interpreter: one start per event instead of a probe + a start (+ the stub's own start on stock Windows, 2 s per
+# event on the author's laptop). The file is a hint about which probe step to skip, not a command: a writable state file must not
+# choose what the hooks run, so a path, any other word, a name PATH no longer has and a Store alias (WindowsApps) are all ignored
+# and probed again. Remembered only once ~/.claude/smartuse exists, and never written through a symlink.
 CF="$D/home5/.claude/smartuse/interpreter"; mkdir -p "${CF%/*}"
 OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" bash "$H/py.sh" -c "print('ran')" 2>&1)
 P5=""; [ -f "$CF" ] && read -r P5 < "$CF"
-[ "$OUT" = ran ] && [ -n "$P5" ] && [ -x "$P5" ] && case "${P5##*/}" in [Pp]ython*) true;; *) false;; esac && echo "PASS launcher remembers the interpreter the probe proved: $P5" || { echo "FAIL launcher cache: out '$OUT', cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && case "$P5" in python3|python|"py -3") true;; *) false;; esac && echo "PASS launcher remembers the name the probe proved (a word, never a path): $P5" || { echo "FAIL launcher cache: out '$OUT', cached '$P5'"; fail=1; }
 mkdir -p "$D/stub2"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub2" > "$D/stub2/python3"; chmod +x "$D/stub2/python3"
-OUT=$(PATH="$D/stub2" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1)
-[ "$OUT" = ran ] && [ ! -e "$D/stub2/called" ] && echo "PASS the remembered interpreter runs with no python on PATH, and the stub is never started" || { echo "FAIL remembered interpreter: out '$OUT', stub called: $([ -e "$D/stub2/called" ] && echo yes || echo no)"; fail=1; }
-printf '%s\n' "$D/gone/python3" > "$CF"
-OUT=$(HOME="$D/home5" bash "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
-[ "$OUT" = ran ] && [ -x "$P5" ] && echo "PASS a remembered path that is gone is probed again and replaced: $P5" || { echo "FAIL stale cache: out '$OUT', cached '$P5'"; fail=1; }
-printf '#!/bin/sh\necho EVIL\n' > "$D/evil"; chmod +x "$D/evil"; printf '%s\n' "$D/evil" > "$CF"
-OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home5" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
-[ "$OUT" = "rc=0" ] && echo "PASS a remembered path not named python* is never run (no interpreter left: nothing, exit 0)" || { echo "FAIL launcher ran a non-python remembered path: $OUT"; fail=1; }
+printf 'python\n' > "$CF"
+OUT=$(PATH="$D/stub2:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1)
+[ "$OUT" = ran ] && [ ! -e "$D/stub2/called" ] && echo "PASS the remembered name runs straight away, and the stub ahead of it on PATH is never started" || { echo "FAIL remembered name: out '$OUT', stub called: $([ -e "$D/stub2/called" ] && echo yes || echo no)"; fail=1; }
+printf 'python3\n' > "$CF"
+OUT=$(PATH="$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
+[ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a remembered name that PATH no longer has is probed again and replaced: $P5" || { echo "FAIL stale cache: out '$OUT', cached '$P5'"; fail=1; }
+mkdir -p "$D/tmp"; printf '#!/bin/sh\necho EVIL\n' > "$D/tmp/python3"; chmod +x "$D/tmp/python3"; printf '%s\n' "$D/tmp/python3" > "$CF"
+OUT=$(printf '{}' | PATH="$D/stub:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
+[ "$OUT" = "rc=0" ] && echo "PASS a remembered path is never run, whatever its name: the probe runs the hook, nothing else" || { echo "FAIL launcher ran a remembered path: $OUT"; fail=1; }
+printf '%s\n' "$REAL" > "$CF"   # a 0.5.0 cache: the absolute path of the real interpreter
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
+[ "$OUT" = ran ] && case "$P5" in python3|python|"py -3") true;; *) false;; esac && echo "PASS a 0.5.0 cache (a path) is probed again and rewritten as a name: $P5" || { echo "FAIL upgrade from a path cache: out '$OUT', cached '$P5'"; fail=1; }
+printf 'python3; echo pwned\n' > "$CF"
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1)
+[ "$OUT" = ran ] && echo "PASS the remembered word is one of three exact names, not a pattern: nothing after it runs" || { echo "FAIL a remembered word with a tail: $OUT"; fail=1; }
+: > "$CF"; RC=0
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
+[ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an empty remembered file is probed, rc 0" || { echo "FAIL empty cache: out '$OUT', rc $RC"; fail=1; }
+mkdir -p "$D/WindowsApps"; cp "$D/stub/python3" "$D/WindowsApps/python3"; chmod +x "$D/WindowsApps/python3"; printf 'python3\n' > "$CF"
+OUT=$(PATH="$D/WindowsApps:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
+[ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias (WindowsApps) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WindowsApps alias: out '$OUT', cached '$P5'"; fail=1; }
+case "$OSTYPE" in
+  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  *) printf 'junk\n' > "$D/target"; rm -f "$CF"; ln -s "$D/target" "$CF"
+     OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); T5=""; read -r T5 < "$D/target"
+     [ "$OUT" = ran ] && [ "$T5" = junk ] && echo "PASS the launcher never writes through a symlinked cache file" || { echo "FAIL symlinked cache: out '$OUT', target '$T5'"; fail=1; };;
+esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

@@ -155,4 +155,15 @@ check deny  'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --put pending.json "$(su
 check deny  $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --put pending.json \'{}\'\nbash -c \'sudo ls\''
 check deny  $'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --receipts \'sudo ls\''
 check deny  $'bash "/p/hooks/py.sh" "/p/hooks/other.py" --put pending.json \'sudo ls\''
+# --- the launcher's remembered interpreter name (~/.claude/smartuse/interpreter) is human-only: a writable state file must not choose
+#     what the hooks run. Writes by the same verbs as the other human-only files are denied; reading it, or a file of the same last
+#     name in another folder, is fine; a heredoc body is data.
+check deny  'echo python3 > ~/.claude/smartuse/interpreter'
+check deny  $'printf \'%s\\n\' /tmp/t/python3 | tee "$HOME/.claude/smartuse/interpreter"'
+check deny  'cp /tmp/t/cache ~/.claude/smartuse/interpreter'
+check deny  $'sed -i \'s/.*/python/\' ~/.claude/smartuse/interpreter'
+check deny  $'python3 -c "open(\'/home/u/.claude/smartuse/interpreter\',\'w\').write(\'python\')"'
+check allow 'cat ~/.claude/smartuse/interpreter'
+check allow 'echo python3 > notes/interpreter'
+check allow $'cat > notes.md <<\'EOF\'\necho python3 > ~/.claude/smartuse/interpreter\nEOF'
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

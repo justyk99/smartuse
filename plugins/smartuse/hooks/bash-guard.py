@@ -34,8 +34,8 @@ RULES = [
     # git [options] push … --force / -f (also bundled: -fu) / --force-with-lease / --mirror / +ref
     (r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*(\s--force\b|\s-[a-z]*f[a-z]*\b|--force-with-lease|--mirror|\s[\"']?\+\S)",
      "force push"),
-    (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json)",
-     "human-only file (it decides what the until-done gate may run) — ask the user to edit it"),
+    (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json|\.claude[/\\]smartuse[/\\]interpreter(?![\w.-]))",
+     "human-only file (it decides what the until-done gate may run, or which Python runs the hooks) — ask the user to edit it"),
     (r"(^|[;&|]\s*)(unbuffer|expect|script)\s",
      "faking an interactive terminal (script / unbuffer / expect) is not allowed"),
     (r"until-done\.py\s+--trust",
