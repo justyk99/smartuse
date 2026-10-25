@@ -24,5 +24,5 @@ Read first: `docs/notes/py-cache-fix-plan.md` (approved; §3 is the contract, §
 - Public repo: comments, commit messages and release notes describe the class of problem, never the steps to exploit it.
 - Done means the suite's own last line, quoted. Commits end with the session's Co-Authored-By and Claude-Session lines.
 
-## Keep-running line (print once at the start of phase 4)
-`/goal smartuse 0.5.1 (launcher remembers a name; file human-only in both guards): CI ci.yml green and all.sh prints run 134 · ledger 46 · until-done 40 · file-guard 14 · heartbeat 110 · ab 36 · watch 63 · wait 187, both interactive scenarios pass with outputs saved, nothing outside the six files plus the plan §7 release files changed, or stop after 12 turns`
+## Keep-running line (YK pastes it after `/dev-flow continue`; it ends at his go)
+`/goal smartuse 0.5.1 per docs/notes/py-cache-fix-brief.md, phases 3 to 8 up to but not including main: ci.yml green on the pushed dev branch with the Linux all.sh line run 134 · ledger 46 · until-done 40 · file-guard 14 · heartbeat 110 · ab 36 · watch 63 · wait 187, both interactive scenarios pass with outputs saved, the fresh review and the security review leave no open major, the 0.5.1 release commit is on the dev branch with CI green, nothing outside the six files and the plan §7 release files changed, and the last reply asks YK for the go to main; or stop sooner at a decision with two reasonable answers, or after 25 turns`
