@@ -23,6 +23,13 @@ chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter.","content":"python"}}' "Write the interpreter file with a trailing dot"
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter ","content":"python"}}' "Write the interpreter file with a trailing space"
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude.\\smartuse \\interpreter","content":"python"}}' "Write the interpreter file through folder names with a trailing dot or space"
-chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/x/.. /interpreter"}}' "Edit the interpreter file through a '.. ' part (also read as .., fail closed)"
+chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/x/.. /interpreter"}}' "Edit the interpreter file through a '.. ' part (a part of only dots and spaces: fail closed)"
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/.. /../interpreter","content":"python"}}' "Write the interpreter file through a POSIX folder named '.. ' (a name there, so the path as written is the file)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\q\\... \\interpreter","content":"python"}}' "Write under smartuse through a part of only dots and spaces ('... ' may be read as a name, . or ..: fail closed)"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/.../notes.md","content":"x"}}' "Write a path with a '...' part that names no smartuse file"
+case "$OSTYPE" in   # the path the OS resolves is matched too (links here; Windows short 8.3 names the same way)
+  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  *) T=$(mktemp -d); mkdir -p "$T/h/.claude/smartuse"; : > "$T/h/.claude/smartuse/interpreter"; ln -s "$T/h/.claude/smartuse" "$T/lnk"
+     chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$T/lnk/interpreter\",\"content\":\"python\"}}" "Write the interpreter file through a symlinked folder (the resolved path is matched)"; rm -rf "$T";;
+esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
