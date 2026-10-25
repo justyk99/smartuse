@@ -333,20 +333,22 @@ case "$OSTYPE" in
      [ "$OUT" = ran ] && [ "$T5" = junk ] && echo "PASS the launcher never writes through a symlinked cache file" || { echo "FAIL symlinked cache: out '$OUT', target '$T5'"; fail=1; };;
 esac
 # N6: the remembered name is on PATH but that file cannot be run (no exec bit): the old launcher exec'd it and bash exited 2 (126 on Linux), and an exit 2 blocks a PreToolUse hook. Now it is probed instead.
-rm -f "$CF"; mkdir -p "$D/nx"; printf 'fi\n' > "$D/nx/python"; chmod -x "$D/nx/python"; printf 'python\n' > "$CF"; RC=0
-OUT=$(PATH="$D/nx:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
-[ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS a remembered name whose file on PATH is not executable is probed again, rc 0 (was exit 2 / 126)" || { echo "FAIL non-executable hit: out '$OUT', rc $RC"; fail=1; }
+#     No executable python may follow on PATH (bash would pick that one and hide the bug): only a python3 does.
+rm -f "$CF"; mkdir -p "$D/nx" "$D/real3"; printf 'fi\n' > "$D/nx/python"; chmod -x "$D/nx/python"; printf 'python\n' > "$CF"; RC=0
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL" > "$D/real3/python3"; chmod +x "$D/real3/python3"
+OUT=$(PATH="$D/nx:$D/real3" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?; P5=""; read -r P5 < "$CF"
+[ "$OUT" = ran ] && [ $RC = 0 ] && [ "$P5" = python3 ] && echo "PASS a remembered name whose file on PATH is not executable is probed again, rc 0 (was exit 2 / 126), python3 remembered" || { echo "FAIL non-executable hit: out '$OUT', rc $RC, cached '$P5'"; fail=1; }
 # N7: an environment variable named like the remembered word (python=...). On bash >= 4 this passes with or without the fix; on macOS /bin/bash 3.2 (CI) it is the regression check: there BASH_CMDS does not exist and $W was read as arithmetic.
 printf 'python\n' > "$CF"; RC=0
 OUT=$(python=/usr/bin/python3.11 PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
-[ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an env var named python does not abort the launcher (bash >= 4: passes either way; the bash 3.2 check runs on macOS /bin/bash in CI)" || { echo "FAIL env var named python: out '$OUT', rc $RC"; fail=1; }
+[ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an env var named python does not abort the launcher (bash $BASH_VERSION; on bash >= 4 it passes either way, the bash 3.2 check runs on macOS /bin/bash in CI)" || { echo "FAIL env var named python: out '$OUT', rc $RC"; fail=1; }
 # N8: the cache path is a FIFO: reading it is skipped ([ -f ] is false) and the write must not open it (a write to a FIFO with no reader blocks for ever). A watchdog turns a hang into a FAIL.
 case "$OSTYPE" in
   msys*|cygwin*) echo "PASS (skipped on Windows: no FIFOs)";;
   *) rm -f "$CF"; mkfifo "$CF"; n=0
      (PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" > "$D/fifo.out" 2>&1) & W8=$!
      while kill -0 "$W8" 2>/dev/null && [ $n -lt 100 ]; do sleep 0.2; n=$((n + 1)); done   # up to 20 s
-     if kill -0 "$W8" 2>/dev/null; then kill "$W8" 2>/dev/null || true; pkill -P "$W8" 2>/dev/null || true; echo "FAIL FIFO cache file: the launcher is still running after 20 s (hung on the FIFO)"; fail=1
+     if kill -0 "$W8" 2>/dev/null; then pkill -P "$W8" 2>/dev/null || true; kill "$W8" 2>/dev/null || true; echo "FAIL FIFO cache file: the launcher is still running after 20 s (hung on the FIFO)"; fail=1
      else wait "$W8" 2>/dev/null || true; OUT=$(cat "$D/fifo.out"); [ "$OUT" = ran ] && echo "PASS the launcher never opens a FIFO cache file: it finished and ran" || { echo "FAIL FIFO cache file: out '$OUT'"; fail=1; }; fi
      rm -f "$CF";;
 esac

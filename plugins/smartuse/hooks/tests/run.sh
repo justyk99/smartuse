@@ -169,13 +169,12 @@ check deny  $'python3 -c "open(\'C:/Users/u/.claude./smartuse /interpreter\',\'w
 check allow 'cat ~/.claude/smartuse/interpreter'
 check allow 'echo python3 > notes/interpreter'
 check allow $'cat > notes.md <<\'EOF\'\necho python3 > ~/.claude/smartuse/interpreter\nEOF'
-# --- a long command that matches no rule must be allowed within the hook's timeout (10 s in hooks.json): a PreToolUse hook that
-#     times out lets the command through, so a rule that rescans the text at every position (quadratic) is a hole. ~16 KB took 12 s
-#     on the author's laptop before the SQL rule was anchored, 7 s at 12 KB; now under 2 s.
+# --- a long command of ordinary text is decided well within the hook's timeout (10 s in hooks.json): no rule may rescan the text
+#     from every position. 16 KB took 12 s on the author's laptop before the SQL rule was anchored; 64 KB is 4x the length, so ~16x the time.
 BIG=$(mktemp)
 py - > "$BIG" <<'PY'
-import json; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo " + "lorem ipsum dolor " * 900}}))
+import json; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "echo " + "lorem ipsum dolor " * 3600}}))
 PY
 t0=$(date +%s); out=$(bash "$H/py.sh" "$G" < "$BIG"); t1=$(date +%s); rm -f "$BIG"
-if [ -z "$out" ] && [ $((t1 - t0)) -lt 10 ]; then echo "PASS allow  a 16 KB command that matches no rule, in $((t1 - t0)) s (hook timeout 10 s)"; else echo "FAIL a 16 KB command that matches no rule: ${t1}-${t0} = $((t1 - t0)) s (limit 10), output '${out:0:60}'"; fail=1; fi
+if [ -z "$out" ] && [ $((t1 - t0)) -lt 10 ]; then echo "PASS allow  a 64 KB command that matches no rule, in $((t1 - t0)) s (hook timeout 10 s)"; else echo "FAIL a 64 KB command that matches no rule: ${t1}-${t0} = $((t1 - t0)) s (limit 10), output '${out:0:60}'"; fail=1; fi
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
