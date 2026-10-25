@@ -3,7 +3,7 @@ name: dev-flow
 description: Run a software project or feature start to end with quality first — brief, research, plan, contract, build, integrate, interactive test, review, ship, handoff — delegating each phase to the right model through the flow-* subagents, and telling the user exactly when to /clear. Use for "/dev-flow <ask>", "/dev-flow continue", or when the user starts a new project, a new feature or a new build phase.
 ---
 
-# dev-flow (v1, 2026-10-24)
+# dev-flow (v1.1, 2026-10-25: test tiers)
 
 Priority: **quality and accuracy → speed → tokens.** The user keeps one setting in the menu (Opus, high). You switch models by delegating to the subagents below; never ask the user to change the model.
 
@@ -12,11 +12,11 @@ Priority: **quality and accuracy → speed → tokens.** The user keeps one sett
 |---|---|---|
 | 0 Brief · 1 Research · 2 Plan | `flow-planner` (strongest model on the account · xhigh, see the ladder); bulk reading by `flow-researcher` (Sonnet · medium) | collect the ask, show the plan, get the user's yes |
 | 3 Contract | you (Opus · high) | interfaces, data shapes, fixtures, their tests |
-| 4 Build | `flow-builder` (Sonnet · high), one per feature; own worktree and in parallel only in git repos (see version control) | brief each one: feature, contract, files in scope, test command |
-| 5 Integrate | you | merge one feature at a time; full gate after each merge |
-| 6 Use it | `flow-tester` (Sonnet · high) | fix nothing yourself without a failing scenario to point at |
+| 4 Build | `flow-builder` (Sonnet · high), one per feature; own worktree and in parallel only in git repos (see version control) | brief each one: feature, contract, files in scope, its T1 command |
+| 5 Integrate | you | merge one feature at a time; T2 after each merge (see test tiers) |
+| 6 Use it | `flow-tester` (Sonnet · high): T3, once per batch | fix nothing yourself without a failing scenario to point at |
 | 7 Review | `flow-reviewer` (Opus · xhigh), fresh | majors go back to a builder; then 5 and 6 again |
-| 8 Ship · 9 Handoff | you | docs, status, commit, push (or hand the diff over, see version control); the handoff below |
+| 8 Ship · 9 Handoff | you | T3 green and the user's UAT yes (T4), then docs, status, commit, push (or hand the diff over, see version control); the handoff below |
 
 ## Model ladder (planner)
 The planner runs on the strongest model the account can use, so the same skill works for anyone who installs it.
@@ -35,6 +35,18 @@ Detect it before phase 4: a `.svn` folder or a working `svn info` → SVN; `git 
 - **SVN or no VCS:** no worktrees. Builders run one at a time in the same working copy, each told its exact files. Nobody commits: phase 8 shows the diff (`svn diff`) and the user commits. A stray `.git` inside an SVN working copy doesn't make it git: SVN wins.
 - **Either:** the project says the user commits → same as SVN for phase 8.
 
+## Test tiers
+Run the cheapest tier that proves the change; the slow tiers run less often, never not at all.
+| Tier | What it runs | Who · when |
+|---|---|---|
+| T1 Unit | the touched modules' own tests | the builder, after every change (seconds) |
+| T2 Integration | T1 plus the end-to-end runs on mocks and fixtures; no real renders, full builds, browsers or shared servers | you, after every merge and before every commit (minutes) |
+| T3 System | the full gate plus the interactive pass (phase 6) | once per batch before push, and whenever a change touches the system layer itself (render, build, dependencies, config) |
+| T4 UAT | the user: the batch's scenarios, screenshots and result doc | the user, in phase 8, before ship |
+- The plan names the project's command for each tier. A gate without tiers gets switches on that same gate in phase 3 (a fast mode for T1, a no-system mode for T2) and prints the seconds per step; never a second test runner.
+- A tier fails → fix, rerun that tier, then go on; never skip up past a red tier.
+- The project's own gate rule wins (see project rules); the tiers apply as far as it allows.
+
 ## Your own past work first (every brief, research and plan)
 - Read `my-work.md` next to this file: it says where the user's reuse map, lessons and decisions live on this machine. Pass those paths to `flow-planner` and `flow-researcher` in their brief.
 - Before anything from outside, search the user's own work for the task's keywords: lessons (mistakes not to repeat), decisions (already made, don't re-decide), past projects and patterns (code shapes to copy), design systems (UI work).
@@ -43,10 +55,10 @@ Detect it before phase 4: a `.svn` folder or a working `svn info` → SVN; `git 
 ## Rules that are never skipped
 - Find the project's own files first: its status file, plan, decisions log, test gate (CLAUDE.md, README, `tests/`). Use them; never create a parallel set.
 - No build without an approved plan. The plan names, for every feature: acceptance criteria as user actions, unit tests, one integration test, one interactive scenario, what must not change.
-- Merge one feature at a time; run the full gate after every merge. Never claim done without the gate's own output line in the reply.
-- Every feature gets the interactive pass (phase 6). Unit tests prove a part works; only the interactive pass proves the product works.
+- Merge one feature at a time; T2 after every merge and before every commit, T3 before every push. Never claim done without the tier's own output line in the reply.
+- Every feature's interactive scenario runs in phase 6 (part of T3, once per batch). Unit tests prove a part works; only the interactive pass proves the product works.
 - Stop for the user only for: plan approval, anything irreversible, money, messages to other people, a decision with two reasonable answers. Everything else runs.
-- For a batch that spans several turns, print once the line the user can paste to keep it running (you cannot start it yourself): `/goal <the batch's features>: <gate command> prints <pass line>, the interactive scenarios pass with screenshots saved, nothing outside <scope> changed, or stop after <N> turns`.
+- For a batch that spans several turns, print once the line the user can paste to keep it running (you cannot start it yourself): `/goal <the batch's features>: <T3 command> prints <pass line>, the interactive scenarios pass with screenshots saved, nothing outside <scope> changed, or stop after <N> turns`.
 
 ## When to tell the user to /clear
 Say it at these moments, never in the middle of a feature:
