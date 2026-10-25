@@ -39,6 +39,18 @@ jobs:
       - name: Install Claude Code
         if: steps.token.outputs.ok == '1'
         run: curl -fsSL https://claude.ai/install.sh | bash
+      - name: Token works? (one plain call, so a bad token is told apart from an eval problem; the value is never printed)
+        if: steps.token.outputs.ok == '1'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          unset ANTHROPIC_API_KEY
+          t="$CLAUDE_CODE_OAUTH_TOKEN"
+          case "$t" in sk-ant-oat01-*) ;; *) echo "::warning::the secret does not start with sk-ant-oat01- (the claude setup-token prefix)";; esac
+          case "$t" in *[[:space:]]*) echo "::warning::the secret holds a space or a line break (a copy across a wrapped line?)";; esac
+          echo "token length: ${#t}"
+          claude -p "Reply with the single word ok." --max-turns 1
       - name: claude plugin eval (all cases, one arm, cost cap)
         if: steps.token.outputs.ok == '1'
         env:
