@@ -18,4 +18,8 @@ chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smart
 chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\Interpreter"}}' "Edit the interpreter file with backslashes and mixed case"
 chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/x/../interpreter"}}' "Edit the interpreter file through x/.."
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/smartuse/interpreter.md","content":"x"}}' "Write a doc named interpreter.md under a smartuse/ folder"
+# Windows maps these spellings to the same file: a trailing dot or space is dropped, and ::$DATA is the file's own data stream
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\interpreter::$DATA","content":"python"}}' "Write the interpreter file as interpreter::\$DATA"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter.","content":"python"}}' "Write the interpreter file with a trailing dot"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/interpreter ","content":"python"}}' "Write the interpreter file with a trailing space"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
