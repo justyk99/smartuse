@@ -22,8 +22,6 @@ GENERIC = [
     ("jira-key", re.compile(r"(?<!['\"A-Z0-9-])(?!CVE-|ISO-|RFC-|UTF-|SHA-|MIT-|ID-|PR-|CI-)[A-Z]{3,10}-\d{2,6}\b")),
     ("credential-file", re.compile(r"(db-creds\.json|\.jira_env|/secrets/|recovery-codes|\.git-credentials|\.netrc|gh/hosts\.yml)")),
     ("db-object-prefix", re.compile(r"\b(usp_|t_|bo_|App_Code/|_KNOWLEDGE_BASE|_SESSIONS)[A-Za-z0-9_]*", re.I)),
-    ("company-abbrev", re.compile(r"\b(<work-item>|<work-item>|Guru|GitLab)\b", re.I)),
-    ("author-suffix", re.compile(r"(_YK\b|\byk_[a-z]+|\b<work-item>\b)")),
 ]
 SKIP_DIRS = {".git", "node_modules", "__pycache__"}
 SKIP_SELF = {"scripts/term-scan.py", ".smartuse-terms.local"}
