@@ -91,7 +91,7 @@ bench/                 reproducible mini-benchmark: sample repo + 5 asks + runne
 docs/research/         the reading behind the design (reply styles, security profiles, the routing landscape)
 docs/notes/            7: design notes with test logs (make-prompt, living-docs, receipts, heartbeat) · the 1.0 audit (audit-2026-10-22) · one session that delegates (built in 0.5: watch.py, the wait gate, the steering) · relay guards (a proposal, not built)
 docs/releases/         release notes per version
-scripts/               2: term-scan.py — private-term scan before a public push · render-demo.py — the demo gif from a captured run
+scripts/               3: term-scan.py — private-term scan before a public push, and its test · render-demo.py — the demo gif from a captured run
 ```
 
 ## Roadmap

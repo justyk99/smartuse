@@ -7,8 +7,9 @@ addresses, ticket keys, personal paths) plus the PRIVATE list in `.smartuse-term
 line (plain substrings, case-insensitive; a line starting with `re:` is a regex). That file is gitignored. Its terms are
 NEVER printed: a hit shows as `private#<n>` with the matched text masked.
 
-usage: python3 scripts/term-scan.py [--history] [--repo <path>] [--max-hits N]
-exit 1 when any hit was found (so it can gate a push), 0 when clean.
+usage: python3 scripts/term-scan.py [--history] [--repo <path>] [--max-hits N] [--no-private]
+exit 1 when any hit was found (so it can gate a push), 2 when the private list is missing or empty (those names were not
+checked, so the run cannot call the tree clean; --no-private says a generic-only run is meant, as in CI), 0 when clean.
 """
 import argparse, os, pathlib, re, subprocess, sys
 
@@ -71,6 +72,7 @@ def main():
     ap.add_argument("--repo", default=".")
     ap.add_argument("--history", action="store_true", help="also scan git log -p --all")
     ap.add_argument("--max-hits", type=int, default=400)
+    ap.add_argument("--no-private", action="store_true", help="generic patterns only: no private list is expected (CI)")
     a = ap.parse_args()
     repo = pathlib.Path(a.repo).resolve()
     private = load_private(repo)
@@ -109,7 +111,11 @@ def main():
             print(f"- {label}:{ln}  …{ex}…")
         if len(rows) > 60:
             print(f"- … {len(rows) - 60} more")
-    sys.exit(1 if hits else 0)
+    unchecked = not private and not a.no_private
+    if unchecked:
+        print("\nterm-scan: private names were NOT checked: .smartuse-terms.local is missing or empty. "
+              "Put it at the repo root, or pass --no-private for a generic-only run.")
+    sys.exit(1 if hits else 2 if unchecked else 0)
 
 
 if __name__ == "__main__":

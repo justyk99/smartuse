@@ -11,7 +11,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ['3.12']
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04   # 3.9 is the supported floor; ubuntu-latest (26.04) has no 3.9 build
             python: '3.9'
     runs-on: ${{ matrix.os }}
     defaults:
@@ -46,7 +46,9 @@ jobs:
       - name: A/B runner dry run (fake claude, spends nothing)
         run: bash bench/tests/ab-test.sh
       - name: term scan (generic patterns; the private list is never in the repo)
-        run: python3 scripts/term-scan.py || echo "::warning::term-scan found hits — see the job log"
+        run: python3 scripts/term-scan.py --no-private || echo "::warning::term-scan found hits — see the job log"
+      - name: term scan regression
+        run: bash scripts/term-scan-test.sh
   validate:
     runs-on: ubuntu-latest
     steps:
