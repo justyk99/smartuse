@@ -39,7 +39,7 @@ Windows: Git Bash converts POSIX paths in arguments and environment variables fo
 cwd / transcript_path go through native_path(); stdin is read as bytes and decoded as UTF-8; stdout is written as UTF-8 bytes.
 Python 3.9 stdlib only, no subprocess, no network. Any error: exit 0 and print nothing (a hook must never block a compaction).
 """
-import collections, datetime, json, os, pathlib, re, stat, sys, time
+import collections, datetime, json, os, pathlib, posixpath, re, stat, sys, time
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 BUDGET_S = 3.0                 # one pass over the transcript; the hook's timeout is 10 s
@@ -321,8 +321,10 @@ def path_kind(p):
 def last_commit_epoch(project):
     """The time of the last entry of .git/logs/HEAD (a file read, no subprocess; a worktree's .git is a file naming its git dir),
     or None. The entry is `<old> <new> <name> <mail> <epoch> <zone><TAB><message>`; only the last 4 KB are read. Links are refused,
-    not followed: the .git candidate, the git dir, its logs folder and the HEAD log are each looked at with lstat (the ancestors of
-    an absolute gitdir are not walked: a worktree points into its owner's own repo)."""
+    not followed: the .git candidate, the git dir, its logs folder and the HEAD log are each looked at with lstat. A RELATIVE gitdir
+    is walked component by component from its base (a link in the middle is refused too). An ABSOLUTE gitdir is looked at from the git
+    dir down only: its ancestors are the owner's own folders (a worktree points into its owner's repo), and some systems keep a
+    link there themselves (macOS /var), so walking them would drop real stale lines."""
     try:
         d = pathlib.Path(project).resolve()
         for base in [d] + list(d.parents)[:6]:
@@ -335,6 +337,19 @@ def last_commit_epoch(project):
                 if m and not plain_local_target(m.group(1).strip()):
                     return None   # not a plain local spelling (a share, a device form): no stale check, nothing is touched (a local absolute target is fine: worktrees point outside their folder)
                 gd = pathlib.Path(m.group(1).strip()) if m else None
+                if gd is not None and not gd.is_absolute():
+                    # a relative gitdir: the joined, normalised spelling gets the text checks too (`..` parts can land on an automount
+                    # prefix), then every component from base is looked at with lstat, `..` parts included, before anything is opened
+                    joined = os.path.normpath(str(base / gd)).replace("\\", "/")
+                    if not plain_local_target(joined) or automount_text(joined):
+                        return None
+                    cur = str(base)
+                    for part in re.split(r"[/\\]+", m.group(1).strip()):
+                        if part in ("", "."):
+                            continue
+                        cur = os.path.join(cur, part)
+                        if path_kind(cur) in ("link", "missing"):
+                            return None
                 g = (gd if gd.is_absolute() else base / gd) if gd else None
             elif kind != "dir":
                 return None   # a link or an odd entry: no stale check
@@ -371,6 +386,15 @@ def is_net_path(s):
 DEVICE_FORMS = re.compile(r"\\\?\?\\|\\\\\?\\|\\\\\.\\|//\?/|//\./|GLOBALROOT", re.I)   # \??\  \\?\  \\.\  //?/  //./  GLOBALROOT (bash-guard.py's list, copied)
 
 
+AUTOMOUNT = re.compile(r"/(?:net|Network)(?:/|$)", re.I)
+
+
+def automount_text(s):
+    """True when the text, with its `.` and `..` parts folded away, starts with an automount prefix (/net/host/..., /Network/...):
+    those reach a remote host by name. Text only, no filesystem call."""
+    return bool(AUTOMOUNT.match(posixpath.normpath(str(s).replace("\\", "/"))))
+
+
 def plain_local_target(s):
     """A gitdir: value in a plain local spelling, decided on the text before any filesystem call: X:\\... or X:/... (not X://),
     /... (not // or /\\), or relative with no leading separator and no drive (`..` allowed: git may write a relative gitdir).
@@ -378,8 +402,8 @@ def plain_local_target(s):
     s = str(s or "")
     if not s or "\x00" in s or DEVICE_FORMS.search(s):
         return False
-    if re.match(r"/(?:net|Network)(?:[/\\]|$)", s, re.I):
-        return False   # the automount prefixes of some systems (/net/host/..., /Network/...) reach a remote host by name
+    if re.match(r"/(?:net|Network)(?:[/\\]|$)", s, re.I) or (s[:1] in ("/", "\\") and automount_text(s)):
+        return False   # the automount prefixes of some systems (/net/host/..., /Network/...) reach a remote host by name, also spelled with . and .. parts
     if re.match(r"[A-Za-z]:[\\/](?![\\/])", s) or re.match(r"/(?![/\\])", s):
         return True
     return not (s[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", s))

@@ -190,13 +190,14 @@ if mode == "imports":      # imports <recall.py>: stdlib only, no subprocess, no
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    allowed = {"collections", "datetime", "json", "os", "pathlib", "re", "stat", "sys", "time"}
+    allowed = {"collections", "datetime", "json", "os", "pathlib", "posixpath", "re", "stat", "sys", "time"}
     print("ok" if set(mods) <= allowed and not calls else "imports %s, process calls %s" % (mods, calls))
 elif mode == "plain":      # plain <recall.py>: plain_local_target() on gitdir: values (the file runs main() on import; stdin is empty here, so it prints nothing)
     import runpy
     g = runpy.run_path(sys.argv[2], run_name="recall_under_test")
     f = g["plain_local_target"]
     want = {"/net/192.0.2.7/x": False, "/Network/x": False, "/NET/x": False, "/network": False, "/netx/a": True, "/home/yk/x": True,
+            "/x/../net/192.0.2.7/s": False, "/./Network/x": False, "/x/./../NET/h": False, "\\x\\..\\net\\h": False, "/x/../home/y": True, "/net/../home/y": False,
             "C:/demo/x": True, "../gd": True, "gd/x": True, "//192.0.2.7/x": False}
     bad = ["%s -> %s" % (k, f(k)) for k, v in want.items() if f(k) != v]
     print("ok" if not bad else "; ".join(bad))
@@ -570,13 +571,27 @@ else ok "(skipped: no logs link can be made here without admin rights)"; fi
 # the automount prefixes: decided on the text (a unit check of the allowlist, then the run: nothing is touched)
 r=$(py "$D/chk.py" plain "$HOOK" </dev/null); [ "$r" = ok ] && ok "gitdir: /net/host/x and /Network/x (any case) are not plain local; /netx/a and other local spellings still are" || ko "plain_local_target: $r"
 oldproj proj7; newlog "$D/gdreal/logs/HEAD"
-for gd in "/net/192.0.2.7/x" "/Network/x"; do
+for gd in "/net/192.0.2.7/x" "/Network/x" "/x/../net/192.0.2.7/s" "/./Network/x"; do
   printf 'gitdir: %s\n' "$gd" > "$D/proj7/.git"
   CPDIR=$(wp "$D/proj7"); runt "$(ev SessionStart startup -)"; CPDIR="$PW"
   has "gitdir: $gd: the handoff is still printed" "HANDOFF-LINE-01"
   lacks "gitdir: $gd gives no stale line" "stale:"
   [ "$MS" -le $NETMAX ] && ok "gitdir: $gd is skipped at once ($MS ms)" || ko "gitdir $gd took $MS ms"
 done
+# a relative gitdir: every component from its base is looked at, not only the last (control first: through a real folder it gives the stale line)
+oldproj proj8; mkdir -p "$D/proj8/real/gd/logs" "$D/gdparent/gd/logs"; newlog "$D/proj8/real/gd/logs/HEAD"; newlog "$D/gdparent/gd/logs/HEAD"
+printf 'gitdir: real/gd\n' > "$D/proj8/.git"
+CPDIR=$(wp "$D/proj8"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+has "links (control): a relative gitdir through a real folder gives the stale line" "stale: the handoff is"
+if mkln "$D/gdparent" "$D/proj8/lnk"; then
+  printf 'gitdir: lnk/gd\n' > "$D/proj8/.git"
+  CPDIR=$(wp "$D/proj8"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+  has "links: a relative gitdir through a linked folder: the handoff is still printed" "HANDOFF-LINE-01"
+  lacks "links: a relative gitdir through a linked folder gives no stale line" "stale:"
+  printf 'gitdir: real/../lnk/gd\n' > "$D/proj8/.git"
+  CPDIR=$(wp "$D/proj8"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+  lacks "links: a link behind a .. part is looked at too" "stale:"
+else ok "(skipped: no folder link can be made here without admin rights)"; fi
 
 adapter $'sources: jobs/demo/plan.pdf, photos/a.jpg\nhandoff: docs/STATUS.md'; run "$(ev SessionStart startup -)"
 has "startup: sources are listed" "jobs/demo/plan.pdf"
