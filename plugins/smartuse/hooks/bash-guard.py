@@ -669,21 +669,23 @@ def _sub_end(t, i, depth=0):
     return n
 
 
-def subst_bodies(text):
+def subst_bodies(text, quoted=True):
     """The text inside each $( … ) and `…` of a shell text, also inside double quotes (not inside single quotes; an open single
-    quote is read as a plain character, so more is checked, not less). Nested ones are found when a body is checked in turn."""
+    quote is read as a plain character, so more is checked, not less). Nested ones are found when a body is checked in turn.
+    With quoted False the text is the body of an unquoted heredoc, where quote characters are plain text and only a backslash
+    keeps a $ or backtick from substituting."""
     out, n, i, dq = [], len(text), 0, False
     while i < n:
         c = text[i]
         if c == "\\":
             i += 2
             continue
-        if c == "'" and not dq:
+        if c == "'" and not dq and quoted:
             j = text.find("'", i + 1)
             if j >= 0:
                 i = j + 1
                 continue
-        elif c == '"':
+        elif c == '"' and quoted:
             dq = not dq
         elif c == "`":
             j = _bt_end(text, i + 1)
@@ -737,7 +739,32 @@ def shell_string(cmd):
     return None
 
 
-def publish_hit(text, patterns, depth=0):
+# an UNQUOTED heredoc: no quote or backslash in or after the delimiter (bash substitutes $( … ) and backticks in its body lines)
+HEREDOC_OPEN_PLAIN = re.compile(r"(?<!<)<<-?[ \t]*(\w+)(?![\w'\"\\])[^\n]*\n(.*?)\n[ \t]*\1[ \t]*(?=\n|$)", re.S)
+
+
+BACKSLASH_DELIM = re.compile(r"(?<!<)<<(-?[ \t]*)\\(\w+)")
+
+
+def gate_strip(text):
+    """strip_heredocs for the gate's text: a backslashed delimiter (<<\\EOF) quotes it like '…' does, so its body is data too
+    (strip_heredocs itself does not read that spelling; the RULES path is left as it is)."""
+    return strip_heredocs(BACKSLASH_DELIM.sub(lambda m: "<<" + m.group(1) + "'" + m.group(2) + "'", text))
+
+
+def heredoc_substs(text):
+    """The $( … ) and backtick bodies inside the bodies of the unquoted heredocs of a shell text. strip_heredocs removes a data
+    heredoc body whatever its quoting, but bash still runs the substitutions in an unquoted one; the plain lines stay data and a
+    quoted or backslashed delimiter's body is not looked at."""
+    if "<<" not in text:
+        return []
+    out = []
+    for m in HEREDOC_OPEN_PLAIN.finditer(text):
+        out.extend(subst_bodies(m.group(2), False))
+    return out
+
+
+def publish_hit(text, patterns, depth=0, raw=None):
     """Does any command of `text` run a publish pattern? A pattern matches a command when its first word is the command word
     (after VAR=value, env / nohup / timeout / winpty / sudo … wrappers and their options; by base name, so /usr/bin/git and
     git.exe are git, and the python family is one name) and each later pattern word appears, in order, among the command's later
@@ -750,7 +777,12 @@ def publish_hit(text, patterns, depth=0):
         segs = flex_split(p)
         if segs and segs[0]:
             pats.append(segs[0])
-    return bool(pats) and _hit(text, pats, depth)
+    if not pats:
+        return False
+    if _hit(text, pats, depth):
+        return True
+    # `raw` is the command before strip_heredocs: the substitutions inside its unquoted heredocs run, whatever strip_heredocs did
+    return raw is not None and depth < 2 and any(_hit(gate_strip(b), pats, depth + 1) for b in heredoc_substs(raw))
 
 
 def _hit(text, pats, depth):
@@ -772,14 +804,16 @@ def _hit(text, pats, depth):
             return True
     if depth < 2:
         for body in subst_bodies(text):
-            if _hit(strip_heredocs(body), pats, depth + 1):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
+            if _hit(gate_strip(body), pats, depth + 1):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
+                return True
+            if any(_hit(gate_strip(b), pats, depth + 1) for b in heredoc_substs(body)):   # but an unquoted one still substitutes
                 return True
     return False
 
 
-def fresh_gate(data, text):
+def fresh_gate(data, text, raw=None):
     """None to allow the call, else the reason to deny it. `text` is the Bash command with data heredocs stripped, or None for
-    a tool call (then the tool's name is matched against `publish_tools:`)."""
+    a tool call (then the tool's name is matched against `publish_tools:`); `raw` is the same command before the stripping."""
     deadline = time.monotonic() + BUDGET_S
     try:
         project = project_dir(data)
@@ -788,7 +822,7 @@ def fresh_gate(data, text):
         if not sources:
             return None
         if text is not None:
-            hit = publish_hit(text, adapter_list(adapter, "publish"))
+            hit = publish_hit(text, adapter_list(adapter, "publish"), 0, raw)
         else:
             name = data.get("tool_name")
             hit = isinstance(name, str) and any(fnmatch.fnmatchcase(name, g) for g in adapter_list(adapter, "publish_tools"))
@@ -826,12 +860,13 @@ def main():
         leave()
         return
     cmd = (data.get("tool_input") or {}).get("command") or ""
-    text = strip_heredocs(strip_state_args(cmd))
+    pre = strip_state_args(cmd)
+    text = strip_heredocs(pre)
     for pat, why in RULES:
         if re.search(pat, text, re.I | re.S):
             deny(why)
             return
-    why = fresh_gate(data, text)
+    why = fresh_gate(data, gate_strip(pre), pre)
     if why:
         deny(why)
     leave()

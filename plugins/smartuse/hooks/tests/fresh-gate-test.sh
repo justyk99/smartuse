@@ -487,6 +487,26 @@ for nm, cm in (("commit_line_is_the_publish_command", COMMIT % "fix the parser\n
                ("pr_body_line_is_the_publish_command", PRBODY % "- git push\ngit push origin main"),
                ("pr_body_backtick_span", PRBODY % "- `python send.py` stays manual")):
     make("a_heredoc_text_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+# an UNQUOTED heredoc still substitutes $( … ) and backticks in its body lines (strip_heredocs removes the body either way); plain lines stay data
+EOFU, EOFQ2, EOFB = "<<EOF", '<<"EOF"', "<<\\EOF"
+COMMITU = 'git commit -m "$(cat <<EOF\n%s\nEOF\n)"'
+for nm, cm in (("commit_dollar_paren", COMMITU % "$(python send.py)"), ("commit_backticks", COMMITU % "`python send.py`"),
+               ("commit_text_around", COMMITU % "notes\nrun $(git push) now\nmore"), ("commit_single_quotes_do_not_protect", COMMITU % "'$(python send.py)'"),
+               ("top_level_dollar_paren", "cat " + EOFU + "\n$(python send.py)\nEOF"), ("top_level_backticks", "cat " + EOFU + "\n`python send.py`\nEOF\n"),
+               ("top_level_dash_tab_terminator", "cat <<-EOF\n\t$(git push)\n\tEOF\n"), ("top_level_other_publish_command", "cat " + EOFU + "\nx $(git push origin main) y\nEOF"),
+               ("pr_body", 'gh pr create --body "$(cat ' + EOFU + '\n- `python send.py`\nEOF\n)"'),
+               ("nested_in_a_bash_c", "bash -c 'echo \"$(cat " + EOFU + "\n$(python send.py)\nEOF\n)\"'"),
+               ("after_other_text", "echo start; cat " + EOFU + " > out.txt\nline\n$(python send.py)\nEOF\necho end")):
+    make("d_unquoted_heredoc_" + nm, ex(DENY, has=[SRC]), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("quoted_single", "cat <<'EOF'\n$(python send.py)\nEOF"), ("quoted_double", "cat " + EOFQ2 + "\n$(python send.py)\nEOF"),
+               ("backslashed", "cat " + EOFB + "\n$(python send.py)\nEOF"), ("quoted_single_backticks", "cat <<'EOF'\n`python send.py`\nEOF\n"),
+               ("commit_quoted_single", COMMIT % "$(python send.py)"), ("commit_quoted_double", 'git commit -m "$(cat ' + EOFQ2 + '\n$(python send.py)\nEOF\n)"'),
+               ("commit_backslashed", 'git commit -m "$(cat ' + EOFB + '\n$(python send.py)\nEOF\n)"'),
+               ("plain_line", "cat " + EOFU + "\npython send.py\nEOF"), ("plain_lines_in_a_commit", COMMITU % "run python send.py\ngit push"),
+               ("dash_plain_line", "cat <<-EOF\n\tpython send.py\n\tEOF\n"),
+               ("escaped_dollar_paren", "cat " + EOFU + "\n\\$(python send.py)\nEOF"), ("escaped_backtick", "cat " + EOFU + "\n\\`python send.py\\`\nEOF"),
+               ("other_substitution", "cat " + EOFU + "\nnow $(date) and `hostname`\nEOF")):
+    make("a_unquoted_heredoc_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
 for nm, cm in (("plain_subst_still_denies", 'echo "$(python send.py)"'),
                ("shell_heredoc_in_subst", 'echo "$(bash ' + EOFQ + '\npython send.py\nEOF\n)"'),
                ("command_after_the_heredoc_in_subst", 'echo "$(cat ' + EOFQ + '\ntext\nEOF\npython send.py)"'),
