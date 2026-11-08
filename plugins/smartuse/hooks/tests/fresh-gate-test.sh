@@ -12,6 +12,10 @@
 # order (env, then the event's cwd, MSYS form too) · first occurrence wins, CRLF adapter · the RULES still come first · the REPLAY
 # (sources opened only after the publish call: denied at the first call, allowed at the second) · the deny JSON shape · nothing
 # written · stdlib only · exec without main() prints nothing (until-done.py reuses this file's RULES) · the hooks.json entry.
+# Review fixes (F1b): a script word matched by the end of its path (C:/proj/send.py, /home/u/send.py, ./send.py) and the command
+# word by base name (/usr/bin/git, git.exe, the python family) · brackets in the project path, a literal file named with [1] · a
+# link or junction on a relative source refused, never followed, and the automount trees /net/ and /Network/ · $(…) and backtick
+# bodies, winpty, ksh, bash -c -- '…', xargs -i / -l · values echoed in a reason cut at 200 characters, a whole reason at 2,000.
 # One temp dir under ${TMPDIR:-/tmp}/smartuse-fresh.XXXXXX, the only thing removed on exit; temp HOME. Every PASS / FAIL line is
 # one check; exit 1 on failure. The event JSON is written to files by Python (Windows paths), never through a command line, and
 # every allow case is built by the same code as its deny twin and re-read as JSON, so an empty answer is an allow of parsed input.
@@ -128,8 +132,8 @@ def adapter(sources="jobs/demo/plan.pdf, jobs/demo/photos/*.jpg", publish="pytho
     return ("---" + eol + body + eol + "---" + eol + "# demo notes" + eol) if front else ("# demo notes" + eol + eol + body + eol)
 
 
-def ex(mode, prefix=FS, has=(), no=(), rx=(), max=0):
-    return {"mode": mode, "prefix": prefix, "has": list(has), "no": list(no), "rx": list(rx), "max": max}
+def ex(mode, prefix=FS, has=(), no=(), rx=(), max=0, maxlen=0):
+    return {"mode": mode, "prefix": prefix, "has": list(has), "no": list(no), "rx": list(rx), "max": max, "maxlen": maxlen}
 
 
 def reads_all(t, P, side=False):
@@ -151,14 +155,63 @@ def base(P, boundary=True):
     return t
 
 
+SKIPS, CAN = [], {}
+
+
+def is_reparse(p):
+    st = os.lstat(p)
+    return os.path.islink(p) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
+def mklink(link, target, kind):
+    """One link of kind file | dir (symlinks) | junction (Windows, no admin needed); False when this machine cannot make it."""
+    try:
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        if kind == "junction":
+            if os.name != "nt":
+                return False
+            import subprocess
+            subprocess.run(["cmd", "/c", "mklink", "/J", link.replace("/", "\\"), target.replace("/", "\\")], capture_output=True, timeout=20)
+        else:
+            os.symlink(target, link, target_is_directory=(kind == "dir"))
+        return os.path.lexists(link) and is_reparse(link)
+    except Exception:
+        return False
+
+
+def can_link(kind):
+    """Tried once per kind in a probe folder that is removed again; the cases of a kind that cannot be made are skipped, said once."""
+    if kind not in CAN:
+        probe = OUT + "/_probe_" + kind
+        os.makedirs(probe + "/t", exist_ok=True)
+        open(probe + "/t/f", "w").write("x")
+        CAN[kind] = mklink(probe + "/l", probe + "/t" + ("/f" if kind == "file" else ""), kind)
+        for p in (probe + "/l",):
+            for rm in (os.unlink, os.rmdir):
+                try:
+                    rm(p)
+                    break
+                except OSError:
+                    pass
+        import shutil
+        shutil.rmtree(probe, ignore_errors=True)
+        if not CAN[kind]:
+            SKIPS.append("%s links cannot be made on this machine (no privilege, or not Windows for junctions)" % kind)
+    return CAN[kind]
+
+
 def make(name, expect, cmd=None, tool="Bash", tinput=None, tr=None, adp=None, noadp=False, files=FILES, cut=None, tpath="auto", cwd="proj",
-         raw=None, env=False, guard=None, pyenc=None, nfiles=None):
+         raw=None, env=False, guard=None, pyenc=None, nfiles=None, proj="proj", links=()):
     d = OUT + "/" + name
-    P = d + "/proj"
+    P = d + "/" + proj
+    if not all(can_link(k) for _, _, k in links):
+        return
     os.makedirs(P, exist_ok=True)
     for f in files:
         os.makedirs(os.path.dirname(P + "/" + f), exist_ok=True)
         open(P + "/" + f, "w").write("x")
+    for rel, target, kind in links:   # link kinds were proven makeable above; the target is a project-relative path
+        assert mklink(P + "/" + rel, P + "/" + target, kind), "could not make " + rel
     if nfiles:
         folder, count = nfiles
         os.makedirs(P + "/" + folder, exist_ok=True)
@@ -370,7 +423,170 @@ make("a_env_dir_beats_cwd", ex(ALLOW), cmd="python send.py", tr=lambda P: reads_
 if MSYS:
     make("a_cwd_in_msys_form", ex(ALLOW), cmd="python send.py", tr=lambda P: reads_all(base(P), P), cwd="msys")
 
+# ================= F1b review fixes
+SRC = "sources not opened"
+# 1 + 2: a script word is matched by the end of its path; the command word by its base name; the python family is one name
+for nm, cm in (("abs_drive_path", "python C:/work/send.py"), ("abs_backslash_path", 'python "C:\\work\\send.py"'), ("abs_posix_path", "python /home/u/proj/send.py"),
+               ("dotdot_path", "python ../send.py"), ("dot_path", "python ./send.py"), ("relative_dir_path", "python tools/send.py"),
+               ("path_case_insensitive", "python C:/Work/SEND.PY"), ("python3", "python3 send.py"), ("python3_minor", "python3.12 send.py"),
+               ("py_launcher", "py -3 send.py"), ("python_exe_path", "C:/Python313/python.exe send.py"),
+               ("python_exe_quoted", '"C:\\Python313\\python.exe" send.py'), ("python_option_then_abs_path", "python -u C:/work/send.py --to client"),
+               ("git_abs_path", "/usr/bin/git push"), ("git_exe", "git.exe push"), ("git_exe_windows_path", '"C:\\Program Files\\Git\\cmd\\git.exe" -C dir push'),
+               ("wrapped_abs_path", "timeout 60 /usr/bin/python3 /home/u/proj/send.py")):
+    make("d_match_" + nm, ex(DENY, has=[SRC]), cmd=cm, tr=lambda P: base(P))
+make("d_match_pattern_dir_path", ex(DENY, has=[SRC]), cmd='python "C:\\p\\tools\\send.py"', adp=adapter(publish="python tools/send.py"), tr=lambda P: base(P))
+make("d_match_pattern_dir_path_posix", ex(DENY, has=[SRC]), cmd="python /home/u/tools/send.py", adp=adapter(publish="python tools/send.py"), tr=lambda P: base(P))
+make("d_match_pattern_python3_head", ex(DENY, has=[SRC]), cmd="python send.py", adp=adapter(publish="python3 send.py"), tr=lambda P: base(P))
+make("d_match_pattern_py_head", ex(DENY, has=[SRC]), cmd="python3.11 C:/work/send.py", adp=adapter(publish="py send.py"), tr=lambda P: base(P))
+make("d_match_pattern_git_exe_head", ex(DENY, has=[SRC]), cmd="git push", adp=adapter(publish="git.exe push"), tr=lambda P: base(P))
+make("d_match_all_opened_still_allows", ex(ALLOW), cmd="python C:/work/send.py", tr=lambda P: reads_all(base(P), P))
+# allow: other scripts, other names, other families
+for nm, cm in (("other_script", "python other.py"), ("other_script_deeper", "python tools/other/send2.py"), ("other_script_abs", "python C:/work/other.py"),
+               ("longer_name_abs", "python /home/u/proj/mysend.py"), ("git_pull", "git pull"), ("git_abs_pull", "/usr/bin/git pull"), ("git_exe_pull", "git.exe pull"),
+               ("python3_other", "python3 other.py"), ("py_other", "py -3 other.py"), ("gitx", "gitx push"), ("node_is_not_python", "node send.py"),
+               ("python_head_only_as_a_word", "echo python send.py"), ("send_as_a_directory", "python send.py/other.py")):
+    make("a_match_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+make("a_match_pattern_dir_path_other_dir", ex(ALLOW), cmd="python C:/p/send.py", adp=adapter(publish="python tools/send.py"), tr=lambda P: base(P))
+make("a_match_pattern_dir_path_longer_dir", ex(ALLOW), cmd="python xtools/send.py", adp=adapter(publish="python tools/send.py"), tr=lambda P: base(P))
+make("a_match_pattern_dir_path_bare_name", ex(ALLOW), cmd="python send.py", adp=adapter(publish="python tools/send.py"), tr=lambda P: base(P))
+make("a_match_pattern_python3_head_other", ex(ALLOW), cmd="python other.py", adp=adapter(publish="python3 send.py"), tr=lambda P: base(P))
+# 5: matcher gaps
+for nm, cm in (("dquote_subst", 'echo "$(python send.py)"'), ("dquote_subst_text_around", 'echo "done: $(python send.py) ok"'),
+               ("backtick", "echo `python send.py`"), ("dquote_backtick", 'echo "went `python send.py` ok"'),
+               ("subst_nested", 'echo "$(echo "$(python send.py)")"'), ("subst_in_bash_c", "bash -c 'echo \"$(python send.py)\"'"),
+               ("subst_assignment", 'X="$(git push)"'), ("subst_with_inner_quote", 'echo "$(echo \')\'; python send.py)"'),
+               ("subst_after_apostrophe_in_dquotes", 'echo "it\'s $(python send.py)"'),
+               ("winpty", "winpty python send.py"), ("winpty_option", "winpty -Xallow-non-tty python send.py"),
+               ("ksh_c", "ksh -c 'python send.py'"), ("bash_c_dashdash", "bash -c -- 'python send.py'"), ("bash_lc_dashdash", 'bash -lc -- "python send.py"'),
+               ("xargs_i", "echo x | xargs -i python send.py"), ("xargs_l", "echo x | xargs -l python send.py"), ("xargs_i_attached", "echo x | xargs -i{} python send.py"),
+               ("xargs_I_valued", "echo x | xargs -I % python send.py")):
+    make("d_gap_" + nm, ex(DENY, has=[SRC]), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("dquote_subst_other", 'echo "$(python other.py)"'), ("backtick_other", "echo `ls`"), ("dquote_subst_pull", 'echo "$(git pull)"'),
+               ("subst_text_only", 'echo "python send.py is $(date)"'), ("winpty_other", "winpty python other.py"), ("ksh_c_other", "ksh -c 'python other.py'"),
+               ("bash_c_dashdash_other", "bash -c -- 'python other.py'"), ("xargs_i_other", "echo x | xargs -i python other.py"),
+               ("xargs_l_other", "echo x | xargs -l python other.py")):
+    make("a_gap_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+make("a_gap_subst_all_opened", ex(ALLOW), cmd='echo "$(python send.py)"', tr=lambda P: reads_all(base(P), P))
+
+# 3: brackets in the project path are only a name; a relative source with wildcard characters that is a literal file is that file
+BR = "3 of 3 sources not opened since the last compaction"
+for pj in ("p[a]x", "[1]p", "p[!x]"):
+    make("a_bracket_project_" + pj.replace("[", "L").replace("]", "R").replace("!", "N"), ex(ALLOW), cmd="python send.py", proj=pj, tr=lambda P: reads_all(base(P), P))
+    make("d_bracket_project_" + pj.replace("[", "L").replace("]", "R").replace("!", "N"),
+         ex(DENY, has=[BR, "jobs/demo/plan.pdf, jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg."], no=["matches no file"]), cmd="python send.py", proj=pj, tr=lambda P: base(P))
+make("d_bracket_project_two_of_three", ex(DENY, has=["2 of 3 sources not opened", "jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg."], no=["matches no file", "jobs/demo/plan.pdf"]),
+     cmd="python send.py", proj="p[a]x", tr=lambda P: base(P).read(P + "/" + PLAN))
+make("d_bracket_project_env_dir", ex(DENY, has=[BR], no=["matches no file"]), cmd="python send.py", proj="p[a]x", tr=lambda P: base(P), cwd="other", env=True)
+make("d_bracket_project_missing_glob_still_says_so", ex(DENY, has=["source pattern matches no file: jobs/demo/nothing/*.png"]), cmd="python send.py",
+     proj="p[a]x", adp=adapter(sources="jobs/demo/nothing/*.png"), tr=lambda P: base(P))
+LIT = ["jobs/demo/plan.pdf", "jobs/demo/photo[1].jpg"]
+make("a_literal_bracket_file", ex(ALLOW), cmd="python send.py", adp=adapter(sources=", ".join(LIT)), files=LIT,
+     tr=lambda P: base(P).read(P + "/" + LIT[0]).read(P + "/" + LIT[1]))
+make("d_literal_bracket_file_unread", ex(DENY, has=["1 of 2 sources not opened", "jobs/demo/photo[1].jpg."], no=["matches no file"]), cmd="python send.py",
+     adp=adapter(sources=", ".join(LIT)), files=LIT, tr=lambda P: base(P).read(P + "/" + LIT[0]))
+make("d_literal_bracket_file_missing", ex(DENY, has=["source pattern matches no file: jobs/demo/photo[2].jpg."]), cmd="python send.py",
+     adp=adapter(sources="jobs/demo/photo[2].jpg"), files=LIT, tr=lambda P: base(P))
+make("a_glob_class_still_a_glob", ex(ALLOW), cmd="python send.py", adp=adapter(sources="jobs/demo/photos/[ab].jpg"), tr=lambda P: reads_all(base(P), P))
+make("a_glob_skips_hidden_names", ex(ALLOW), cmd="python send.py", files=FILES + ["jobs/demo/photos/.h.jpg"], tr=lambda P: reads_all(base(P), P))
+make("d_glob_dot_pattern_reaches_hidden_names", ex(DENY, has=["1 of 1 sources not opened", "jobs/demo/photos/.h.jpg."]), cmd="python send.py",
+     adp=adapter(sources="jobs/demo/photos/.*.jpg"), files=FILES + ["jobs/demo/photos/.h.jpg"], tr=lambda P: base(P))
+make("a_glob_double_star_finds_the_nested_file", ex(ALLOW), cmd="python send.py", adp=adapter(sources="jobs/**/b.jpg"), tr=lambda P: reads_all(base(P), P))
+make("d_glob_double_star_finds_the_nested_file", ex(DENY, has=["1 of 1 sources not opened", "jobs/demo/photos/b.jpg."], no=["matches no file"]), cmd="python send.py",
+     adp=adapter(sources="jobs/**/b.jpg"), tr=lambda P: base(P).read(P + "/" + PA))
+DEEP = FILES + ["jobs/x.jpg", "jobs/demo/y.jpg"]
+make("d_glob_double_star_several_depths", ex(DENY, has=["4 of 4 sources not opened", "jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg, jobs/demo/y.jpg, jobs/x.jpg."]),
+     cmd="python send.py", adp=adapter(sources="jobs/**/*.jpg"), files=DEEP, tr=lambda P: base(P))
+make("a_glob_double_star_several_depths_opened", ex(ALLOW), cmd="python send.py", adp=adapter(sources="jobs/**/*.jpg"), files=DEEP,
+     tr=lambda P: base(P).read(P + "/jobs/x.jpg").read(P + "/jobs/demo/y.jpg").read(P + "/" + PA).read(P + "/" + PB))
+make("d_glob_double_star_zero_levels_counts", ex(DENY, has=["1 of 2 sources not opened", "jobs/x.jpg."]), cmd="python send.py",
+     adp=adapter(sources="jobs/**/x.jpg, jobs/**/a.jpg"), files=DEEP, tr=lambda P: base(P).read(P + "/" + PA))
+make("a_glob_double_star_skips_hidden_folders", ex(ALLOW), cmd="python send.py", adp=adapter(sources="jobs/**/*.jpg"), files=FILES + ["jobs/.hid/z.jpg"],
+     tr=lambda P: base(P).read(P + "/" + PA).read(P + "/" + PB))
+make("d_glob_double_star_last_names_every_file", ex(DENY, has=["4 of 4 sources not opened", "jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg, jobs/demo/plan.pdf, jobs/x.jpg."]),
+     cmd="python send.py", adp=adapter(sources="jobs/**"), files=FILES + ["jobs/x.jpg"], tr=lambda P: base(P))
+make("d_glob_double_star_one_level_matches", ex(DENY, has=["1 of 1 sources not opened", "jobs/demo/plan.pdf."]), cmd="python send.py",
+     adp=adapter(sources="jobs/**/plan.pdf"), tr=lambda P: base(P))
+make("d_glob_dir_is_not_a_file", ex(DENY, has=["source pattern matches no file: jobs/demo/photos."]), cmd="python send.py",
+     adp=adapter(sources="jobs/demo/photos"), tr=lambda P: reads_all(base(P), P))
+
+# 4: a link on a relative source is refused, never followed; a link elsewhere in the project is not on the path and is no business of the gate
+def linkmsg(pat, link):
+    return pat + " passes through a link (" + link + "); sources must be plain local files. The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
+
+
+def reads_and(P, *extra):
+    t = reads_all(base(P), P)
+    for e in extra:
+        t.read(P + "/" + e)
+    return t
+
+
+make("d_link_source_file", ex(DENY, has=[linkmsg("jobs/demo/link.pdf", "jobs/demo/link.pdf")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/demo/link.pdf"), links=[("jobs/demo/link.pdf", "jobs/demo/plan.pdf", "file")], tr=lambda P: reads_and(P, "jobs/demo/link.pdf"))
+make("d_link_source_folder", ex(DENY, has=[linkmsg("jobs/linked/plan.pdf", "jobs/linked")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/linked/plan.pdf"), links=[("jobs/linked", "jobs/demo", "dir")], tr=lambda P: reads_and(P, "jobs/linked/plan.pdf"))
+make("d_link_folder_matched_by_a_wildcard", ex(DENY, has=[linkmsg("jobs/*/plan.pdf", "jobs/linked")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/*/plan.pdf"), links=[("jobs/linked", "jobs/demo", "dir")], tr=lambda P: reads_all(base(P), P))
+make("d_link_file_matched_by_a_wildcard", ex(DENY, has=[linkmsg("jobs/demo/photos/*.jpg", "jobs/demo/photos/c.jpg")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/demo/photos/*.jpg"), links=[("jobs/demo/photos/c.jpg", "jobs/demo/photos/a.jpg", "file")], tr=lambda P: reads_all(base(P), P))
+make("d_link_source_file_tool", ex(DENY, has=[linkmsg("jobs/demo/link.pdf", "jobs/demo/link.pdf")]), tool="mcp__demo__file_upload",
+     adp=adapter(sources="jobs/demo/link.pdf"), links=[("jobs/demo/link.pdf", "jobs/demo/plan.pdf", "file")], tr=lambda P: reads_all(base(P), P))
+make("d_link_after_a_local_source", ex(DENY, has=[linkmsg("jobs/linked/a.jpg", "jobs/linked")]), cmd="python send.py",
+     adp=adapter(sources="jobs/demo/plan.pdf, jobs/linked/a.jpg"), links=[("jobs/linked", "jobs/demo/photos", "dir")], tr=lambda P: reads_all(base(P), P))
+make("d_junction_source_folder", ex(DENY, has=[linkmsg("jobs/jn/photos/*.jpg", "jobs/jn")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/jn/photos/*.jpg"), links=[("jobs/jn", "jobs/demo", "junction")], tr=lambda P: reads_all(base(P), P))
+make("d_junction_matched_by_a_wildcard", ex(DENY, has=[linkmsg("jobs/*/photos/*.jpg", "jobs/jn")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/*/photos/*.jpg"), links=[("jobs/jn", "jobs/demo", "junction")], tr=lambda P: reads_all(base(P), P))
+make("d_link_folder_under_double_star", ex(DENY, has=[linkmsg("jobs/**/b.jpg", "jobs/demo/linked")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/**/b.jpg"), links=[("jobs/demo/linked", "jobs/demo/photos", "dir")], tr=lambda P: reads_all(base(P), P))
+make("d_link_file_under_double_star", ex(DENY, has=[linkmsg("jobs/**/*.jpg", "jobs/demo/photos/c.jpg")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/**/*.jpg"), links=[("jobs/demo/photos/c.jpg", "jobs/demo/photos/a.jpg", "file")], tr=lambda P: reads_all(base(P), P))
+make("d_junction_under_double_star", ex(DENY, has=[linkmsg("jobs/**/b.jpg", "jobs/demo/jn")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/**/b.jpg"), links=[("jobs/demo/jn", "jobs/demo/photos", "junction")], tr=lambda P: reads_all(base(P), P))
+make("d_link_folder_under_trailing_double_star", ex(DENY, has=[linkmsg("jobs/**", "jobs/linked")], no=["not opened"]), cmd="python send.py",
+     adp=adapter(sources="jobs/**"), links=[("jobs/linked", "jobs/demo", "dir")], tr=lambda P: reads_all(base(P), P))
+make("a_link_outside_the_double_star_tree", ex(ALLOW), cmd="python send.py", adp=adapter(sources="jobs/**/b.jpg"), links=[("other/l", "jobs/demo", "dir")],
+     tr=lambda P: reads_all(base(P), P))
+make("a_link_elsewhere_in_the_project", ex(ALLOW), cmd="python send.py", links=[("other/l", "jobs/demo", "dir"), ("other/f", "jobs/demo/plan.pdf", "file")],
+     tr=lambda P: reads_all(base(P), P))
+make("a_junction_elsewhere_in_the_project", ex(ALLOW), cmd="python send.py", links=[("other/j", "jobs/demo", "junction")], tr=lambda P: reads_all(base(P), P))
+make("a_link_no_publish_is_no_business", ex(ALLOW), cmd="python other.py", adp=adapter(sources="jobs/demo/link.pdf"),
+     links=[("jobs/demo/link.pdf", "jobs/demo/plan.pdf", "file")], tr=lambda P: base(P))
+# an absolute source is owner-written and taken literally: a link on its path IS followed (documented in the guard)
+make("a_absolute_source_through_a_link_is_followed", ex(ALLOW), cmd="python send.py", adp=lambda P: adapter(sources=P + "/jobs/linked/plan.pdf"),
+     links=[("jobs/linked", "jobs/demo", "dir")], tr=lambda P: base(P).read(P + "/jobs/linked/plan.pdf"))
+# the automount trees are network paths whatever their spelling
+for nm, val in (("net_tree", "/net/192.0.2.7/x"), ("network_tree", "/Network/x"), ("net_upper", "/NET/192.0.2.7/x"), ("network_lower", "/network/x/y.pdf"),
+                ("net_backslashes_after_slash", "/net\\192.0.2.7\\x"), ("net_through_dotdot", "/xx/../net/192.0.2.7/s/a.pdf"),
+                ("network_through_dot", "/./Network/x/a.pdf"), ("net_through_dotdot_backslash", "/x\\..\\NET\\192.0.2.7\\s\\a.pdf"),
+                ("net_bare_folder_through_dotdot", "/xx/../net")):
+    make("d_not_plain_" + nm, ex(DENY, has=[val + NET], max=5), cmd="python send.py", adp=adapter(sources=val), tr=lambda P: base(P))
+make("d_net_lookalike_is_a_plain_path", ex(DENY, has=["source pattern matches no file: /netflix/x.pdf."], max=5), cmd="python send.py",
+     adp=adapter(sources="/netflix/x.pdf"), tr=lambda P: base(P))
+make("d_netx_is_a_plain_path", ex(DENY, has=["source pattern matches no file: /netx/a.pdf."], max=5), cmd="python send.py",
+     adp=adapter(sources="/netx/a.pdf"), tr=lambda P: base(P))
+make("d_netx_through_dotdot_is_a_plain_path", ex(DENY, has=["source pattern matches no file: /xx/../netx/a.pdf."], max=5), cmd="python send.py",
+     adp=adapter(sources="/xx/../netx/a.pdf"), tr=lambda P: base(P))
+make("a_netx_no_publish", ex(ALLOW, max=5), cmd="python other.py", adp=adapter(sources="/netx/a.pdf"), tr=lambda P: base(P))
+make("d_net_folder_inside_a_drive_is_a_plain_path", ex(DENY, has=["source pattern matches no file: C:/net/x.pdf."], max=5), cmd="python send.py",
+     adp=adapter(sources="C:/net/x.pdf"), tr=lambda P: base(P))
+make("a_net_path_no_publish", ex(ALLOW, max=5), cmd="python other.py", adp=adapter(sources="/net/192.0.2.7/x"), tr=lambda P: base(P))
+
+# 6: a value echoed in a reason is cut at 200 characters, a whole reason at 2,000 (a 1 MB sources value; the unit checks are below)
+X200 = "x" * 200
+make("d_size_1mb_pattern", ex(DENY, has=["source pattern matches no file: " + X200 + "\u2026."], no=["x" * 201], maxlen=2000), cmd="python send.py",
+     adp=adapter(sources="x" * 1000000), tr=lambda P: base(P))
+make("d_size_long_glob_pattern", ex(DENY, has=["source pattern matches no file: " + "jobs/" + "y" * 195 + "\u2026."], no=["y" * 196], maxlen=2000), cmd="python send.py",
+     adp=adapter(sources="jobs/" + "y" * 100000 + "*"), tr=lambda P: base(P))
+make("d_size_1mb_not_plain", ex(DENY, has=["../" + "z" * 197 + "\u2026" + NET], no=["z" * 198], maxlen=2000, max=5), cmd="python send.py",
+     adp=adapter(sources="../" + "z" * 1000000), tr=lambda P: base(P))
+make("d_size_1mb_link", ex(DENY, has=[linkmsg("jobs/linked/" + "w" * 188 + "\u2026", "jobs/linked")], maxlen=2000), cmd="python send.py",
+     adp=adapter(sources="jobs/linked/" + "w" * 1000000), links=[("jobs/linked", "jobs/demo", "dir")], tr=lambda P: base(P))
+make("d_size_many_unopened_still_capped", ex(DENY, has=["12 of 12 sources not opened"], maxlen=2000), cmd="python send.py",
+     adp=adapter(sources="many/*.txt"), files=[], nfiles=("many", 12), tr=lambda P: base(P))
+
 open(OUT + "/order.txt", "w", newline="\n").write("\n".join(ORDER) + "\n")
+open(OUT + "/skipped.txt", "w", newline="\n").write("".join(s + "\n" for s in SKIPS))
 PY
 
 cat > "$D/chk.py" <<'PY'
@@ -411,6 +627,8 @@ if mode == "results":    # results <cases dir> <results dir>: one PASS / FAIL li
             print("FAIL deny %s: no deny JSON in %r (%s)" % (name, out[:200], type(e).__name__))
             continue
         bad = []
+        if meta.get("maxlen") and len(r) > meta["maxlen"]:
+            bad.append("reason is %d characters (limit %d)" % (len(r), meta["maxlen"]))
         if not r.startswith(meta["prefix"]):
             bad.append("prefix %r" % r[:60])
         bad += ["missing %r" % s for s in meta["has"] if s not in r]
@@ -432,7 +650,7 @@ elif mode == "imports":  # imports <bash-guard.py>: stdlib only, no process or n
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "glob", "fnmatch", "datetime", "itertools", "threading"} and not calls
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading"} and not calls
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "execsilent":   # execsilent <bash-guard.py>: until-done.py's way of reusing RULES prints nothing, and the file has one main() line to cut
     src = rd(sys.argv[2])
@@ -442,6 +660,45 @@ elif mode == "execsilent":   # execsilent <bash-guard.py>: until-done.py's way o
         ns = {}
         exec(compile(src.replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
         print("ok" if ns.get("RULES") else "no RULES")
+elif mode == "units":    # units <bash-guard.py> <empty dir>: the size caps on the functions themselves (file names too long for a temp path are not needed)
+    import contextlib, io
+    ns = {}
+    exec(compile(rd(sys.argv[2]).replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
+
+    def denied(why):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ns["deny"](why)
+        return json.loads(buf.getvalue())["hookSpecificOutput"]["permissionDecisionReason"]
+    bad = []
+    r = denied("z" * 5000)
+    if len(r) != 2000 or not r.startswith("bash-guard: zzz") or not r.endswith("…"):
+        bad.append("a 5000-character reason came out as %d characters" % len(r))
+    if denied("short") != "bash-guard: short":
+        bad.append("a short reason was changed")
+    out, why = ns["expand_sources"](sys.argv[3], ["a" * 300])
+    if out is not None or ("a" * 200 + "….") not in why or "a" * 201 in why:
+        bad.append("a 300-character pattern is echoed as %r" % why[:80])
+    ns["expand_by_deadline"] = lambda project, sources, deadline: ([("k" + str(i), "n" * 300 + str(i)) for i in range(12)], "")
+    ns["opened_since_compaction"] = lambda tp, project, deadline: (set(), None)
+    why = ns["fresh_verdict"]({"transcript_path": "t.jsonl"}, sys.argv[3], ["x"], 10 ** 12)
+    if "n" * 201 in why or ("n" * 200 + "…") not in why or "and 2 more" not in why:
+        bad.append("unopened file names are not cut at 200 characters")
+    # the link predicate on fake lstat results: only link-like reparse points count (the name-surrogate bit of the tag), not cloud-sync ones
+    import collections
+    St = collections.namedtuple("St", "st_mode st_file_attributes st_reparse_tag")
+    Posix = collections.namedtuple("Posix", "st_mode")
+    REG, LNK, RP = 0o100644, 0o120777, 0x400
+    try:
+        for label, st, want in (("cloud-sync tag 0x9000001A", St(REG, RP | 0x20, 0x9000001A), False), ("cloud-sync tag 0x8000001E", St(REG, RP, 0x8000001E), False),
+                                ("symlink tag 0xA000000C", St(REG, RP, 0xA000000C), True), ("mount point / junction tag 0xA0000003", St(REG, RP | 0x10, 0xA0000003), True),
+                                ("no reparse attribute", St(REG, 0x20, 0), False), ("a tag without the reparse attribute", St(REG, 0x20, 0xA000000C), False),
+                                ("S_ISLNK mode", St(LNK, 0, 0), True), ("plain POSIX stat", Posix(REG), False), ("POSIX symlink", Posix(LNK), True)):
+            if bool(ns["is_link_stat"](st)) != want:
+                bad.append("is_link_stat(%s) is not %s" % (label, want))
+    except Exception as e:
+        bad.append("is_link_stat: " + type(e).__name__)
+    print("ok" if not bad else "; ".join(bad))
 elif mode == "hooks":    # hooks <hooks.json>
     d = json.loads(rd(sys.argv[2]))
     pre = d["hooks"]["PreToolUse"]
@@ -477,6 +734,7 @@ done
 py "$D/chk.py" results "$D/c" "$D/r" </dev/null > "$D/results.txt"
 cat "$D/results.txt"
 grep -q '^FAIL' "$D/results.txt" && fail=1
+while IFS= read -r l; do [ -n "$l" ] && ok "(skipped the link cases: $l)"; done < "$D/c/skipped.txt"
 [ "$(grep -c '^PASS\|^FAIL' "$D/results.txt")" = "$(grep -c . "$D/c/order.txt")" ] && ok "every case printed exactly one result ($(grep -c . "$D/c/order.txt") cases)" || ko "some case printed no result line"
 
 # --- the 2 MB transcript: the pass has a 3 s budget of its own and a pass over it ends in an allow, not a "could not verify" deny
@@ -492,7 +750,8 @@ cmp -s "$D/snap.before" "$D/snap.after" && ok "no file was created, changed or r
 [ -z "$(ls -A "$HOME/.claude/smartuse" | grep -v '^interpreter$')" ] && ok "no state file in ~/.claude/smartuse (the launcher's interpreter hint aside)" || ko "state written: $(ls -A "$HOME/.claude/smartuse")"
 
 # --- structure
-r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time glob fnmatch datetime threading), no process call, Python 3.9 grammar" || ko "imports: $r"
+r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time stat fnmatch datetime threading), no process call, Python 3.9 grammar" || ko "imports: $r"
+mkdir -p "$D/empty"; r=$(py "$D/chk.py" units "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "unit checks on the functions: a value echoed in a reason is cut at 200 characters, a whole reason at 2,000; only link-like reparse points are links" || ko "size caps: $r"
 r=$(py "$D/chk.py" execsilent "$G" </dev/null); [ "$r" = ok ] && ok "until-done.py's exec of this file without main() prints nothing and yields RULES" || ko "exec without main(): $r"
 r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
 

@@ -15,13 +15,17 @@
 # names the unopened files. Detection errors (bad input, no adapter, no sources, no publish match) allow, as every check here does;
 # once a publish matched, a failure to verify (no transcript, unreadable, past the deadline) denies. The adapter is only ever read.
 # A source value must be a plain local path (checked by its text before any file call); source expansion and the transcript pass
-# share one deadline, the expansion running in a worker thread that is abandoned when it does not answer.
+# share one deadline, the expansion running in a worker thread that is abandoned when it does not answer. A relative source is
+# walked component by component without following links (a link or reparse point on the way refuses the pattern); every value
+# echoed in a reason is cut at 200 characters and a whole reason at 2,000.
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
-import datetime, fnmatch, glob, json, os, re, sys, threading, time
+import datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
 
 BUDGET_S = 4.0       # one deadline for the whole fresh-source check (source expansion and transcript pass); past it a matched publish is denied
 MAX_SOURCES = 200    # files one gate check will expand the sources to
 MAX_NAMES = 10       # unopened files named in a reason
+MAX_VALUE = 200      # characters of one adapter value or file name echoed in a reason
+MAX_REASON = 2000    # characters of a whole reason
 
 RULES = [
     (r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|zsh|dash|python3?|node|perl)\b",
@@ -244,12 +248,22 @@ def path_key(p, project):
 DEVICE_FORMS = re.compile(r"\\\?\?\\|\\\\\?\\|\\\\\.\\|//\?/|//\./|GLOBALROOT", re.I)   # \??\  \\?\  \\.\  //?/  //./  GLOBALROOT
 
 
+AUTOMOUNT = ("/net/", "/network/")   # automounted network trees (any case): a path under them is a share, whatever its spelling
+AUTOMOUNT_RESOLVED = re.compile(r"/(?:net|network)(?:/|$)", re.I)   # the same trees after . and .. parts are folded away (text only)
+
+
 def is_plain_local(s):
     """A text test, no file system call: is this source value one of the plain spellings of a local file? Relative (no leading
-    slash, no drive letter, no .. part), a drive path (C:\\x or C:/x, not C://x), or a POSIX absolute path (/x, not //x or /\\x).
-    Everything else (//host/share, \\\\host\\share, the device and GLOBALROOT forms) is refused. A mapped network drive letter
-    cannot be told apart from a local one by its text and is accepted."""
+    slash, no drive letter, no .. part), a drive path (C:\\x or C:/x, not C://x), or a POSIX absolute path (/x, not //x or /\\x,
+    and not under the automount trees /net/ and /Network/). Everything else (//host/share, \\\\host\\share, the device and
+    GLOBALROOT forms) is refused. A mapped network drive letter cannot be told apart from a local one by its text and is
+    accepted."""
     if DEVICE_FORMS.search(s):
+        return False
+    t = s.replace("\\", "/")
+    if t.lower().startswith(AUTOMOUNT):
+        return False
+    if t.startswith("/") and AUTOMOUNT_RESOLVED.match(posixpath.normpath(t)):   # /x/../net/h/s and /./net/h/s resolve to the same tree
         return False
     if re.match(r"[A-Za-z]:[\\/](?![\\/])", s) or re.match(r"/(?![/\\])", s):
         return True
@@ -258,32 +272,133 @@ def is_plain_local(s):
     return ".." not in re.split(r"[\\/]", s)
 
 
+def clip(s, n=MAX_VALUE):
+    """A value echoed in a reason, cut at n characters."""
+    s = str(s)
+    return s if len(s) <= n else s[:n] + "\u2026"
+
+
+MAGIC = re.compile(r"[*?\[]")
+FIX = " The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
+
+
+def is_link_stat(st):
+    """A link from an lstat result alone, never by opening or resolving it: a symlink, or on Windows a link-like reparse point
+    (a junction or mount point is one; DirEntry.is_symlink() does not see it). The name-surrogate bit of the reparse tag
+    (0x20000000) is set for symlinks and junctions and clear for cloud-sync tags, so a synced folder is not refused."""
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)) \
+        and bool(getattr(st, "st_reparse_tag", 0) & 0x20000000)
+
+
+def _descent(full, rel):
+    """-> (the directories at and under `full`, without following links: [(relative name, path)], the link met or None). Hidden
+    names are skipped as glob does for **. Any link met on the way stops the descent: it may be a directory the walk would enter."""
+    out, todo = [], [(rel, full)]
+    while todo:
+        r, f = todo.pop()
+        out.append((r, f))
+        try:
+            with os.scandir(f) as it:
+                names = sorted(e.name for e in it)
+        except (OSError, ValueError):
+            continue
+        for name in reversed(names):
+            if name.startswith("."):
+                continue
+            child, crel = os.path.join(f, name), (r + "/" + name if r else name)
+            try:
+                st = os.lstat(child)
+            except (OSError, ValueError):
+                continue
+            if is_link_stat(st):
+                return out, crel
+            if stat.S_ISDIR(st.st_mode):
+                todo.append((crel, child))
+    return out, None
+
+
+def walk_pattern(project, comps, wild):
+    """-> (the regular files the project-relative components stand for, the project-relative link passed through or None).
+    The tree is walked one component at a time and no link is followed: an entry that is a link, matched by a wildcard or
+    named outright, or met while a ** descends, stops the walk. Wildcards are the ones glob has (a component that is exactly **
+    matches zero or more directory levels; a hidden name only when the pattern part starts with a dot; the case rules of the
+    platform's fnmatch). With wild False every component is a literal name. Stops past MAX_SOURCES files."""
+    level, found = [("", str(project))], []
+    for idx, comp in enumerate(comps):
+        last, nxt = idx == len(comps) - 1, []
+        if wild and comp == "**":
+            grown = []
+            for rel, full in level:
+                dirs, link = _descent(full, rel)
+                if link:
+                    return found, link
+                grown.extend(dirs)
+            level = grown
+            if not last:
+                continue
+            comp = "*"   # a trailing ** names every file below
+        for rel, full in level:
+            if wild and MAGIC.search(comp):
+                try:
+                    with os.scandir(full) as it:
+                        names = sorted(e.name for e in it)
+                except (OSError, ValueError):
+                    continue
+                if not comp.startswith("."):
+                    names = [x for x in names if not x.startswith(".")]
+                names = fnmatch.filter(names, comp)
+            else:
+                names = [comp]
+            for name in names:
+                child, crel = os.path.join(full, name), (rel + "/" + name if rel else name)
+                try:
+                    st = os.lstat(child)
+                except (OSError, ValueError):
+                    continue
+                if is_link_stat(st):
+                    return found, crel
+                if last:
+                    if stat.S_ISREG(st.st_mode):
+                        found.append(child)
+                        if len(found) > MAX_SOURCES:
+                            return found, None
+                elif stat.S_ISDIR(st.st_mode):
+                    nxt.append((crel, child))
+        level = nxt
+        if not level:
+            break
+    return found, None
+
+
 def expand_sources(project, patterns):
     """-> ([(key, name shown)], "") with the files the patterns stand for, or (None, the reason). A source that is not a plain
     local path is refused by its text before anything touches the file system (the adapter can come with a cloned repo, and a
-    hook must not reach the network). Only a pattern relative to the project dir is expanded as a glob; an absolute source is
-    one literal file. A pattern that matches no file is a problem of its own (a typo must reach the owner); so is a set larger
-    than MAX_SOURCES."""
+    hook must not reach the network). A pattern relative to the project dir is walked without following links (walk_pattern;
+    the project dir itself is never read as a pattern, so brackets in its name are only a name) and a link on the way refuses
+    it; a relative value with wildcard characters that stands for nothing is tried once as a literal file name. An absolute
+    source is one literal file, owner-written, and a link on an absolute path IS followed. A pattern that matches no file is a
+    problem of its own (a typo must reach the owner); so is a set larger than MAX_SOURCES."""
     for pat in patterns:
         if not is_plain_local(str(native_path(pat))):
-            return None, pat + " is not a plain local path; sources must be local files. The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
+            return None, clip(pat) + " is not a plain local path; sources must be local files." + FIX
     seen, out = set(), []
     for pat in patterns:
         p = str(native_path(pat))
         absolute = _is_abs(p.replace("\\", "/"))
-        full = p if absolute else os.path.join(str(project), p)
-        if not absolute and re.search(r"[*?\[]", p):
-            found = []
-            for f in glob.iglob(full, recursive=True):
-                if os.path.isfile(f):
-                    found.append(f)
-                    if len(found) > MAX_SOURCES:
-                        break
-            found.sort()
+        if absolute:
+            found = [p] if os.path.isfile(p) else []
         else:
-            found = [full] if os.path.isfile(full) else []
+            comps = [c for c in p.replace("\\", "/").split("/") if c not in ("", ".")]
+            found, link = walk_pattern(project, comps, True)
+            if not found and not link and MAGIC.search(p):
+                found, link = walk_pattern(project, comps, False)
+            if link:
+                return None, clip(pat) + " passes through a link (" + clip(link) + "); sources must be plain local files." + FIX
+            found.sort()
         if not found:
-            return None, ("source pattern matches no file: " + pat + ". The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent.")
+            return None, "source pattern matches no file: " + clip(pat) + "." + FIX
         for f in found:
             k = path_key(f, project)
             if k not in seen:
@@ -291,7 +406,7 @@ def expand_sources(project, patterns):
                 n, root = path_norm(f, project), path_norm(project, project)
                 out.append((k, n[len(root) + 1:] if path_key(n, project).startswith(path_key(root, project) + "/") else n))
         if len(out) > MAX_SOURCES:
-            return None, "narrow the pattern: " + pat + " matches over %d files. Nothing was sent." % MAX_SOURCES
+            return None, "narrow the pattern: " + clip(pat) + " matches over %d files. Nothing was sent." % MAX_SOURCES
     return out, ""
 
 
@@ -393,7 +508,7 @@ def fresh_verdict(data, project, sources, deadline):
     if not left:
         return None
     since = "in this session" if when is None else ("since the last compaction" + (" (" + hhmm(when) + ")" if hhmm(when) else ""))
-    shown = ", ".join(left[:MAX_NAMES]) + (", and %d more" % (len(left) - MAX_NAMES) if len(left) > MAX_NAMES else "")
+    shown = ", ".join(clip(n) for n in left[:MAX_NAMES]) + (", and %d more" % (len(left) - MAX_NAMES) if len(left) > MAX_NAMES else "")
     return ("fresh-source \u2014 %d of %d sources not opened %s: %s. Open each with Read, then retry. Nothing was sent."
             % (len(left), len(files), since, shown))
 
@@ -407,7 +522,8 @@ LEAD_WORDS = frozenset(("if", "then", "else", "elif", "do", "while", "until", "!
 WRAPPERS = {"command": (frozenset(), 0), "builtin": (frozenset(), 0), "exec": (frozenset(("-a",)), 0),
             "env": (frozenset(("-u", "-C", "-S")), 0), "nohup": (frozenset(), 0), "nice": (frozenset(("-n",)), 0),
             "timeout": (frozenset(("-s", "-k")), 1), "stdbuf": (frozenset(("-i", "-o", "-e")), 0),
-            "xargs": (frozenset(("-n", "-I", "-P", "-d", "-L", "-s", "-a", "-E", "-l", "-i")), 0), "time": (frozenset(), 0),
+            "xargs": (frozenset(("-n", "-I", "-P", "-d", "-L", "-s", "-a", "-E")), 0), "time": (frozenset(), 0),   # GNU -i / -l attach their value
+            "winpty": (frozenset(), 0),
             "sudo": (frozenset(("-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-r", "-t", "-U")), 0),
             "doas": (frozenset(("-u", "-C")), 0)}
 
@@ -446,11 +562,119 @@ def command_segments(text):
     return segs
 
 
-def word_norm(w):
-    """A word with a path in it (a script) compared by its normalised form: ./tools/send.py = tools/send.py = tools\\send.py."""
-    if "/" in w or "\\" in w:
-        return os.path.normcase(os.path.normpath(str(native_path(w)).replace("\\", "/"))).replace("\\", "/")
-    return w
+EXT = re.compile(r"\.[A-Za-z0-9]+$")
+PYFAM = re.compile(r"(?:python(?:3(?:\.\d+)?)?|py)")   # python, python3, python3.N, py: one name
+
+
+def names_file(w):
+    """Does a pattern word name a file: a path separator in it, or an extension at its end?"""
+    return "/" in w or "\\" in w or bool(EXT.search(w))
+
+
+def path_parts(w):
+    """The components of a path word, compared case-insensitively: backslashes read as /, empty parts and . dropped."""
+    return [x.lower() for x in w.replace("\\", "/").split("/") if x not in ("", ".")]
+
+
+def word_eq(p, c):
+    """Does the command word c stand for the pattern word p? A word that names a file matches when c's path components end with
+    p's (send.py = C:/proj/send.py = ./send.py; tools/send.py = C:\\p\\tools\\send.py, not send.py or xtools/send.py); any other
+    word must be equal. No file system call: an unrelated script of the same name is an over-deny, which costs one turn."""
+    if names_file(p):
+        pp, cp = path_parts(p), path_parts(c)
+        return bool(pp) and len(cp) >= len(pp) and cp[-len(pp):] == pp
+    return p == c
+
+
+def base_name(w):
+    """The last path component of a command word with a trailing .exe dropped."""
+    b = re.split(r"[\\/]", w)[-1]
+    return b[:-4] if b.lower().endswith(".exe") else b
+
+
+def head_eq(p, c):
+    """Does the command word c run the program the pattern's first word p names? Without a separator in p, by base name
+    (/usr/bin/git, git.exe and git are one); the python family (python, python3, python3.N, py) is one name; a first word that
+    names a file or holds a separator is matched like any other file word."""
+    if "/" in p or "\\" in p:
+        return word_eq(p, c)
+    p = base_name(p)
+    if PYFAM.fullmatch(p):
+        return bool(PYFAM.fullmatch(base_name(c)))
+    if names_file(p):
+        return word_eq(p, c)
+    return base_name(c) == p
+
+
+def _bt_end(t, i):
+    """t[i:] starts just after an opening backtick: the index of the closing one, or len(t)."""
+    n = len(t)
+    while i < n:
+        if t[i] == "\\":
+            i += 2
+        elif t[i] == "`":
+            return i
+        else:
+            i += 1
+    return n
+
+
+def _sub_end(t, i, depth=0):
+    """t[i:] starts just after "$(": the index of its matching ")", or len(t). Quotes, backticks and nested $( ) are respected."""
+    n, par, dq = len(t), 1, False
+    while i < n:
+        c = t[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'" and not dq:
+            j = t.find("'", i + 1)
+            if j >= 0:
+                i = j + 1
+                continue
+        elif c == '"':
+            dq = not dq
+        elif c == "`":
+            i = _bt_end(t, i + 1)
+        elif c == "$" and t.startswith("$(", i) and depth < 20:
+            i = _sub_end(t, i + 2, depth + 1)
+        elif not dq:
+            if c == "(":
+                par += 1
+            elif c == ")":
+                par -= 1
+                if par == 0:
+                    return i
+        i += 1
+    return n
+
+
+def subst_bodies(text):
+    """The text inside each $( … ) and `…` of a shell text, also inside double quotes (not inside single quotes; an open single
+    quote is read as a plain character, so more is checked, not less). Nested ones are found when a body is checked in turn."""
+    out, n, i, dq = [], len(text), 0, False
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'" and not dq:
+            j = text.find("'", i + 1)
+            if j >= 0:
+                i = j + 1
+                continue
+        elif c == '"':
+            dq = not dq
+        elif c == "`":
+            j = _bt_end(text, i + 1)
+            out.append(text[i + 1:j])
+            i = j
+        elif c == "$" and text.startswith("$(", i):
+            j = _sub_end(text, i + 2)
+            out.append(text[i + 2:j])
+            i = j
+        i += 1
+    return out
 
 
 def command_start(seg):
@@ -486,48 +710,50 @@ def shell_string(cmd):
         name = name[:-4]
     if name == "eval":
         return " ".join(cmd[1:]) if len(cmd) > 1 else None
-    if name in ("sh", "bash", "zsh", "dash"):
+    if name in ("sh", "bash", "zsh", "dash", "ksh"):
         for k in range(1, len(cmd) - 1):
             if cmd[k].startswith("-") and not cmd[k].startswith("--") and "c" in cmd[k][1:]:
-                return cmd[k + 1]
+                return cmd[k + 2] if cmd[k + 1] == "--" and k + 2 < len(cmd) else cmd[k + 1]   # bash -c -- 'text'
     return None
 
 
 def publish_hit(text, patterns, depth=0):
     """Does any command of `text` run a publish pattern? A pattern matches a command when its first word is the command word
-    (after VAR=value, env / nohup / timeout / sudo … wrappers and their options; case-sensitive, a script path in its
-    normalised form) and each later pattern word appears, in order, among the command's later words: `git push` matches
-    `git -C dir push origin`, `python send.py` matches `python -u send.py`. The string given to sh|bash|zsh|dash -c and to
-    eval is checked the same way, to depth 2. `echo "python send.py"` is not a match: its command word is echo. A word that
-    only happens to appear later (git log --grep push) is an over-deny, which costs one turn."""
+    (after VAR=value, env / nohup / timeout / winpty / sudo … wrappers and their options; by base name, so /usr/bin/git and
+    git.exe are git, and the python family is one name) and each later pattern word appears, in order, among the command's later
+    words: `git push` matches `git -C dir push origin`, `python send.py` matches `python -u C:/proj/send.py` (a word that names a
+    file matches by the end of its path, see word_eq). The string given to sh|bash|zsh|dash|ksh -c and to eval, and the body of
+    each $( … ) and backtick pair, is checked the same way, to depth 2. `echo "python send.py"` is not a match: its command
+    word is echo. A word that only happens to appear later (git log --grep push) is an over-deny, which costs one turn."""
     pats = []
     for p in patterns:
         segs = flex_split(p)
-        pw = [word_norm(w) for w in (segs[0] if segs else [])]
-        if pw:
-            pats.append(pw)
-    if not pats:
-        return False
+        if segs and segs[0]:
+            pats.append(segs[0])
+    return bool(pats) and _hit(text, pats, depth)
+
+
+def _hit(text, pats, depth):
     for seg in command_segments(text):
         cmd = seg[command_start(seg):]
         if not cmd:
             continue
-        head = word_norm(cmd[0])
-        rest = None
         for pw in pats:
-            if head != pw[0]:
+            if not head_eq(pw[0], cmd[0]):
                 continue
-            if rest is None:
-                rest = [word_norm(w) for w in cmd[1:]]
             k = 0
-            for w in rest:
-                if k < len(pw) - 1 and w == pw[k + 1]:
+            for w in cmd[1:]:
+                if k < len(pw) - 1 and word_eq(pw[k + 1], w):
                     k += 1
             if k == len(pw) - 1:
                 return True
         inner = shell_string(cmd)
-        if inner and depth < 2 and publish_hit(inner, patterns, depth + 1):
+        if inner and depth < 2 and _hit(inner, pats, depth + 1):
             return True
+    if depth < 2:
+        for body in subst_bodies(text):
+            if _hit(body, pats, depth + 1):
+                return True
     return False
 
 
@@ -557,10 +783,13 @@ def fresh_gate(data, text):
 
 
 def deny(why):
+    msg = f"bash-guard: {why}"
+    if len(msg) > MAX_REASON:
+        msg = msg[:MAX_REASON - 1] + "…"   # a whole reason, ellipsis included, is at most MAX_REASON characters
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
-        "permissionDecisionReason": f"bash-guard: {why}"}}))
+        "permissionDecisionReason": msg}}))
 
 
 def main():
