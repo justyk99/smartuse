@@ -439,6 +439,16 @@ make("d_match_pattern_dir_path_posix", ex(DENY, has=[SRC]), cmd="python /home/u/
 make("d_match_pattern_python3_head", ex(DENY, has=[SRC]), cmd="python send.py", adp=adapter(publish="python3 send.py"), tr=lambda P: base(P))
 make("d_match_pattern_py_head", ex(DENY, has=[SRC]), cmd="python3.11 C:/work/send.py", adp=adapter(publish="py send.py"), tr=lambda P: base(P))
 make("d_match_pattern_git_exe_head", ex(DENY, has=[SRC]), cmd="git push", adp=adapter(publish="git.exe push"), tr=lambda P: base(P))
+# one letter as the first part of a path is a drive: /c/proj/send.py and C:/proj/send.py are the same file, whichever side holds which spelling
+make("d_match_msys_drive_command_drive_pattern", ex(DENY, has=[SRC]), cmd="python /c/proj/send.py", adp=adapter(publish="python C:/proj/send.py"), tr=lambda P: base(P))
+make("d_match_msys_drive_command_backslash_pattern", ex(DENY, has=[SRC]), cmd='python "\\c\\proj\\send.py"', adp=adapter(publish="python C:/proj/send.py"), tr=lambda P: base(P))
+make("d_match_drive_command_msys_pattern", ex(DENY, has=[SRC]), cmd="python C:/proj/send.py", adp=adapter(publish="python /c/proj/send.py"), tr=lambda P: base(P))
+make("d_match_backslash_drive_command_msys_pattern", ex(DENY, has=[SRC]), cmd='python "C:\\proj\\send.py"', adp=adapter(publish="python /c/proj/send.py"), tr=lambda P: base(P))
+make("d_match_msys_drive_upper_letter", ex(DENY, has=[SRC]), cmd="python /C/proj/send.py", adp=adapter(publish="python c:/proj/send.py"), tr=lambda P: base(P))
+make("d_match_posix_dir_pattern_for_a_posix_dir", ex(DENY, has=[SRC]), cmd="python /a/proj/send.py", adp=adapter(publish="python a/proj/send.py"), tr=lambda P: base(P))
+make("a_match_two_letter_dir_is_not_a_drive", ex(ALLOW), cmd="python /cc/proj/send.py", adp=adapter(publish="python C:/proj/send.py"), tr=lambda P: base(P))
+make("a_match_two_letter_dir_is_not_a_drive_reverse", ex(ALLOW), cmd="python C:/proj/send.py", adp=adapter(publish="python /cc/proj/send.py"), tr=lambda P: base(P))
+make("a_match_other_drive", ex(ALLOW), cmd="python /d/proj/send.py", adp=adapter(publish="python C:/proj/send.py"), tr=lambda P: base(P))
 make("d_match_all_opened_still_allows", ex(ALLOW), cmd="python C:/work/send.py", tr=lambda P: reads_all(base(P), P))
 # allow: other scripts, other names, other families
 for nm, cm in (("other_script", "python other.py"), ("other_script_deeper", "python tools/other/send2.py"), ("other_script_abs", "python C:/work/other.py"),
@@ -467,6 +477,23 @@ for nm, cm in (("dquote_subst_other", 'echo "$(python other.py)"'), ("backtick_o
                ("xargs_l_other", "echo x | xargs -l python other.py")):
     make("a_gap_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
 make("a_gap_subst_all_opened", ex(ALLOW), cmd='echo "$(python send.py)"', tr=lambda P: reads_all(base(P), P))
+# a quoted-delimiter heredoc inside $( … ) is text, not commands (Claude Code's own commit and PR form); one a shell runs still is code
+EOFQ = "<<'EOF'"
+COMMIT = 'git commit -m "$(cat ' + EOFQ + '\n%s\n\nCo-Authored-By: Test <t@example.com>\nEOF\n)"'
+PRBODY = 'gh pr create --title "demo" --body "$(cat ' + EOFQ + '\n## Summary\n%s\n\n## Test plan\n- ran it\nEOF\n)"'
+for nm, cm in (("commit_line_is_the_publish_command", COMMIT % "fix the parser\ngit push\nand more"),
+               ("commit_backtick_span_names_the_script", COMMIT % "run `python send.py` after the build"),
+               ("commit_apostrophes_and_parentheses", COMMIT % "don't (really) break it, 1) then\ngit push\nit's `python send.py` fine"),
+               ("pr_body_line_is_the_publish_command", PRBODY % "- git push\ngit push origin main"),
+               ("pr_body_backtick_span", PRBODY % "- `python send.py` stays manual")):
+    make("a_heredoc_text_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("plain_subst_still_denies", 'echo "$(python send.py)"'),
+               ("shell_heredoc_in_subst", 'echo "$(bash ' + EOFQ + '\npython send.py\nEOF\n)"'),
+               ("command_after_the_heredoc_in_subst", 'echo "$(cat ' + EOFQ + '\ntext\nEOF\npython send.py)"'),
+               ("commit_then_a_real_publish", COMMIT % "fix the parser" + " && git push"),
+               ("commit_with_subst_publish_in_the_message_command", 'git commit -m "$(python send.py)"'),
+               ("pr_then_a_real_publish", PRBODY % "- text" + "; python send.py")):
+    make("d_heredoc_text_" + nm, ex(DENY, has=[SRC]), cmd=cm, tr=lambda P: base(P))
 
 # 3: brackets in the project path are only a name; a relative source with wildcard characters that is a literal file is that file
 BR = "3 of 3 sources not opened since the last compaction"
@@ -486,6 +513,20 @@ make("d_literal_bracket_file_unread", ex(DENY, has=["1 of 2 sources not opened",
      adp=adapter(sources=", ".join(LIT)), files=LIT, tr=lambda P: base(P).read(P + "/" + LIT[0]))
 make("d_literal_bracket_file_missing", ex(DENY, has=["source pattern matches no file: jobs/demo/photo[2].jpg."]), cmd="python send.py",
      adp=adapter(sources="jobs/demo/photo[2].jpg"), files=LIT, tr=lambda P: base(P))
+# a file named like the pattern is a source beside whatever the wildcards match (lit[1].pdf is not hidden by lit1.pdf)
+BOTH = ["lit[1].pdf", "lit1.pdf"]
+make("d_literal_and_wildcard_match_both_required", ex(DENY, has=["2 of 2 sources not opened", "lit1.pdf", "lit[1].pdf"]), cmd="python send.py",
+     adp=adapter(sources="lit[1].pdf"), files=BOTH, tr=lambda P: base(P))
+make("d_literal_opened_wildcard_match_not", ex(DENY, has=["1 of 2 sources not opened", "lit1.pdf."], no=["lit[1].pdf"]), cmd="python send.py",
+     adp=adapter(sources="lit[1].pdf"), files=BOTH, tr=lambda P: base(P).read(P + "/lit[1].pdf"))
+make("d_wildcard_match_opened_literal_not", ex(DENY, has=["1 of 2 sources not opened", "lit[1].pdf."], no=["lit1.pdf"]), cmd="python send.py",
+     adp=adapter(sources="lit[1].pdf"), files=BOTH, tr=lambda P: base(P).read(P + "/lit1.pdf"))
+make("a_literal_and_wildcard_match_both_opened", ex(ALLOW), cmd="python send.py", adp=adapter(sources="lit[1].pdf"), files=BOTH,
+     tr=lambda P: base(P).read(P + "/lit[1].pdf").read(P + "/lit1.pdf"))
+make("d_only_the_wildcard_match_exists", ex(DENY, has=["1 of 1 sources not opened", "lit1.pdf."]), cmd="python send.py",
+     adp=adapter(sources="lit[1].pdf"), files=["lit1.pdf"], tr=lambda P: base(P))
+make("d_only_the_literal_exists", ex(DENY, has=["1 of 1 sources not opened", "lit[1].pdf."], no=["matches no file"]), cmd="python send.py",
+     adp=adapter(sources="lit[1].pdf"), files=["lit[1].pdf"], tr=lambda P: base(P))
 make("a_glob_class_still_a_glob", ex(ALLOW), cmd="python send.py", adp=adapter(sources="jobs/demo/photos/[ab].jpg"), tr=lambda P: reads_all(base(P), P))
 make("a_glob_skips_hidden_names", ex(ALLOW), cmd="python send.py", files=FILES + ["jobs/demo/photos/.h.jpg"], tr=lambda P: reads_all(base(P), P))
 make("d_glob_dot_pattern_reaches_hidden_names", ex(DENY, has=["1 of 1 sources not opened", "jobs/demo/photos/.h.jpg."]), cmd="python send.py",

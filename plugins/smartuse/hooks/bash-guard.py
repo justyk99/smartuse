@@ -377,7 +377,7 @@ def expand_sources(project, patterns):
     local path is refused by its text before anything touches the file system (the adapter can come with a cloned repo, and a
     hook must not reach the network). A pattern relative to the project dir is walked without following links (walk_pattern;
     the project dir itself is never read as a pattern, so brackets in its name are only a name) and a link on the way refuses
-    it; a relative value with wildcard characters that stands for nothing is tried once as a literal file name. An absolute
+    it; a relative value with wildcard characters also names a literal file (when it exists, it is required beside the wildcard matches). An absolute
     source is one literal file, owner-written, and a link on an absolute path IS followed. A pattern that matches no file is a
     problem of its own (a typo must reach the owner); so is a set larger than MAX_SOURCES."""
     for pat in patterns:
@@ -392,8 +392,9 @@ def expand_sources(project, patterns):
         else:
             comps = [c for c in p.replace("\\", "/").split("/") if c not in ("", ".")]
             found, link = walk_pattern(project, comps, True)
-            if not found and not link and MAGIC.search(p):
-                found, link = walk_pattern(project, comps, False)
+            if not link and MAGIC.search(p):   # a file named like the pattern is a source too, beside whatever the wildcards match
+                lit, link = walk_pattern(project, comps, False)
+                found = found + lit
             if link:
                 return None, clip(pat) + " passes through a link (" + clip(link) + "); sources must be plain local files." + FIX
             found.sort()
@@ -572,8 +573,15 @@ def names_file(w):
 
 
 def path_parts(w):
-    """The components of a path word, compared case-insensitively: backslashes read as /, empty parts and . dropped."""
-    return [x.lower() for x in w.replace("\\", "/").split("/") if x not in ("", ".")]
+    """The readings of a path word as component lists, compared case-insensitively: backslashes read as /, empty parts and .
+    dropped. A word that starts with one letter as its first part (/c/proj, \\c\\proj) has a second reading with that letter as
+    a drive (c:, proj), so /c/proj/send.py and C:/proj/send.py are the same file."""
+    s = w.replace("\\", "/")
+    out = [[x.lower() for x in s.split("/") if x not in ("", ".")]]
+    m = re.match(r"/([A-Za-z])/", s)
+    if m:
+        out.append([m.group(1).lower() + ":"] + out[0][1:])
+    return out
 
 
 def word_eq(p, c):
@@ -581,8 +589,7 @@ def word_eq(p, c):
     p's (send.py = C:/proj/send.py = ./send.py; tools/send.py = C:\\p\\tools\\send.py, not send.py or xtools/send.py); any other
     word must be equal. No file system call: an unrelated script of the same name is an over-deny, which costs one turn."""
     if names_file(p):
-        pp, cp = path_parts(p), path_parts(c)
-        return bool(pp) and len(cp) >= len(pp) and cp[-len(pp):] == pp
+        return any(pp and len(cp) >= len(pp) and cp[-len(pp):] == pp for pp in path_parts(p) for cp in path_parts(c))
     return p == c
 
 
@@ -619,6 +626,17 @@ def _bt_end(t, i):
     return n
 
 
+HEREDOC_OPEN = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1")
+
+
+def _heredoc_end(t, i):
+    """t[i:] starts with <<: the index just after the terminator line of a heredoc opened there, or i + 2 when there is none."""
+    m = HEREDOC_OPEN.match(t, i)
+    nl = t.find("\n", m.end()) if m else -1
+    e = re.compile(r"\n[ \t]*" + re.escape(m.group(2)) + r"[ \t]*(?=\n|$)").search(t, nl) if nl >= 0 else None
+    return e.end() if e else i + 2
+
+
 def _sub_end(t, i, depth=0):
     """t[i:] starts just after "$(": the index of its matching ")", or len(t). Quotes, backticks and nested $( ) are respected."""
     n, par, dq = len(t), 1, False
@@ -638,6 +656,8 @@ def _sub_end(t, i, depth=0):
             i = _bt_end(t, i + 1)
         elif c == "$" and t.startswith("$(", i) and depth < 20:
             i = _sub_end(t, i + 2, depth + 1)
+        elif c == "<" and not dq and t.startswith("<<", i) and not t.startswith("<<<", i):
+            i = max(i, _heredoc_end(t, i) - 1)   # a heredoc's lines are text: quotes and parentheses in them do not count
         elif not dq:
             if c == "(":
                 par += 1
@@ -752,7 +772,7 @@ def _hit(text, pats, depth):
             return True
     if depth < 2:
         for body in subst_bodies(text):
-            if _hit(body, pats, depth + 1):
+            if _hit(strip_heredocs(body), pats, depth + 1):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
                 return True
     return False
 
