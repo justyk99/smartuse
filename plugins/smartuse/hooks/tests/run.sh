@@ -177,4 +177,41 @@ import json; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "e
 PY
 t0=$(date +%s); out=$(bash "$H/py.sh" "$G" < "$BIG"); t1=$(date +%s); rm -f "$BIG"
 if [ -z "$out" ] && [ $((t1 - t0)) -lt 10 ]; then echo "PASS allow  a 64 KB command that matches no rule, in $((t1 - t0)) s (hook timeout 10 s)"; else echo "FAIL a 64 KB command that matches no rule: ${t1}-${t0} = $((t1 - t0)) s (limit 10), output '${out:0:60}'"; fail=1; fi
+# --- the fresh-source gate (docs/notes/recall-design.md, F1), text side: which commands count as a publish. The project below lists
+#     sources and publish patterns but the event names no transcript, so a command that IS a publish cannot be verified and is denied
+#     ("fresh-source"); one that is not a publish is allowed. The transcript side is tests/fresh-gate-test.sh.
+FP=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-fresh-run.XXXXXX") && [ -d "$FP" ] || { echo "FAIL could not create a temp dir"; exit 1; }
+fwp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+mkdir -p "$FP/with/.claude" "$FP/with/jobs/demo" "$FP/none/.claude"
+printf 'sources: jobs/demo/plan.pdf\npublish: python send.py, git push\npublish_tools: mcp__*__file_upload\n' > "$FP/with/.claude/smartuse.local.md"
+printf 'x' > "$FP/with/jobs/demo/plan.pdf"
+printf 'publish: python send.py\n' > "$FP/none/.claude/smartuse.local.md"
+fcheck() { # $1 = deny|allow, $2 = command (a tool name when $4 is "tool"), $3 = project (with|none)
+  out=$(py - "$2" "${4:-Bash}" <<'PY' | env CLAUDE_PROJECT_DIR="$(fwp "$FP/$3")" bash "$H/py.sh" "$G"
+import json,sys; ti = {"command": sys.argv[1]} if sys.argv[2] == "Bash" else {}
+print(json.dumps({"tool_name": "Bash" if sys.argv[2] == "Bash" else sys.argv[1], "tool_input": ti, "cwd": "."}))
+PY
+)
+  if [ "$1" = deny ]; then case "$out" in *"bash-guard: fresh-source"*) got=deny;; "") got=allow;; *) got=other;; esac; else got=$([ -z "$out" ] && echo allow || echo deny); fi
+  if [ "$got" = "$1" ]; then echo "PASS $1  fresh: ${2:0:60}"; else echo "FAIL expected $1 got $got  fresh: ${2:0:60} -> ${out:0:100}"; fail=1; fi
+}
+fcheck deny  'python send.py' with
+fcheck deny  'cd out && git push origin main' with
+fcheck deny  'FOO=1 python send.py now' with
+fcheck deny  'python send.py | tee send.log' with
+fcheck deny  'false || python send.py' with
+fcheck deny  $'bash <<\'EOF\'\npython send.py\nEOF' with
+fcheck deny  'mcp__demo__file_upload' with tool
+fcheck allow 'echo "python send.py"' with
+fcheck allow $'cat > notes.txt <<\'EOF\'\npython send.py\nEOF' with
+fcheck allow 'python send.pyc' with
+fcheck allow 'git status' with
+fcheck allow 'mcp__demo__list_files' with tool
+fcheck allow 'python send.py' none
+out=$(py - <<'PY' | env CLAUDE_PROJECT_DIR="$(fwp "$FP/with")" bash "$H/py.sh" "$G"
+import json; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "sudo python send.py"}}))
+PY
+)
+case "$out" in *"bash-guard: sudo"*) echo "PASS deny  fresh: a RULES match is decided before the publish gate";; *) echo "FAIL a RULES match must keep its own reason -> ${out:0:100}"; fail=1;; esac
+case "$FP" in */smartuse-fresh-run.*) rm -rf "$FP";; esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

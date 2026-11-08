@@ -43,6 +43,8 @@ jobs:
         run: bash plugins/smartuse/hooks/tests/watch-test.sh
       - name: wait gate regression
         run: bash plugins/smartuse/hooks/tests/wait-gate-test.sh
+      - name: fresh-source gate regression
+        run: bash plugins/smartuse/hooks/tests/fresh-gate-test.sh
       - name: recall regression
         run: bash plugins/smartuse/hooks/tests/recall-test.sh
       - name: A/B runner dry run (fake claude, spends nothing)

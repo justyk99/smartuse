@@ -13,6 +13,16 @@
         ]
       },
       {
+        "matcher": "mcp__.*(upload|send|publish|post|share|submit).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {
