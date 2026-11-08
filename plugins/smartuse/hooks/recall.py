@@ -17,6 +17,10 @@ PreCompact (F2): prints instructions for the summary: custom instructions first 
 paths verbatim", "keep these owner prompts verbatim" (the last 8, oldest first), "mark anything not re-verified as from summary".
 SessionStart `compact` (F2): the squeeze time and "The summary is not a source."; with `sources:` also the list ("none counts as opened
 now; open each before any output") and the owner prompts. Without `sources:` just those two lines. The state file counts the squeeze.
+The adapter can arrive with a cloned repo, so `handoff:` is read only when it is a relative path with no `..` part, no drive letter and no
+leading separator (a //host/share or \\\\host\\share path is refused by its text, before any filesystem call: no network touch), whose
+resolved path (links followed) is a regular file inside the project; else one line says it is not read. A `.git` file whose gitdir:
+starts with two separators gets no stale check.
 SessionStart `startup` / `clear` / `resume` (F3): with `handoff:` its first 15 lines, its modified time and age, and a stale line when
 the repo's last commit (the last entry of .git/logs/HEAD, a file read) is newer than the note; on `resume` with a compaction in the
 transcript "resumed; the compacted part is a summary, not a source"; with `sources:` the list. Neither key: nothing is printed.
@@ -307,6 +311,8 @@ def last_commit_epoch(project):
             g = base / ".git"
             if g.is_file():
                 m = re.match(r"gitdir:\s*(.+)", g.read_text(encoding="utf-8").strip())
+                if m and is_net_path(m.group(1).strip()):
+                    return None   # a git dir on a network share: no stale check, the share is never touched (a local absolute target is fine: worktrees point outside their folder)
                 gd = pathlib.Path(m.group(1).strip()) if m else None
                 g = (gd if gd.is_absolute() else base / gd) if gd else None
             elif not g.is_dir():
@@ -334,12 +340,44 @@ def age(seconds):
     return "under a minute" if s < 60 else f"{s // 60}m" if s < 3600 else f"{s // 3600}h" if s < 86400 else f"{s // 86400}d"
 
 
+def is_net_path(s):
+    """True for text that starts with two path separators (//host/share, \\\\host\\share, //?/..., \\\\?\\...). Decided on the text alone,
+    before any filesystem call: on Windows merely looking at such a path can send the user's credentials to that host."""
+    s = str(s or "")
+    return len(s) >= 2 and s[0] in "/\\" and s[1] in "/\\"
+
+
+def handoff_target(project, rel):
+    """-> (Path of the file, "") when `handoff:` names a regular file inside the project, else (None, "denied") or, for a path
+    inside the project that does not exist, (None, "missing"). The adapter can come with a cloned repo, so the value is checked as
+    text first (relative, no `..` part, no drive letter, no leading separator, so no network path), and only then on disk: the
+    resolved path (links followed) must lie inside the resolved project dir."""
+    s = str(rel)
+    if (not s or "\x00" in s or is_net_path(s) or s[0] in "/\\" or re.match(r"[A-Za-z]:", s) or os.path.isabs(s)
+            or ".." in re.split(r"[/\\]+", s)):
+        return None, "denied"
+    try:
+        base = os.path.realpath(str(project))
+        real = os.path.realpath(os.path.join(base, s))
+        nbase = os.path.normcase(base)
+        if os.path.commonpath([nbase, os.path.normcase(real)]) != nbase:
+            return None, "denied"
+        if os.path.isfile(real):
+            return pathlib.Path(real), ""
+        return None, ("denied" if os.path.exists(real) else "missing")
+    except (ValueError, OSError):
+        return None, "denied"
+
+
 def handoff_lines(project, rel):
     """The printed lines for `handoff:`: the path, modified time and age, the first HANDOFF_LINES lines, a stale line when the
-    repo's last commit is newer than the note. A missing file is said, not hidden."""
-    p = pathlib.Path(str(native_path(rel)))
-    if not p.is_absolute():
-        p = project / p
+    repo's last commit is newer than the note. A missing file is said, not hidden; a value that is not a file inside the project
+    is named and never read."""
+    p, why = handoff_target(project, rel)
+    if p is None:
+        if why == "missing":
+            return [f"Handoff: {rel} was not found or cannot be read."]
+        return [f"handoff: {one_line(rel, 200)} is not read: it must be a file inside the project"]
     try:
         mtime = p.stat().st_mtime
         with open(p, "rb") as fh:

@@ -179,6 +179,17 @@ if mode == "imports":      # imports <recall.py>: stdlib only, no subprocess, no
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
     allowed = {"collections", "datetime", "json", "os", "pathlib", "re", "sys", "time"}
     print("ok" if set(mods) <= allowed and not calls else "imports %s, process calls %s" % (mods, calls))
+elif mode == "timed":      # timed <recall.py> <event file>: runs the hook in this interpreter and prints its output, then ELAPSED_MS=<the hook's own time, without the interpreter start>
+    import io, runpy, time
+    sys.stdin = io.TextIOWrapper(io.BytesIO(open(sys.argv[3], "rb").read()), encoding="utf-8")
+    real, sys.stdout = sys.stdout, io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    t0 = time.perf_counter()
+    runpy.run_path(sys.argv[2], run_name="__main__")
+    ms = int((time.perf_counter() - t0) * 1000)
+    sys.stdout.flush()
+    got = sys.stdout.buffer.getvalue().decode("utf-8", "replace")
+    sys.stdout = real
+    sys.stdout.write(got + "\nELAPSED_MS=%d\n" % ms)
 elif mode == "hooks":      # hooks <hooks.json>: the PreCompact entry and the second SessionStart command
     d = json.load(open(sys.argv[2], encoding="utf-8"))
     want = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/recall.py"'
@@ -202,6 +213,12 @@ run() { # $1 = the event JSON on stdin -> OUT RC ERR (the hook's stdout, exit co
 }
 runf() { # $1 = a file holding the event JSON
   OUT=$(CLAUDE_PROJECT_DIR="$CPDIR" py "$HOOK" < "$1" 2>"$D/err"; echo "rc=$?"); RC=${OUT##*rc=}; OUT=${OUT%rc=*}; OUT=${OUT%$'\n'}; ERR=$(cat "$D/err")
+}
+NETMAX=3000   # ms: the hook's own time (the interpreter start is not in it, and it takes seconds on a loaded laptop); touching a dead share took 27-34 s (SMB timeout)
+runt() { # $1 = the event JSON -> OUT RC ERR as run, and MS = the hook's own time in ms (see chk.py timed)
+  printf '%s' "$1" > "$D/ev-timed.json"
+  OUT=$(CLAUDE_PROJECT_DIR="$CPDIR" py "$D/chk.py" timed "$HOOK" "$D/ev-timed.json" 2>"$D/err"; echo "rc=$?"); RC=${OUT##*rc=}; OUT=${OUT%rc=*}; ERR=$(cat "$D/err")
+  MS=${OUT##*ELAPSED_MS=}; MS=${MS%%[!0-9]*}; MS=${MS:-999999}; OUT=${OUT%ELAPSED_MS=*}; OUT=${OUT%$'\n'}; OUT=${OUT%$'\n'}
 }
 ev() { # $1 event, $2 source or -, $3 transcript case or -, $4 more JSON fields (start with a comma)
   local s="" t=""
@@ -404,8 +421,48 @@ printf 'token sk-xxxxxxxxxxxxxxxxxxxx for yk@example.test\n' > "$D/proj/docs/SEC
 adapter "handoff: docs/SECRET.md"; run "$(ev SessionStart startup -)"
 lacks "handoff: its lines are scrubbed" "sk-xxxxxxxx"
 has "handoff: the e-mail in it is masked" "[email]"
+
+# --- the handoff must be a file inside the project: a cloned repo can ship its own adapter, so a value that points at another file
+# (absolute, up and out, a network share, a directory, a link out) is named and never read; a network path is never even stat'ed
+NR="is not read: it must be a file inside the project"
+printf 'OUTSIDE-LINE not part of the project\n' > "$D/outside.md"
 adapter "handoff: $(wp "$D/proj/docs/STATUS.md")"; run "$(ev SessionStart startup -)"
-has "handoff: an absolute path works" "HANDOFF-LINE-01"
+has "handoff: an absolute path is not read" "$NR"
+lacks "handoff: an absolute path prints none of the file" "HANDOFF-LINE-01"
+adapter "handoff: ../outside.md"; run "$(ev SessionStart startup -)"
+has "handoff: a path that leaves the project is not read" "$NR"
+lacks "handoff: ../outside.md prints none of the file" "OUTSIDE-LINE"
+adapter "handoff: docs/../docs/STATUS.md"; run "$(ev SessionStart startup -)"
+has "handoff: a .. part is refused even when the path ends up inside" "$NR"
+adapter "handoff: //192.0.2.7/share/STATUS.md"; runt "$(ev SessionStart startup -)"
+has "handoff: a //host/share path is not read" "$NR"
+[ "$MS" -le $NETMAX ] && ok "handoff: a //host/share path is decided at once ($MS ms, nothing touched the network)" || ko "handoff: //host/share took $MS ms"
+cat > "$D/proj/.claude/smartuse.local.md" <<'EOF'
+handoff: \\192.0.2.7\share\STATUS.md
+EOF
+runt "$(ev SessionStart startup -)"
+has "handoff: a \\\\host\\share path is not read" "$NR"
+[ "$MS" -le $NETMAX ] && ok "handoff: a \\\\host\\share path is decided at once ($MS ms)" || ko "handoff: \\\\host\\share took $MS ms"
+cat > "$D/proj/.claude/smartuse.local.md" <<'EOF'
+handoff: \\?\C:\demo\STATUS.md
+EOF
+run "$(ev SessionStart startup -)"
+has "handoff: a \\\\?\\ device path is not read" "$NR"
+adapter "handoff: docs"; run "$(ev SessionStart startup -)"
+has "handoff: a directory is not read" "$NR"
+case "$OSTYPE" in
+  msys*|cygwin*) ok "(skipped on Windows: no symlinks)";;
+  *) ln -s "$D/outside.md" "$D/proj/docs/LINK.md"; adapter "handoff: docs/LINK.md"; run "$(ev SessionStart startup -)"
+     has "handoff: a link inside the project that points outside is not read" "$NR"
+     lacks "handoff: the link's target is not printed" "OUTSIDE-LINE";;
+esac
+# a worktree's .git file may name a git dir outside its folder (a local absolute path stays allowed, the stale test above), never a network one
+mkdir -p "$D/proj3/.claude" "$D/proj3/docs"; cp "$D/proj/docs/STATUS.md" "$D/proj3/docs/STATUS.md"; touch -t 202001010000 "$D/proj3/docs/STATUS.md"
+printf 'gitdir: //192.0.2.7/x\n' > "$D/proj3/.git"; printf 'handoff: docs/STATUS.md\n' > "$D/proj3/.claude/smartuse.local.md"
+CPDIR=$(wp "$D/proj3"); runt "$(ev SessionStart startup -)"; CPDIR="$PW"
+has "gitdir: //host/x: the handoff is still printed" "HANDOFF-LINE-01"
+lacks "gitdir: //host/x gives no stale line" "stale:"
+[ "$MS" -le $NETMAX ] && ok "gitdir: //host/x is skipped at once ($MS ms, nothing touched the network)" || ko "gitdir //host/x took $MS ms"
 
 adapter $'sources: jobs/demo/plan.pdf, photos/a.jpg\nhandoff: docs/STATUS.md'; run "$(ev SessionStart startup -)"
 has "startup: sources are listed" "jobs/demo/plan.pdf"
