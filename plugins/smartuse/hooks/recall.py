@@ -56,6 +56,7 @@ INJECTED = ("<task-notification>", "<system-reminder>", "<local-command-", "<com
 GATE_WORDS = re.compile(r"upload|send|publish|post|share|submit")   # the words of the gate's PreToolUse matcher mcp__.*(upload|send|publish|post|share|submit).*
 SCRUB_TOKEN = re.compile(r"\b(?:sk-|ghp_|gho_|github_pat_|xox[abpr]-|AKIA|AIza)[A-Za-z0-9_-]{8,}")
 SCRUB_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+SCRUB_DIGITS = re.compile(r"\d{8,}")   # the full rule, for text
 SCRUB_NUMBER = re.compile(r"(?<![A-Za-z0-9_/\\.\-])\d{8,}(?![A-Za-z0-9_/\\\-]|\.[A-Za-z0-9])")   # a free-standing run only: a digit run inside a file name or path (a camera or export name, a dated folder) is part of a path the owner asked to keep verbatim
 CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
 
@@ -225,15 +226,18 @@ def is_human(r, text, kind, turn):
     return bool(t) and not t.startswith(INJECTED)
 
 
-def scrub(text):
-    """Token prefixes -> [secret], e-mail addresses -> [email], digit runs of 8 or more -> [number]."""
-    return SCRUB_NUMBER.sub("[number]", SCRUB_EMAIL.sub("[email]", SCRUB_TOKEN.sub("[secret]", text)))
+def scrub(text, path=False):
+    """Token prefixes -> [secret], e-mail addresses -> [email], digit runs of 8 or more -> [number]. Two digit rules: text (the
+    owner's prompts, handoff lines, custom instructions) masks every run of 8 or more digits, whatever stands next to it (an
+    account code, a number with a hyphen); a path value (a source path, the handoff's name) masks only a free-standing run, so a
+    file name with a date or a counter in it prints intact."""
+    return (SCRUB_NUMBER if path else SCRUB_DIGITS).sub("[number]", SCRUB_EMAIL.sub("[email]", SCRUB_TOKEN.sub("[secret]", text)))
 
 
-def one_line(text, n):
-    """Scrubbed, control characters out, whitespace collapsed to single spaces, cut at n characters (the cut comes last, so a
-    token is masked whole before it can be cut in half)."""
-    s = " ".join(CTRL.sub(" ", scrub(str(text))).split())
+def one_line(text, n, path=False):
+    """Scrubbed (see scrub), control characters out, whitespace collapsed to single spaces, cut at n characters (the cut comes last,
+    so a token is masked whole before it can be cut in half)."""
+    s = " ".join(CTRL.sub(" ", scrub(str(text), path)).split())
     return s if len(s) <= n else s[:n - 1].rstrip() + "…"
 
 
@@ -461,7 +465,7 @@ def handoff_lines(project, rel):
     if p is None:
         if why == "missing":
             return [f"Handoff: {rel} was not found or cannot be read."]
-        return [f"handoff: {one_line(rel, 200)} is not read: it must be a file inside the project"]
+        return [f"handoff: {one_line(rel, 200, True)} is not read: it must be a file inside the project"]
     try:
         mtime = p.stat().st_mtime
         with open(p, "rb") as fh:
@@ -481,7 +485,7 @@ def handoff_lines(project, rel):
 # ---------------------------------------------------------------- output
 
 def emit(lines):
-    text = scrub("\n".join(lines))[:CAP]
+    text = scrub("\n".join(lines), path=True)[:CAP]   # the last pass: tokens and e-mail addresses everywhere, digits by the narrow rule (the pieces were scrubbed where they were added; this never re-masks a path, and still catches what slipped through)
     try:
         sys.stdout.buffer.write((text + "\n").encode("utf-8", "replace"))
         sys.stdout.buffer.flush()
@@ -504,7 +508,7 @@ def pre_compact(data, project, keys):
     lines.append("smartuse recall: write the summary so the next turn can check it against the real files.")
     if keys["sources"]:
         lines.append("Keep these source paths verbatim:")
-        lines += ["  " + one_line(s, 300) for s in keys["sources"]]
+        lines += ["  " + one_line(s, 300, True) for s in keys["sources"]]
     lines += quote_prompts(scan_safe(data)["prompts"], "Keep these owner prompts verbatim (oldest first):")
     lines.append('Mark anything you did not re-verify against a source as "from summary".')
     emit(lines)
@@ -535,7 +539,7 @@ def session_start(data, project, keys):
         lines = [f"smartuse recall: squeezed at {squeeze_time(s['squeezed_at'])}.", "The summary is not a source."]
         if keys["sources"]:
             lines.append("Sources (none counts as opened now; open each before any output):")
-            lines += ["  " + one_line(x, 300) for x in keys["sources"]]
+            lines += ["  " + one_line(x, 300, True) for x in keys["sources"]]
             lines += quote_prompts(s["prompts"], "Owner prompts, verbatim (oldest first):")
             lines += notes(keys)
         count_squeeze(state_dir(project), keys)
@@ -550,7 +554,7 @@ def session_start(data, project, keys):
             lines.append("resumed; the compacted part is a summary, not a source")
         if keys["sources"]:
             lines.append("Sources (open each before any output):")
-            lines += ["  " + one_line(x, 300) for x in keys["sources"]]
+            lines += ["  " + one_line(x, 300, True) for x in keys["sources"]]
             lines += notes(keys)
         emit(lines)
 

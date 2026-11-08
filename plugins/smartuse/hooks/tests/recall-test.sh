@@ -157,7 +157,7 @@ t.save("secret")
 
 # digits: free-standing digit runs are masked, runs inside a name or a path are kept
 t = T()
-t.human("call 0234567891 now, acct 1234567892. also +60198765432 and ref-12345678 and photos/20261108.jpg and photos/IMG_20261108_140233.jpg")
+t.human("call 0234567891 now, acct 1234567892. also +60198765432. IBAN MY12345678901234, acct ACC12345678, mobile 011-23456789, ref-12345678")
 t.save("digits")
 
 # big: about 2 MB of records, the last prompt at the end
@@ -353,15 +353,31 @@ has "scrub: a run after a plus sign is masked" "+[number]"
 lacks "scrub: the three runs are gone" "0234567891"
 lacks "scrub: the sentence-end run is gone" "1234567892"
 lacks "scrub: the phone-style run is gone" "60198765432"
-has "scrub: a run after a letter and a hyphen is part of a name and stays" "ref-12345678"
-has "scrub: a dated file name in a folder stays" "photos/20261108.jpg"
-has "scrub: a camera-style file name stays" "photos/IMG_20261108_140233.jpg"
-adapter "sources: photos/IMG_20261108_140233.jpg, exports/2026110812.csv"; fresh
+# in the owner's text every run of 8 or more digits is masked, whatever stands next to it (an account code, a hyphenated number)
+has "scrub: a run after capital letters (an IBAN) is masked in a prompt" "IBAN MY[number]"
+has "scrub: a run after an account prefix is masked in a prompt" "acct ACC[number]"
+has "scrub: a run after a hyphen is masked in a prompt" "mobile 011-[number]"
+has "scrub: a run after a word and a hyphen is masked in a prompt" "ref-[number]"
+lacks "scrub: the IBAN digits are gone" "12345678901234"
+lacks "scrub: the account digits are gone" "ACC12345678"
+lacks "scrub: the hyphenated digits are gone" "23456789"
+# in a path value only a free-standing run is masked, so a name with a date or a counter prints intact
+adapter "sources: photos/IMG_20261108_140233.jpg, exports/2026110812.csv, photos/20261108.jpg, ref-12345678"; fresh
 run "$(ev PreCompact - main)"
 has "scrub: PreCompact prints a source path with digits in its name intact" "photos/IMG_20261108_140233.jpg"
 has "scrub: PreCompact keeps a dated export name intact" "exports/2026110812.csv"
+has "scrub: a dated file name in a folder stays" "photos/20261108.jpg"
+has "scrub: a source value with a run after a hyphen stays" "ref-12345678"
 run "$(ev SessionStart compact main)"
 has "scrub: SessionStart compact prints a source path with digits in its name intact" "photos/IMG_20261108_140233.jpg"
+# a handoff: its file lines are text (full rule), its name is a path (narrow rule)
+printf 'HLINE call 0234567891 now\nHLINE IBAN MY12345678901234 acct ACC12345678 mobile 011-23456789\nHLINE file photos/IMG_20261108_140233.jpg\n' > "$D/proj/docs/2026110812-notes.md"
+adapter "handoff: docs/2026110812-notes.md"; run "$(ev SessionStart startup -)"
+has "scrub: the handoff's name with digits in it prints intact" "docs/2026110812-notes.md"
+has "scrub: a handoff line masks a free-standing run" "HLINE call [number] now"
+has "scrub: a handoff line masks an IBAN-style run" "IBAN MY[number]"
+has "scrub: a handoff line masks an account-prefix run" "acct ACC[number]"
+has "scrub: a handoff line masks a hyphenated run" "mobile 011-[number]"
 adapter "$A_FULL"
 
 # ===== 3. the 9,000 cap
