@@ -122,6 +122,18 @@ expect_not "agent older than 3 h dropped" "waiting on agent"
 # --- session handling: compact keeps the state, another session resets, a foreign SessionEnd is ignored
 ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"source\":\"compact\",$C}"
 js "d['turn']==3 and d['session_id']=='s1' and d['source']=='compact'" && echo "PASS SessionStart compact keeps the turn count" || { echo "FAIL compact reset the state"; fail=1; }
+# --- the squeeze counter (recall, F2): a SessionStart compact of the same session counts; the line shows it while it is above 0
+expect "a compact of the same session: the line counts one squeeze" "squeezed 1× (last "
+js "d['compactions']==1 and d['compact_at']" && echo "PASS --json: compactions 1, compact_at set" || { echo "FAIL --json after the first compact"; fail=1; }
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"source\":\"compact\",$C}"
+expect "a second compact: squeezed 2×" "squeezed 2× (last "
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s1\",$C}"
+expect "the counter survives the next prompt and the line still says working" "working · "
+expect "the counter is in the line while the session works" "squeezed 2× (last "
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s9\",\"source\":\"startup\",$C}"
+expect_not "a new session starts at 0: no squeezed suffix" "squeezed"
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s10\",\"source\":\"compact\",$C}"
+expect_not "a compact of a session the state does not hold starts fresh at 0" "squeezed"
 ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s2\",$C}"
 js "d['turn']==1 and d['session_id']=='s2' and d['agents_done']==0" && echo "PASS another session_id -> fresh file, turn 1" || { echo "FAIL session reset"; fail=1; }
 ev "{\"hook_event_name\":\"SessionEnd\",\"session_id\":\"s1\",\"reason\":\"logout\",$C}"

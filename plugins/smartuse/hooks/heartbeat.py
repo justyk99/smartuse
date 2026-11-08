@@ -42,6 +42,8 @@ Render (no model tokens):
                          idle_prompt, or no prompt yet) · working · last <tool> (prefixed "stalled? " + "no activity <ago>" after SMARTUSE_STALL_MIN
                          minutes, default 5, without any event). Then "· step <id>/<n> <tier>·<model> "<title>"" when
                          routing.json has a running unit and "· loop block <blocks>/<max>" in an until-done run.
+                         Then " · squeezed N× (last HH:MM)" while the session has been compacted (SessionStart source "compact" of the
+                         same session adds one: status.json compactions + compact_at).
   --json                 status.json + "project" (folder name), "project_path", "state_dir", the derived "state" (needs_human |
                          ended | waiting_on_you | waiting_on_agent | working | stopped | waiting_on_handoff | stalled | none) and "line".
   --statusline           for ~/.claude/settings.json statusLine: reads Claude Code's status JSON on stdin and prints
@@ -273,6 +275,9 @@ def apply(st, ev, data, now, sdir):
     if ev == "SessionStart":
         if not (st and data.get("source") == "compact" and st.get("session_id") == sid):
             st = fresh(sid, now)
+        elif data.get("source") == "compact":   # a squeeze of the same session: counted, shown by --line as "squeezed N×" (recall.py, F2)
+            st["compactions"] = to_int(st.get("compactions")) + 1
+            st["compact_at"] = iso(now)
         st["source"] = data.get("source")
     elif st is None or st.get("session_id") != sid:
         if ev == "SessionEnd" and st is not None:
@@ -441,6 +446,8 @@ def render(sdir, now=None, name=None):
                 state = "working"
                 body = "working · " + (f"last {lt.get('name')} {since(lt.get('at'), now)}" if lt and calls else f"thinking {fmt_dur(quiet)}") + f" · {n_calls}"
     body += routing_suffix(r)
+    if st and to_int(st.get("compactions")) > 0:
+        body += f" · squeezed {to_int(st.get('compactions'))}×" + (f" (last {hhmm(st.get('compact_at'))})" if hhmm(st.get("compact_at")) else "")
     return {"state": state, "line": flag + PREFIX + body, "short": flag + body, "status": st}
 
 

@@ -1,5 +1,5 @@
 {
-  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 wait gate (Stop: a hand-off with nothing armed to wake the session is blocked once) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, stopped, or stalled?), all deterministic",
+  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 wait gate (Stop: a hand-off with nothing armed to wake the session is blocked once) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, stopped, or stalled?) \u00b7 recall (PreCompact / SessionStart: the summary is not a source), all deterministic",
   "hooks": {
     "PreToolUse": [
       {
@@ -128,6 +128,23 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.py\"",
+            "timeout": 10
           }
         ]
       }
