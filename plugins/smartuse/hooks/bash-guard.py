@@ -13,11 +13,13 @@
 # job's files. When the human-only adapter .claude/smartuse.local.md lists `sources:` and a command matches `publish:` (or a tool
 # matches `publish_tools:`), the call is denied until each source has a Read in this session after the last compaction; the reason
 # names the unopened files. Detection errors (bad input, no adapter, no sources, no publish match) allow, as every check here does;
-# once a publish matched, a failure to verify (no transcript, unreadable, over budget) denies. The adapter is only ever read.
+# once a publish matched, a failure to verify (no transcript, unreadable, past the deadline) denies. The adapter is only ever read.
+# A source value must be a plain local path (checked by its text before any file call); source expansion and the transcript pass
+# share one deadline, the expansion running in a worker thread that is abandoned when it does not answer.
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
-import datetime, fnmatch, glob, json, os, re, sys, time
+import datetime, fnmatch, glob, json, os, re, sys, threading, time
 
-BUDGET_S = 3.0       # wall time the transcript pass may take before the gate gives up (and denies a matched publish)
+BUDGET_S = 4.0       # one deadline for the whole fresh-source check (source expansion and transcript pass); past it a matched publish is denied
 MAX_SOURCES = 200    # files one gate check will expand the sources to
 MAX_NAMES = 10       # unopened files named in a reason
 
@@ -239,19 +241,32 @@ def path_key(p, project):
     return os.path.normcase(path_norm(p, project)).replace("\\", "/")
 
 
-def is_network_path(s):
-    """A text test, no file system call: //host/share, \\\\host\\share and the \\\\?\\ and //?/ forms all start with two slashes."""
-    return s[:2] in ("//", "\\\\", "/\\", "\\/")
+DEVICE_FORMS = re.compile(r"\\\?\?\\|\\\\\?\\|\\\\\.\\|//\?/|//\./|GLOBALROOT", re.I)   # \??\  \\?\  \\.\  //?/  //./  GLOBALROOT
+
+
+def is_plain_local(s):
+    """A text test, no file system call: is this source value one of the plain spellings of a local file? Relative (no leading
+    slash, no drive letter, no .. part), a drive path (C:\\x or C:/x, not C://x), or a POSIX absolute path (/x, not //x or /\\x).
+    Everything else (//host/share, \\\\host\\share, the device and GLOBALROOT forms) is refused. A mapped network drive letter
+    cannot be told apart from a local one by its text and is accepted."""
+    if DEVICE_FORMS.search(s):
+        return False
+    if re.match(r"[A-Za-z]:[\\/](?![\\/])", s) or re.match(r"/(?![/\\])", s):
+        return True
+    if s[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", s):
+        return False
+    return ".." not in re.split(r"[\\/]", s)
 
 
 def expand_sources(project, patterns):
-    """-> ([(key, name shown)], "") with the files the patterns stand for, or (None, the reason). A network path is refused
-    by its text before anything touches the file system (the adapter can come with a cloned repo, and a hook must not reach
-    the network). Only a pattern relative to the project dir is expanded as a glob; an absolute source is one literal file.
-    A pattern that matches no file is a problem of its own (a typo must reach the owner); so is a set larger than MAX_SOURCES."""
+    """-> ([(key, name shown)], "") with the files the patterns stand for, or (None, the reason). A source that is not a plain
+    local path is refused by its text before anything touches the file system (the adapter can come with a cloned repo, and a
+    hook must not reach the network). Only a pattern relative to the project dir is expanded as a glob; an absolute source is
+    one literal file. A pattern that matches no file is a problem of its own (a typo must reach the owner); so is a set larger
+    than MAX_SOURCES."""
     for pat in patterns:
-        if is_network_path(str(native_path(pat))):
-            return None, pat + " is a network path; sources must be local files. The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
+        if not is_plain_local(str(native_path(pat))):
+            return None, pat + " is not a plain local path; sources must be local files. The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
     seen, out = set(), []
     for pat in patterns:
         p = str(native_path(pat))
@@ -288,18 +303,43 @@ def hhmm(ts):
         return ""
 
 
-def opened_since_compaction(tp, project):
+STUCK = []   # worker threads that did not finish (a network share that does not answer): main() leaves without them
+
+
+def expand_by_deadline(project, patterns, deadline):
+    """expand_sources in a daemon worker thread, joined with the time left before `deadline` (file-guard.py's resolved() does the
+    same for realpath): a glob or a stat on a share that does not answer must not hold the hook. Raises TimeoutError past the
+    deadline, so a timeout can never let the call through."""
+    out = []
+
+    def work():
+        try:
+            out.append(expand_sources(project, patterns))
+        except BaseException as e:
+            out.append(e)
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(max(0.0, deadline - time.monotonic()))
+    if not out or time.monotonic() >= deadline:
+        if not out:
+            STUCK.append(t)
+        raise TimeoutError("source expansion over %g s" % BUDGET_S)
+    if isinstance(out[0], BaseException):
+        raise out[0]
+    return out[0]
+
+
+def opened_since_compaction(tp, project, deadline):
     """One forward pass over the transcript: -> (keys of the files the model itself Read since the last compaction, the time
     of that compaction or None when there was none). A Read is an assistant tool_use record named Read, not a subagent's
     (isSidechain). The last compaction is the last compact_boundary system record; with none, the last isCompactSummary user
     record; with neither, every Read counts. Only lines that can matter are parsed. Raises on an unreadable file or when the
-    pass takes longer than BUDGET_S."""
-    start = time.monotonic()
+    pass runs past the deadline."""
     sets = {"b": set(), "s": set(), "all": set()}     # reads since the last boundary / summary record / ever
     seen = {"b": None, "s": None}                    # the timestamp of the last boundary / summary record (None: there was none)
     with open(tp, "rb") as fh:
         for n, line in enumerate(fh, 1):
-            if not n & 127 and time.monotonic() - start > BUDGET_S:
+            if not n & 127 and time.monotonic() >= deadline:
                 raise TimeoutError("transcript pass over %g s" % BUDGET_S)
             use = b'"tool_use"' in line and b'"Read"' in line
             if not (use or b"compact_boundary" in line or b"isCompactSummary" in line):
@@ -324,25 +364,27 @@ def opened_since_compaction(tp, project):
                             k = path_key(fp, project)
                             for s in sets.values():
                                 s.add(k)
-    if time.monotonic() - start > BUDGET_S:
+    if time.monotonic() >= deadline:
         raise TimeoutError("transcript pass over %g s" % BUDGET_S)
     which = "b" if seen["b"] is not None else ("s" if seen["s"] is not None else "all")
     return sets[which], (seen[which] if which != "all" else None)
 
 
-def fresh_verdict(data, project, sources):
+def fresh_verdict(data, project, sources, deadline):
     """None when every source was opened since the last compaction, else the reason (without the 'bash-guard: ' prefix)."""
-    files, problem = expand_sources(project, sources)
-    if files is None:
-        return "fresh-source \u2014 " + problem
-
     def cannot(why):
         return "fresh-source \u2014 could not verify which sources were opened (" + why + "). Retry, or ask the owner. Nothing was sent."
+    try:
+        files, problem = expand_by_deadline(project, sources, deadline)
+    except TimeoutError as e:
+        return cannot(str(e))
+    if files is None:
+        return "fresh-source \u2014 " + problem
     tp = data.get("transcript_path")
     if not isinstance(tp, str) or not tp:
         return cannot("the event names no transcript")
     try:
-        opened, when = opened_since_compaction(native_path(tp), project)
+        opened, when = opened_since_compaction(native_path(tp), project, deadline)
     except TimeoutError as e:
         return cannot(str(e))
     except Exception as e:
@@ -360,7 +402,14 @@ def fresh_verdict(data, project, sources):
 FLEX = re.compile(r"[^\S\n]+|(?P<redir>\d*(?:<<<|<<-?|<>|>>|>&|<&|&>>?|>\||[<>]))[^\S\n]*(?:" + _WORD + r")?"
                   r"|(?P<sep>\n|\|\||&&|;;|\|&|[|;&()])|(?P<word>" + _WORD + ")", re.S)
 VAR_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-LEAD_WORDS = frozenset(("if", "then", "else", "elif", "do", "while", "until", "!", "{", "time"))   # words that can stand before a command in a compound
+LEAD_WORDS = frozenset(("if", "then", "else", "elif", "do", "while", "until", "!", "{"))   # words that can stand before a command in a compound
+# Programs that run the command that follows them: name -> (options that take a value, plain words before the command).
+WRAPPERS = {"command": (frozenset(), 0), "builtin": (frozenset(), 0), "exec": (frozenset(("-a",)), 0),
+            "env": (frozenset(("-u", "-C", "-S")), 0), "nohup": (frozenset(), 0), "nice": (frozenset(("-n",)), 0),
+            "timeout": (frozenset(("-s", "-k")), 1), "stdbuf": (frozenset(("-i", "-o", "-e")), 0),
+            "xargs": (frozenset(("-n", "-I", "-P", "-d", "-L", "-s", "-a", "-E", "-l", "-i")), 0), "time": (frozenset(), 0),
+            "sudo": (frozenset(("-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-r", "-t", "-U")), 0),
+            "doas": (frozenset(("-u", "-C")), 0)}
 
 
 def flex_split(text):
@@ -404,10 +453,53 @@ def word_norm(w):
     return w
 
 
-def publish_hit(text, patterns):
-    """Does any command of `text` start with the words of any publish pattern? Leading VAR=value words (and the if / then / do
-    of a compound command) are dropped; the words
-    are compared case-sensitively, so `echo "python send.py"` (first word echo) is not a match."""
+def command_start(seg):
+    """Index of the command word of a segment: past VAR=value words, the if / then / do of a compound command, and the
+    programs that only run what follows them (env, nohup, nice, timeout, stdbuf, xargs, time, sudo, doas, command, exec …)
+    with their options."""
+    i = 0
+    while i < len(seg):
+        w = seg[i]
+        name = re.split(r"[\\/]", w)[-1]
+        if name.lower().endswith(".exe"):
+            name = name[:-4]
+        if VAR_ASSIGN.match(w) or w in LEAD_WORDS:
+            i += 1
+        elif name in WRAPPERS:
+            valued, plain = WRAPPERS[name]
+            i += 1
+            while i < len(seg) and seg[i].startswith("-") and len(seg[i]) > 1:
+                if seg[i] == "--":
+                    i += 1
+                    break
+                i += 2 if seg[i] in valued else 1
+            i += plain
+        else:
+            break
+    return i
+
+
+def shell_string(cmd):
+    """The command string a shell -c or an eval is given (words after the command word), or None."""
+    name = re.split(r"[\\/]", cmd[0])[-1] if cmd else ""
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    if name == "eval":
+        return " ".join(cmd[1:]) if len(cmd) > 1 else None
+    if name in ("sh", "bash", "zsh", "dash"):
+        for k in range(1, len(cmd) - 1):
+            if cmd[k].startswith("-") and not cmd[k].startswith("--") and "c" in cmd[k][1:]:
+                return cmd[k + 1]
+    return None
+
+
+def publish_hit(text, patterns, depth=0):
+    """Does any command of `text` run a publish pattern? A pattern matches a command when its first word is the command word
+    (after VAR=value, env / nohup / timeout / sudo … wrappers and their options; case-sensitive, a script path in its
+    normalised form) and each later pattern word appears, in order, among the command's later words: `git push` matches
+    `git -C dir push origin`, `python send.py` matches `python -u send.py`. The string given to sh|bash|zsh|dash -c and to
+    eval is checked the same way, to depth 2. `echo "python send.py"` is not a match: its command word is echo. A word that
+    only happens to appear later (git log --grep push) is an over-deny, which costs one turn."""
     pats = []
     for p in patterns:
         segs = flex_split(p)
@@ -416,13 +508,25 @@ def publish_hit(text, patterns):
             pats.append(pw)
     if not pats:
         return False
-    longest = max(len(p) for p in pats)
     for seg in command_segments(text):
-        i = 0
-        while i < len(seg) and (VAR_ASSIGN.match(seg[i]) or seg[i] in LEAD_WORDS):
-            i += 1
-        head = [word_norm(w) for w in seg[i:i + longest]]
-        if any(head[:len(p)] == p for p in pats):
+        cmd = seg[command_start(seg):]
+        if not cmd:
+            continue
+        head = word_norm(cmd[0])
+        rest = None
+        for pw in pats:
+            if head != pw[0]:
+                continue
+            if rest is None:
+                rest = [word_norm(w) for w in cmd[1:]]
+            k = 0
+            for w in rest:
+                if k < len(pw) - 1 and w == pw[k + 1]:
+                    k += 1
+            if k == len(pw) - 1:
+                return True
+        inner = shell_string(cmd)
+        if inner and depth < 2 and publish_hit(inner, patterns, depth + 1):
             return True
     return False
 
@@ -430,6 +534,7 @@ def publish_hit(text, patterns):
 def fresh_gate(data, text):
     """None to allow the call, else the reason to deny it. `text` is the Bash command with data heredocs stripped, or None for
     a tool call (then the tool's name is matched against `publish_tools:`)."""
+    deadline = time.monotonic() + BUDGET_S
     try:
         project = project_dir(data)
         adapter = adapter_text(project)
@@ -446,7 +551,7 @@ def fresh_gate(data, text):
     except Exception:
         return None
     try:
-        return fresh_verdict(data, project, sources)
+        return fresh_verdict(data, project, sources, deadline)
     except Exception as e:
         return "fresh-source \u2014 could not verify which sources were opened (" + type(e).__name__ + "). Retry, or ask the owner. Nothing was sent."
 
@@ -469,6 +574,7 @@ def main():
         why = fresh_gate(data, None)
         if why:
             deny(why)
+        leave()
         return
     cmd = (data.get("tool_input") or {}).get("command") or ""
     text = strip_heredocs(strip_state_args(cmd))
@@ -479,6 +585,15 @@ def main():
     why = fresh_gate(data, text)
     if why:
         deny(why)
+    leave()
+
+
+def leave():
+    """A worker still waiting on the file system (it timed out above) must not hold the process: leave without it, as
+    file-guard.py does. Only when one is stuck; otherwise a normal return."""
+    if STUCK:
+        sys.stdout.flush()
+        os._exit(0)
 
 
 main()

@@ -27,6 +27,14 @@ ok() { echo "PASS $1"; }
 ko() { echo "FAIL $1"; fail=1; }
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
 MSYS=0; command -v cygpath >/dev/null 2>&1 && MSYS=1
+# FRESH_GUARD_REF=<git ref> runs the same cases against the guard as that commit had it (read into this run's temp dir): how a new
+# case is shown failing on the code before the change. Unset, the working copy is tested.
+if [ -n "${FRESH_GUARD_REF:-}" ]; then
+  G="$D/guard-ref.py"
+  MSYS_NO_PATHCONV=1 git -C "$(wp "$H")" show "$FRESH_GUARD_REF:plugins/smartuse/hooks/bash-guard.py" > "$G" 2> "$D/git.err"
+  [ -s "$G" ] || { echo "FAIL could not read bash-guard.py at $FRESH_GUARD_REF: $(head -c 300 "$D/git.err")"; exit 1; }
+  echo "NOTE testing the guard of $FRESH_GUARD_REF, not the working copy"
+fi
 
 # a copy of the guard whose transcript budget is 0 s: the pass overruns at once (the real budget is 3 s)
 BG="$D/guard-budget0.py"; sed 's/^BUDGET_S = .*/BUDGET_S = 0.0/' "$G" > "$BG"
@@ -215,7 +223,7 @@ make("d_literal_path_missing", ex(DENY, has=["source pattern matches no file: jo
 # a source that is a network path (//host/share, \\host\share, the \\?\ and //?/ forms) is never expanded, stat'ed or compared: the
 # adapter can ship in a cloned repo, and a hook must not touch the network (192.0.2.7 is a documentation address that answers nothing,
 # so a gate that tried would stall: each case must be decided in under 5 s, interpreter start included)
-NET = " is a network path; sources must be local files. The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
+NET = " is not a plain local path; sources must be local files. The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."
 UNC = "\\\\192.0.2.7\\share\\plan.pdf"
 make("d_network_path_slashes", ex(DENY, has=["//192.0.2.7/share/plan.pdf" + NET], max=5), cmd="python send.py",
      adp=adapter(sources="//192.0.2.7/share/plan.pdf"), tr=lambda P: base(P))
@@ -230,6 +238,36 @@ make("d_network_path_tool", ex(DENY, has=["//192.0.2.7/share/plan.pdf" + NET], m
      adp=adapter(sources="//192.0.2.7/share/plan.pdf"), tr=lambda P: base(P))
 make("d_network_path_in_a_read", ex(DENY, has=["3 of 3 sources not opened"], max=5), cmd="python send.py",
      tr=lambda P: base(P).read("//192.0.2.7/share/plan.pdf").read("\\\\192.0.2.7\\share\\a.jpg"))   # a Read of a network path is compared as text, never stat'ed
+# the allowlist: relative (no .. part), C:\x or C:/x (not C://x), /x (not //x); the device, \??\ and GLOBALROOT forms never
+for nm, val in (("nt_object_path", "\\??\\UNC\\192.0.2.7\\s\\a.pdf"), ("device_pipe", "\\\\.\\pipe\\x"), ("drive_double_slash", "C://x"),
+                ("drive_relative", "C:x"), ("dotdot_part", "jobs/../x"), ("dotdot_backslash", "jobs\\..\\x"), ("leading_backslash", "\\jobs\\demo\\plan.pdf"),
+                ("slash_backslash", "/\\192.0.2.7/share/a.pdf"), ("globalroot_any_case", "/dev/globalroot/x"), ("posix_double_slash", "//x/y")):
+    make("d_not_plain_" + nm, ex(DENY, has=[val + NET], max=5), cmd="python send.py", adp=adapter(sources=val), tr=lambda P: base(P))
+make("a_not_plain_but_no_publish", ex(ALLOW, max=5), cmd="python other.py", adp=adapter(sources="jobs/../x"), tr=lambda P: base(P))
+# one deadline (BUDGET_S, 4 s) for the glob expansion and the transcript pass: the expansion runs in a worker thread joined with the time
+# left; past the deadline a matched publish is denied, never let through. The patched copy has a deadline of 0.
+make("d_deadline_overrun_in_the_expansion", ex(DENY, has=["could not verify which sources were opened (source expansion over 0 s)", "Nothing was sent."]),
+     cmd="python send.py", tr=lambda P: reads_all(base(P), P), guard=BG)
+make("d_deadline_overrun_literal_sources", ex(DENY, has=["could not verify which sources were opened (source expansion over 0 s)"]),
+     cmd="python send.py", adp=adapter(sources="jobs/demo/plan.pdf"), tr=lambda P: base(P).read(P + "/" + PLAN), guard=BG)
+make("d_deadline_overrun_tool", ex(DENY, has=["could not verify which sources were opened ("]), tool="mcp__demo__file_upload",
+     tr=lambda P: reads_all(base(P), P), guard=BG)
+# commands that run a publish through a wrapper, or have it in the middle: the pattern's first word is the command word (after the
+# wrappers) and its later words appear in order among the command's later words
+for nm, cm in (("timeout", "timeout 60 python send.py"), ("timeout_options", "timeout -s KILL 60 python send.py"), ("env_nohup", "env A=1 nohup python send.py"),
+               ("env_options", "env -i -u HOME B=2 python send.py"), ("nice", "nice -n 5 python send.py"), ("stdbuf", "stdbuf -oL python send.py"),
+               ("xargs", "echo x | xargs -n 1 python send.py"), ("time", "time -p python send.py"), ("command", "command python send.py"),
+               ("exec", "exec python send.py"), ("bash_c", 'bash -c "cd x && python send.py"'), ("sh_c_single", "sh -c 'python send.py'"),
+               ("bash_lc", 'bash -lc "python send.py"'), ("eval", 'eval "python send.py"'), ("eval_words", "eval python send.py"),
+               ("nested_depth_2", "bash -c \"sh -c 'python send.py'\""), ("git_option", "git -C dir push"), ("git_options", "git -c a.b=c -C dir push origin main"),
+               ("python_option", "python -u send.py"), ("script_path_in_the_middle", "python -X utf8 ./send.py --to client"),
+               ("wrapped_git", "timeout 30 git -C dir push origin main")):
+    make("d_wrapped_" + nm, ex(DENY, has=["sources not opened"]), cmd=cm, tr=lambda P: base(P))
+make("a_echo_unquoted", ex(ALLOW), cmd="echo python send.py", tr=lambda P: base(P))
+make("a_git_log", ex(ALLOW), cmd="git log", tr=lambda P: base(P))
+make("a_git_status_dash_c", ex(ALLOW), cmd="git -C dir status", tr=lambda P: base(P))
+make("a_wrapped_other_command", ex(ALLOW), cmd="timeout 60 python other.py", tr=lambda P: base(P))
+make("a_wrapped_publish_all_opened", ex(ALLOW), cmd="env A=1 nohup python -u send.py", tr=lambda P: reads_all(base(P), P))
 make("a_network_path_no_publish", ex(ALLOW, max=5), cmd="python other.py", adp=adapter(sources="//192.0.2.7/share/plan.pdf"), tr=lambda P: base(P))
 # an absolute source is taken literally: no glob expansion; it must exist as a file
 make("d_absolute_pattern_is_literal", ex(DENY, has=["source pattern matches no file: "]), cmd="python send.py",
@@ -384,7 +422,7 @@ elif mode == "imports":  # imports <bash-guard.py>: stdlib only, no process or n
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "glob", "fnmatch", "datetime", "itertools"} and not calls
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "glob", "fnmatch", "datetime", "itertools", "threading"} and not calls
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "execsilent":   # execsilent <bash-guard.py>: until-done.py's way of reusing RULES prints nothing, and the file has one main() line to cut
     src = rd(sys.argv[2])
@@ -444,7 +482,7 @@ cmp -s "$D/snap.before" "$D/snap.after" && ok "no file was created, changed or r
 [ -z "$(ls -A "$HOME/.claude/smartuse" | grep -v '^interpreter$')" ] && ok "no state file in ~/.claude/smartuse (the launcher's interpreter hint aside)" || ko "state written: $(ls -A "$HOME/.claude/smartuse")"
 
 # --- structure
-r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time glob fnmatch datetime), no process call, Python 3.9 grammar" || ko "imports: $r"
+r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time glob fnmatch datetime threading), no process call, Python 3.9 grammar" || ko "imports: $r"
 r=$(py "$D/chk.py" execsilent "$G" </dev/null); [ "$r" = ok ] && ok "until-done.py's exec of this file without main() prints nothing and yields RULES" || ko "exec without main(): $r"
 r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
 
