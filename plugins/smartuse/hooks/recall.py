@@ -39,7 +39,7 @@ Windows: Git Bash converts POSIX paths in arguments and environment variables fo
 cwd / transcript_path go through native_path(); stdin is read as bytes and decoded as UTF-8; stdout is written as UTF-8 bytes.
 Python 3.9 stdlib only, no subprocess, no network. Any error: exit 0 and print nothing (a hook must never block a compaction).
 """
-import collections, datetime, json, os, pathlib, re, sys, time
+import collections, datetime, json, os, pathlib, re, stat, sys, time
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
 BUDGET_S = 3.0                 # one pass over the transcript; the hook's timeout is 10 s
@@ -56,7 +56,7 @@ INJECTED = ("<task-notification>", "<system-reminder>", "<local-command-", "<com
 GATE_WORDS = re.compile(r"upload|send|publish|post|share|submit")   # the words of the gate's PreToolUse matcher mcp__.*(upload|send|publish|post|share|submit).*
 SCRUB_TOKEN = re.compile(r"\b(?:sk-|ghp_|gho_|github_pat_|xox[abpr]-|AKIA|AIza)[A-Za-z0-9_-]{8,}")
 SCRUB_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
-SCRUB_NUMBER = re.compile(r"\d{8,}")
+SCRUB_NUMBER = re.compile(r"(?<![A-Za-z0-9_/\\.\-])\d{8,}(?![A-Za-z0-9_/\\\-]|\.[A-Za-z0-9])")   # a free-standing run only: a digit run inside a file name or path (a camera or export name, a dated folder) is part of a path the owner asked to keep verbatim
 CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -302,23 +302,44 @@ def scan_safe(data):
 
 # ---------------------------------------------------------------- the handoff note (F3)
 
+def path_kind(p):
+    """What a path is, decided with os.lstat so that a link is never followed: "missing", "link" (a symlink, or on Windows any
+    reparse point: a junction is not a symlink to os.path.islink on 3.9), "file", "dir" or "other". A path that cannot be looked
+    at is "link": refused, never read. A link inside a project (or one that arrives with a cloned repo or an archive) can lead to
+    a share or to a file the owner never named, so links are refused, whatever they point at."""
+    try:
+        st = os.lstat(p)
+    except (FileNotFoundError, NotADirectoryError):
+        return "missing"
+    except (OSError, ValueError):
+        return "link"
+    if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        return "link"
+    return "file" if stat.S_ISREG(st.st_mode) else "dir" if stat.S_ISDIR(st.st_mode) else "other"
+
+
 def last_commit_epoch(project):
     """The time of the last entry of .git/logs/HEAD (a file read, no subprocess; a worktree's .git is a file naming its git dir),
-    or None. The entry is `<old> <new> <name> <mail> <epoch> <zone><TAB><message>`; only the last 4 KB are read."""
+    or None. The entry is `<old> <new> <name> <mail> <epoch> <zone><TAB><message>`; only the last 4 KB are read. Links are refused,
+    not followed: the .git candidate, the git dir, its logs folder and the HEAD log are each looked at with lstat (the ancestors of
+    an absolute gitdir are not walked: a worktree points into its owner's own repo)."""
     try:
         d = pathlib.Path(project).resolve()
         for base in [d] + list(d.parents)[:6]:
             g = base / ".git"
-            if g.is_file():
+            kind = path_kind(g)
+            if kind == "missing":
+                continue
+            if kind == "file":
                 m = re.match(r"gitdir:\s*(.+)", g.read_text(encoding="utf-8").strip())
                 if m and not plain_local_target(m.group(1).strip()):
                     return None   # not a plain local spelling (a share, a device form): no stale check, nothing is touched (a local absolute target is fine: worktrees point outside their folder)
                 gd = pathlib.Path(m.group(1).strip()) if m else None
                 g = (gd if gd.is_absolute() else base / gd) if gd else None
-            elif not g.is_dir():
-                continue
+            elif kind != "dir":
+                return None   # a link or an odd entry: no stale check
             log = g / "logs" / "HEAD" if g else None
-            if log is None or not log.is_file():
+            if log is None or path_kind(g) != "dir" or path_kind(g / "logs") != "dir" or path_kind(log) != "file":
                 return None
             with open(log, "rb") as fh:
                 fh.seek(0, os.SEEK_END)
@@ -357,6 +378,8 @@ def plain_local_target(s):
     s = str(s or "")
     if not s or "\x00" in s or DEVICE_FORMS.search(s):
         return False
+    if re.match(r"/(?:net|Network)(?:[/\\]|$)", s, re.I):
+        return False   # the automount prefixes of some systems (/net/host/..., /Network/...) reach a remote host by name
     if re.match(r"[A-Za-z]:[\\/](?![\\/])", s) or re.match(r"/(?![/\\])", s):
         return True
     return not (s[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", s))
@@ -365,13 +388,24 @@ def plain_local_target(s):
 def handoff_target(project, rel):
     """-> (Path of the file, "") when `handoff:` names a regular file inside the project, else (None, "denied") or, for a path
     inside the project that does not exist, (None, "missing"). The adapter can come with a cloned repo, so the value is checked as
-    text first (relative, no `..` part, no drive letter, no leading separator, so no network path), and only then on disk: the
-    resolved path (links followed) must lie inside the resolved project dir."""
+    text first (relative, no `..` part, no drive letter, no leading separator, so no network path); then every component below the
+    project dir is looked at with lstat, and a link (a symlink or a Windows reparse point) is refused even when it points inside the
+    project; and only then the resolved path must lie inside the resolved project dir."""
     s = str(rel)
     if (not s or "\x00" in s or is_net_path(s) or DEVICE_FORMS.search(s) or s[0] in "/\\" or re.match(r"[A-Za-z]:", s) or os.path.isabs(s)
             or ".." in re.split(r"[/\\]+", s)):
         return None, "denied"
     try:
+        cur = str(project)
+        for part in re.split(r"[/\\]+", s):
+            if part in ("", "."):
+                continue
+            cur = os.path.join(cur, part)
+            kind = path_kind(cur)
+            if kind == "missing":
+                return None, "missing"
+            if kind == "link":
+                return None, "denied"
         base = os.path.realpath(str(project))
         real = os.path.realpath(os.path.join(base, s))
         nbase = os.path.normcase(base)
@@ -426,6 +460,9 @@ def quote_prompts(prompts, head):
 
 def pre_compact(data, project, keys):
     lines = []
+    # Claude Code uses a PreCompact hook's stdout as instructions for the compaction summary (hooks reference, PreCompact) and cuts
+    # it at 10,000 characters; our cap (CAP, 9,000) stays under that. The reference does not say whether this output is added to the
+    # owner's own /compact text or replaces it, so that text is echoed first (scrubbed): it is kept either way.
     custom = data.get("custom_instructions")
     if isinstance(custom, str) and custom.strip():
         lines.append(scrub(custom.strip())[:CUSTOM_CUT])

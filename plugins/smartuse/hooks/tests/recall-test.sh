@@ -26,6 +26,14 @@ fail=0
 ok() { echo "PASS $1"; }
 ko() { echo "FAIL $1"; fail=1; }
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
+# RECALL_REF=<git ref> runs the same cases against recall.py as that commit had it (read into this run's temp dir): how a new case is
+# shown failing on the code before the change. Unset, the working copy is tested.
+if [ -n "${RECALL_REF:-}" ]; then
+  HOOK="$D/recall-ref.py"
+  MSYS_NO_PATHCONV=1 git -C "$(wp "$H")" show "$RECALL_REF:plugins/smartuse/hooks/recall.py" > "$HOOK" 2> "$D/git.err"
+  [ -s "$HOOK" ] || { echo "FAIL could not read recall.py at $RECALL_REF: $(head -c 300 "$D/git.err")"; exit 1; }
+  echo "NOTE testing recall.py of $RECALL_REF, not the working copy"
+fi
 PW=$(wp "$D/proj"); K=$(key "$PW"); P="$HOME/.claude/smartuse/projects/$K"; ST="$P/recall.json"   # the state dir of the project every case runs in
 PO=$(wp "$D/other")
 
@@ -147,6 +155,11 @@ t = T()
 t.human("use sk-xxxxxxxxxxxxxxxxxxxx and ghp_xxxxxxxxxxxxxxxxxxxxxxxx and AKIAxxxxxxxxxxxxxxxx, mail yk@example.test, call 0123456789 not 1234567, keep task-folder jobs/demo")
 t.save("secret")
 
+# digits: free-standing digit runs are masked, runs inside a name or a path are kept
+t = T()
+t.human("call 0234567891 now, acct 1234567892. also +60198765432 and ref-12345678 and photos/20261108.jpg and photos/IMG_20261108_140233.jpg")
+t.save("digits")
+
 # big: about 2 MB of records, the last prompt at the end
 t = T()
 for i in range(1, 2201):
@@ -177,8 +190,16 @@ if mode == "imports":      # imports <recall.py>: stdlib only, no subprocess, no
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    allowed = {"collections", "datetime", "json", "os", "pathlib", "re", "sys", "time"}
+    allowed = {"collections", "datetime", "json", "os", "pathlib", "re", "stat", "sys", "time"}
     print("ok" if set(mods) <= allowed and not calls else "imports %s, process calls %s" % (mods, calls))
+elif mode == "plain":      # plain <recall.py>: plain_local_target() on gitdir: values (the file runs main() on import; stdin is empty here, so it prints nothing)
+    import runpy
+    g = runpy.run_path(sys.argv[2], run_name="recall_under_test")
+    f = g["plain_local_target"]
+    want = {"/net/192.0.2.7/x": False, "/Network/x": False, "/NET/x": False, "/network": False, "/netx/a": True, "/home/yk/x": True,
+            "C:/demo/x": True, "../gd": True, "gd/x": True, "//192.0.2.7/x": False}
+    bad = ["%s -> %s" % (k, f(k)) for k, v in want.items() if f(k) != v]
+    print("ok" if not bad else "; ".join(bad))
 elif mode == "timed":      # timed <recall.py> <event file>: runs the hook in this interpreter and prints its output, then ELAPSED_MS=<the hook's own time, without the interpreter start>
     import io, runpy, time
     sys.stdin = io.TextIOWrapper(io.BytesIO(open(sys.argv[3], "rb").read()), encoding="utf-8")
@@ -302,6 +323,23 @@ has "scrub: a digit run of 10 is masked" "[number]"
 lacks "scrub: the 10-digit run is gone" "0123456789"
 has "scrub: a 7-digit run stays" "1234567"
 has "scrub: task-folder stays as it is" "task-folder jobs/demo"
+run "$(ev PreCompact - digits)"
+has "scrub: a run between spaces is masked" "call [number] now"
+has "scrub: a run at a sentence end is masked" "acct [number]."
+has "scrub: a run after a plus sign is masked" "+[number]"
+lacks "scrub: the three runs are gone" "0234567891"
+lacks "scrub: the sentence-end run is gone" "1234567892"
+lacks "scrub: the phone-style run is gone" "60198765432"
+has "scrub: a run after a letter and a hyphen is part of a name and stays" "ref-12345678"
+has "scrub: a dated file name in a folder stays" "photos/20261108.jpg"
+has "scrub: a camera-style file name stays" "photos/IMG_20261108_140233.jpg"
+adapter "sources: photos/IMG_20261108_140233.jpg, exports/2026110812.csv"; fresh
+run "$(ev PreCompact - main)"
+has "scrub: PreCompact prints a source path with digits in its name intact" "photos/IMG_20261108_140233.jpg"
+has "scrub: PreCompact keeps a dated export name intact" "exports/2026110812.csv"
+run "$(ev SessionStart compact main)"
+has "scrub: SessionStart compact prints a source path with digits in its name intact" "photos/IMG_20261108_140233.jpg"
+adapter "$A_FULL"
 
 # ===== 3. the 9,000 cap
 S=""; for i in $(seq 1 400); do S="$S${S:+, }jobs/demo/folder-$i/photo.jpg"; done
@@ -476,6 +514,69 @@ mkdir -p "$D/proj4/.claude" "$D/proj4/docs"; cp "$D/proj/docs/STATUS.md" "$D/pro
 printf 'gitdir: ../gd\n' > "$D/proj4/.git"; printf 'handoff: docs/STATUS.md\n' > "$D/proj4/.claude/smartuse.local.md"
 CPDIR=$(wp "$D/proj4"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
 has "stale: a relative gitdir with a .. part still leads to its git dir" "stale: the handoff is"
+
+# --- links are refused, never followed (a link can come with a cloned repo or an archive and point at a share or at a file nobody named):
+# the handoff's folders and file, the .git entry, the git dir's logs folder. Links need rights on Windows: tried once with a native
+# symlink, then (folders) a junction; where neither can be made the cases are skipped with a PASS line, never silently
+mkln() { # $1 target (a file or a folder that exists), $2 the link to make -> 0 when a link now stands there
+  case "$OSTYPE" in
+    msys*|cygwin*)
+      MSYS=winsymlinks:nativestrict ln -s "$1" "$2" 2>/dev/null
+      [ -e "$2" ] || { [ -d "$1" ] && MSYS_NO_PATHCONV=1 cmd //c mklink //J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null 2>&1; };;
+    *) ln -s "$1" "$2" 2>/dev/null;;
+  esac
+  [ -e "$2" ] && { [ -L "$2" ] || [ -d "$2" ]; }
+}
+oldproj() { # $1 name: a project with a handoff note from 2020 (the stale line shows when the repo has a newer commit)
+  mkdir -p "$D/$1/.claude" "$D/$1/docs"; cp "$D/proj/docs/STATUS.md" "$D/$1/docs/STATUS.md"; touch -t 202001010000 "$D/$1/docs/STATUS.md"
+  printf 'handoff: docs/STATUS.md\n' > "$D/$1/.claude/smartuse.local.md"
+}
+newlog() { printf '0000000000000000000000000000000000000000 2222222222222222222222222222222222222222 Demo <demo@example.test> %s +0000\tcommit: now\n' "$NOWS" > "$1"; }
+if mkln "$D/proj/docs" "$D/proj/dlink"; then
+  adapter "handoff: dlink/STATUS.md"; run "$(ev SessionStart startup -)"
+  has "handoff: a file reached through a linked folder (pointing inside the project) is not read" "$NR"
+  lacks "handoff: the linked folder prints none of the file" "HANDOFF-LINE-01"
+  adapter "handoff: ./docs//STATUS.md"; run "$(ev SessionStart startup -)"
+  has "handoff: a ./ part and a doubled separator are fine (control: no link on the way)" "HANDOFF-LINE-01"
+else ok "(skipped: no folder link can be made here without admin rights)"; fi
+if mkln "$D/proj/docs/STATUS.md" "$D/proj/docs/FLINK.md"; then
+  adapter "handoff: docs/FLINK.md"; run "$(ev SessionStart startup -)"
+  has "handoff: a linked file (pointing inside the project) is not read" "$NR"
+  lacks "handoff: the linked file prints none of the target" "HANDOFF-LINE-01"
+else ok "(skipped: no file link can be made here without admin rights)"; fi
+adapter "handoff: docs/NOPE.md"; run "$(ev SessionStart startup -)"
+has "handoff: a missing file is still said to be missing (control)" "docs/NOPE.md was not found"
+# .git as a link: no stale line (control first: the same git dir reached by a gitdir: file does give one)
+oldproj proj5; mkdir -p "$D/gdreal/logs"; newlog "$D/gdreal/logs/HEAD"
+printf 'gitdir: %s\n' "$(wp "$D/gdreal")" > "$D/proj5/.git"
+CPDIR=$(wp "$D/proj5"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+has "links (control): a .git file leading to that git dir gives the stale line" "stale: the handoff is"
+rm -f "$D/proj5/.git"
+if mkln "$D/gdreal" "$D/proj5/.git"; then
+  CPDIR=$(wp "$D/proj5"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+  has "links: .git as a link: the handoff is still printed" "HANDOFF-LINE-01"
+  lacks "links: .git as a link gives no stale line" "stale:"
+else ok "(skipped: no .git link can be made here without admin rights)"; fi
+# the git dir's logs folder as a link
+oldproj proj6; mkdir -p "$D/proj6/.git/logs" "$D/logsreal"; newlog "$D/proj6/.git/logs/HEAD"; newlog "$D/logsreal/HEAD"
+CPDIR=$(wp "$D/proj6"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+has "links (control): a plain .git/logs gives the stale line" "stale: the handoff is"
+rm -rf "$D/proj6/.git/logs"
+if mkln "$D/logsreal" "$D/proj6/.git/logs"; then
+  CPDIR=$(wp "$D/proj6"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+  has "links: .git/logs as a link: the handoff is still printed" "HANDOFF-LINE-01"
+  lacks "links: .git/logs as a link gives no stale line" "stale:"
+else ok "(skipped: no logs link can be made here without admin rights)"; fi
+# the automount prefixes: decided on the text (a unit check of the allowlist, then the run: nothing is touched)
+r=$(py "$D/chk.py" plain "$HOOK" </dev/null); [ "$r" = ok ] && ok "gitdir: /net/host/x and /Network/x (any case) are not plain local; /netx/a and other local spellings still are" || ko "plain_local_target: $r"
+oldproj proj7; newlog "$D/gdreal/logs/HEAD"
+for gd in "/net/192.0.2.7/x" "/Network/x"; do
+  printf 'gitdir: %s\n' "$gd" > "$D/proj7/.git"
+  CPDIR=$(wp "$D/proj7"); runt "$(ev SessionStart startup -)"; CPDIR="$PW"
+  has "gitdir: $gd: the handoff is still printed" "HANDOFF-LINE-01"
+  lacks "gitdir: $gd gives no stale line" "stale:"
+  [ "$MS" -le $NETMAX ] && ok "gitdir: $gd is skipped at once ($MS ms)" || ko "gitdir $gd took $MS ms"
+done
 
 adapter $'sources: jobs/demo/plan.pdf, photos/a.jpg\nhandoff: docs/STATUS.md'; run "$(ev SessionStart startup -)"
 has "startup: sources are listed" "jobs/demo/plan.pdf"
