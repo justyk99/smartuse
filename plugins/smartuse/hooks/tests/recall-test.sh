@@ -463,6 +463,19 @@ CPDIR=$(wp "$D/proj3"); runt "$(ev SessionStart startup -)"; CPDIR="$PW"
 has "gitdir: //host/x: the handoff is still printed" "HANDOFF-LINE-01"
 lacks "gitdir: //host/x gives no stale line" "stale:"
 [ "$MS" -le $NETMAX ] && ok "gitdir: //host/x is skipped at once ($MS ms, nothing touched the network)" || ko "gitdir //host/x took $MS ms"
+# the gitdir: value goes through the same plain-local allowlist as bash-guard's sources (a lock, not a fix: Python's pathlib joins this
+# \??\ form under the project, so the code before reached no share either); a relative gitdir with a .. part stays allowed
+cat > "$D/proj3/.git" <<'EOF'
+gitdir: \??\UNC\192.0.2.7\x
+EOF
+CPDIR=$(wp "$D/proj3"); runt "$(ev SessionStart startup -)"; CPDIR="$PW"
+has "gitdir: \\??\\UNC form: the handoff is still printed" "HANDOFF-LINE-01"
+lacks "gitdir: \\??\\UNC form gives no stale line" "stale:"
+[ "$MS" -le $NETMAX ] && ok "gitdir: \\??\\UNC form is skipped at once ($MS ms)" || ko "gitdir \\??\\UNC took $MS ms"
+mkdir -p "$D/proj4/.claude" "$D/proj4/docs"; cp "$D/proj/docs/STATUS.md" "$D/proj4/docs/STATUS.md"; touch -t 202001010000 "$D/proj4/docs/STATUS.md"
+printf 'gitdir: ../gd\n' > "$D/proj4/.git"; printf 'handoff: docs/STATUS.md\n' > "$D/proj4/.claude/smartuse.local.md"
+CPDIR=$(wp "$D/proj4"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
+has "stale: a relative gitdir with a .. part still leads to its git dir" "stale: the handoff is"
 
 adapter $'sources: jobs/demo/plan.pdf, photos/a.jpg\nhandoff: docs/STATUS.md'; run "$(ev SessionStart startup -)"
 has "startup: sources are listed" "jobs/demo/plan.pdf"

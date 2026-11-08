@@ -20,7 +20,7 @@ now; open each before any output") and the owner prompts. Without `sources:` jus
 The adapter can arrive with a cloned repo, so `handoff:` is read only when it is a relative path with no `..` part, no drive letter and no
 leading separator (a //host/share or \\\\host\\share path is refused by its text, before any filesystem call: no network touch), whose
 resolved path (links followed) is a regular file inside the project; else one line says it is not read. A `.git` file whose gitdir:
-starts with two separators gets no stale check.
+is not a plain local spelling (two leading separators, the \\\\?\\ \\??\\ \\\\.\\ device forms, GLOBALROOT, C:x or C://) gets no stale check.
 SessionStart `startup` / `clear` / `resume` (F3): with `handoff:` its first 15 lines, its modified time and age, and a stale line when
 the repo's last commit (the last entry of .git/logs/HEAD, a file read) is newer than the note; on `resume` with a compaction in the
 transcript "resumed; the compacted part is a summary, not a source"; with `sources:` the list. Neither key: nothing is printed.
@@ -311,8 +311,8 @@ def last_commit_epoch(project):
             g = base / ".git"
             if g.is_file():
                 m = re.match(r"gitdir:\s*(.+)", g.read_text(encoding="utf-8").strip())
-                if m and is_net_path(m.group(1).strip()):
-                    return None   # a git dir on a network share: no stale check, the share is never touched (a local absolute target is fine: worktrees point outside their folder)
+                if m and not plain_local_target(m.group(1).strip()):
+                    return None   # not a plain local spelling (a share, a device form): no stale check, nothing is touched (a local absolute target is fine: worktrees point outside their folder)
                 gd = pathlib.Path(m.group(1).strip()) if m else None
                 g = (gd if gd.is_absolute() else base / gd) if gd else None
             elif not g.is_dir():
@@ -347,13 +347,28 @@ def is_net_path(s):
     return len(s) >= 2 and s[0] in "/\\" and s[1] in "/\\"
 
 
+DEVICE_FORMS = re.compile(r"\\\?\?\\|\\\\\?\\|\\\\\.\\|//\?/|//\./|GLOBALROOT", re.I)   # \??\  \\?\  \\.\  //?/  //./  GLOBALROOT (bash-guard.py's list, copied)
+
+
+def plain_local_target(s):
+    """A gitdir: value in a plain local spelling, decided on the text before any filesystem call: X:\\... or X:/... (not X://),
+    /... (not // or /\\), or relative with no leading separator and no drive (`..` allowed: git may write a relative gitdir).
+    The \\\\?\\ \\??\\ \\\\.\\ //?/ //./ and GLOBALROOT forms are refused anywhere in the value: they can reach a share or a device."""
+    s = str(s or "")
+    if not s or "\x00" in s or DEVICE_FORMS.search(s):
+        return False
+    if re.match(r"[A-Za-z]:[\\/](?![\\/])", s) or re.match(r"/(?![/\\])", s):
+        return True
+    return not (s[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", s))
+
+
 def handoff_target(project, rel):
     """-> (Path of the file, "") when `handoff:` names a regular file inside the project, else (None, "denied") or, for a path
     inside the project that does not exist, (None, "missing"). The adapter can come with a cloned repo, so the value is checked as
     text first (relative, no `..` part, no drive letter, no leading separator, so no network path), and only then on disk: the
     resolved path (links followed) must lie inside the resolved project dir."""
     s = str(rel)
-    if (not s or "\x00" in s or is_net_path(s) or s[0] in "/\\" or re.match(r"[A-Za-z]:", s) or os.path.isabs(s)
+    if (not s or "\x00" in s or is_net_path(s) or DEVICE_FORMS.search(s) or s[0] in "/\\" or re.match(r"[A-Za-z]:", s) or os.path.isabs(s)
             or ".." in re.split(r"[/\\]+", s)):
         return None, "denied"
     try:
