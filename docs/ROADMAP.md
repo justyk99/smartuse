@@ -37,6 +37,18 @@
 - [ ] Hooks start Python without isolation and run from an install the model can write: harden before 1.0 (0.5.1 security review)
 - [ ] Sandbox mode: the skills' state writes are refused (sandboxed Bash cannot write `~/.claude`); move the skill → hook hand-off off the filesystem (the hooks read it from the transcript), so it works sandboxed and prompt-free
 
+## 0.6.0 — recall: "the summary is not a source" (design and contract `docs/notes/recall-design.md`; plan approved 2026-11-08)
+A long session gets compacted and keeps a summary; Claude then works from the summary while the job's real files sit unopened, and says "checked". Deterministic pieces, 0 model tokens, no network:
+- [ ] F1 fresh-source gate: with `sources:` in the adapter, a `publish:` command or a `publish_tools:` tool call (browser uploads included) is denied until every source file has a Read in this session after the last compaction; the reason names the unopened files
+- [ ] F2 recall at the squeeze: a PreCompact hook hands the summarizer the source list and the owner's last prompts verbatim; a SessionStart (`compact`) hook says which sources must be re-opened and that the summary is not a source; the status line counts squeezes (`hooks/recall.py`, heartbeat)
+- [ ] F3 recall at session start: `handoff:` names the handoff file; its first lines and its age are printed on startup, clear and resume; "stale" when older than the last commit
+- [ ] F4 docs, counts, a 30-second demo with invented files
+- Not in 0.6.0 (said once): a memory store or vector search (Claude Code's compaction and auto memory stay the substrate); a click on a page's own Send button (uploads and named commands are gated); a typed `sources:` line from a phone (needs the owner-quote check from the paid guard)
+
+## 0.7.0 — the paid-call guard (was 0.6.0; plan `docs/notes/paid-guard-plan.md`, YK's yes 2026-10-24; branches `paid-guard`, `paid-f3` rebased onto main 2026-11-06)
+- [x] F1 detect and deny without a go · F2 run cap, one test output first, the counter's protection · hardening (on `paid-guard`, not merged)
+- [ ] F3 the owner-quote check (WIP on `paid-f3`) · F4 docs
+
 ## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches
 - [x] hooks core (worker): the until-done gate holds until done or max_blocks (it yielded after one push per prompt); check runner finds npm/pnpm/yarn on Windows and stops after one "not found" block; state dir keyed by full path (two same-named repos shared one routing.json); UTF-8 stdin; Windows-safe status.json replace; no receipts after a run closed
 - [x] guards (worker): bash-guard rules widened (sudo in if/for/subshell, `bash -c "$(curl …)"`, `git -C … push --force`, `+refspec`, key names without a directory prefix, Windows path spellings, echo-mention false positive); file-guard case-insensitive and normalised; UTF-8 stdin; PYTHONUTF8 in the launcher
@@ -44,7 +56,8 @@
 - [x] repo: `.gitattributes` (LF everywhere), CI matrix ubuntu/macOS/Windows and on the dev branch — green on all three (bac4685)
 
 ## Proposed — relay guards (case study 7; design and failing tests in `docs/notes/relay-design.md`; not in the 1.0 bar until YK adds it)
-One session that delegates (above) removes most of their reason — photos become paths, there is no relay — so rules 1, 2 and 5 are for second-machine setups only. Rule 4 still matters in one session (a cheap subagent can spend) and comes right after the 0.5.0 work.
+One session that delegates (above) removes most of their reason — photos become paths, there is no relay — so rules 1, 2 and 5 are for second-machine setups only. Rule 4 still matters in one session (a cheap subagent can spend): it is 0.7.0.
+Rule 1's open-before-done gate ships in 0.6.0 as the fresh-source gate (opened = a Read after the last compaction); the rest of rule 1 (relay.py save, relay-guard) stays second-machine-only.
 - [ ] Rule 4: a `paid` rule family in bash-guard — the owner's go per script, a cap, one test output first
 - [ ] Rule 1: `relay.py save` + `relay-guard` on the relay channels, then the receiver's open-before-done Stop gate
 - [ ] Rule 2: `inventory.py` + the brief gate; the ask-again check
@@ -58,3 +71,4 @@ One session that delegates (above) removes most of their reason — photos becom
 
 ## Not in 1.0 (said once so it is not relitigated)
 - Another router or classifier; multi-vendor voting; anything needing a proxy or patched binary.
+- A memory database, embeddings or a model call inside a hook: smartuse adds the gate and the pointer, never a store.
