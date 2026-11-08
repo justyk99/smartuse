@@ -282,6 +282,16 @@ make("d_names_capped_at_10", ex(DENY, has=["12 of 12 sources not opened", "many/
      cmd="python send.py", adp=adapter(sources="many/*.txt"), files=[], nfiles=("many", 12), tr=lambda P: base(P))
 make("d_read_only_in_sidechain", ex(DENY, has=["3 of 3 sources not opened"]),
      cmd="python send.py", tr=lambda P: reads_all(base(P), P, side=True))
+# the files Claude Code re-attaches right after a compaction are attachment records (type file), not the model's Read: they do not
+# count as opened (the shape seen in a real compacted transcript, 2026-11-08; the text quotes "tool_use" and "Read" so the line is parsed)
+def attached_all(P):
+    t = T().human("Send the demo job to the client.").say("Working.").boundary().summary()
+    for f in FILES:
+        t.rec(type="attachment", attachment={"type": "file", "filename": P + "/" + f, "displayPath": f, "content": {"type": "text",
+              "file": {"filePath": P + "/" + f, "content": 'invented {"type":"tool_use","name":"Read"}', "numLines": 1, "startLine": 1, "totalLines": 1}}})
+    return t.say("Continuing from the summary.")
+make("d_reattached_after_compaction_is_not_opened", ex(DENY, has=["3 of 3 sources not opened since the last compaction"]),
+     cmd="python send.py", tr=attached_all)
 make("d_heredoc_a_shell_runs", ex(DENY, has=["3 of 3 sources not opened"]),
      cmd="bash <<'EOF'\npython send.py\nEOF", tr=lambda P: base(P))
 make("d_transcript_missing", ex(DENY, has=["could not verify which sources were opened (", "Retry, or ask the owner. Nothing was sent."]),
