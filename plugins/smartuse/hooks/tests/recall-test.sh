@@ -201,6 +201,28 @@ elif mode == "plain":      # plain <recall.py>: plain_local_target() on gitdir: 
             "C:/demo/x": True, "../gd": True, "gd/x": True, "//192.0.2.7/x": False}
     bad = ["%s -> %s" % (k, f(k)) for k, v in want.items() if f(k) != v]
     print("ok" if not bad else "; ".join(bad))
+elif mode == "linkstat":   # linkstat <recall.py>: the link predicate on fake lstat results (a cloud-sync reparse point is not a link; a symlink or a mount point is)
+    import collections, os, runpy, stat
+    g = runpy.run_path(sys.argv[2], run_name="recall_under_test")
+    real_lstat = os.lstat
+    def f(st):   # path_kind() itself, over a fake os.lstat result (the predicate is not called by name: the older file has none)
+        os.lstat = lambda p: st
+        try:
+            return g["path_kind"]("fake") == "link"
+        finally:
+            os.lstat = real_lstat
+    S = collections.namedtuple("S", "st_mode st_file_attributes st_reparse_tag")
+    RP, REG, DIR, LNK = 0x400, stat.S_IFREG | 0o644, stat.S_IFDIR | 0o755, stat.S_IFLNK | 0o777
+    want = [("cloud placeholder file (tag 0x9000001A)", S(REG, RP | 0x20, 0x9000001A), False),
+            ("cloud placeholder folder (tag 0x9000001A)", S(DIR, RP | 0x10, 0x9000001A), False),
+            ("symlink by mode", S(LNK, 0, 0), True),
+            ("symlink tag 0xA000000C", S(REG, RP, 0xA000000C), True),
+            ("mount point / junction tag 0xA0000003", S(DIR, RP | 0x10, 0xA0000003), True),
+            ("plain file, no reparse attribute", S(REG, 0x20, 0), False),
+            ("plain folder, no reparse attribute", S(DIR, 0x10, 0), False),
+            ("reparse attribute and a tag of 0", S(DIR, RP, 0), False)]
+    bad = ["%s -> %s" % (n, f(s)) for n, s, w in want if f(s) != w]
+    print("ok" if not bad else "; ".join(bad))
 elif mode == "timed":      # timed <recall.py> <event file>: runs the hook in this interpreter and prints its output, then ELAPSED_MS=<the hook's own time, without the interpreter start>
     import io, runpy, time
     sys.stdin = io.TextIOWrapper(io.BytesIO(open(sys.argv[3], "rb").read()), encoding="utf-8")
@@ -568,6 +590,7 @@ if mkln "$D/logsreal" "$D/proj6/.git/logs"; then
   has "links: .git/logs as a link: the handoff is still printed" "HANDOFF-LINE-01"
   lacks "links: .git/logs as a link gives no stale line" "stale:"
 else ok "(skipped: no logs link can be made here without admin rights)"; fi
+r=$(py "$D/chk.py" linkstat "$HOOK" </dev/null); [ "$r" = ok ] && ok "links: a cloud-sync reparse point is not a link; a symlink and a mount point are; no reparse attribute follows st_mode" || ko "link predicate: $r"
 # the automount prefixes: decided on the text (a unit check of the allowlist, then the run: nothing is touched)
 r=$(py "$D/chk.py" plain "$HOOK" </dev/null); [ "$r" = ok ] && ok "gitdir: /net/host/x and /Network/x (any case) are not plain local; /netx/a and other local spellings still are" || ko "plain_local_target: $r"
 oldproj proj7; newlog "$D/gdreal/logs/HEAD"

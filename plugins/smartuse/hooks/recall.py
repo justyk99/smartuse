@@ -302,18 +302,29 @@ def scan_safe(data):
 
 # ---------------------------------------------------------------- the handoff note (F3)
 
+def is_link_stat(st):
+    """True when an lstat result is a link: a symlink, or on Windows a link-like reparse point (a symlink, a junction or mount
+    point: a junction is not a symlink to os.path.islink on 3.9). A reparse point is link-like when its tag has the name-surrogate
+    bit (0x20000000); cloud-sync placeholders carry a reparse point with another tag and are ordinary files and folders."""
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    if getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        return bool(getattr(st, "st_reparse_tag", 0) & 0x20000000)
+    return False
+
+
 def path_kind(p):
-    """What a path is, decided with os.lstat so that a link is never followed: "missing", "link" (a symlink, or on Windows any
-    reparse point: a junction is not a symlink to os.path.islink on 3.9), "file", "dir" or "other". A path that cannot be looked
-    at is "link": refused, never read. A link inside a project (or one that arrives with a cloned repo or an archive) can lead to
-    a share or to a file the owner never named, so links are refused, whatever they point at."""
+    """What a path is, decided with os.lstat so that a link is never followed: "missing", "link" (see is_link_stat), "file", "dir"
+    or "other". A path that cannot be looked at is "link": refused, never read. A link inside a project (or one that arrives with
+    a cloned repo or an archive) can lead to a share or to a file the owner never named, so links are refused, whatever they
+    point at."""
     try:
         st = os.lstat(p)
     except (FileNotFoundError, NotADirectoryError):
         return "missing"
     except (OSError, ValueError):
         return "link"
-    if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+    if is_link_stat(st):
         return "link"
     return "file" if stat.S_ISREG(st.st_mode) else "dir" if stat.S_ISDIR(st.st_mode) else "other"
 
