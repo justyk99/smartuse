@@ -150,6 +150,12 @@ One Python start per tool-call hook event (no subprocess, no second interpreter,
 
 **Recommendation: A**, with C's one settings line kept in the back pocket for the demo repo should F1 not be green on Wednesday evening; B's items go to ROADMAP 0.7.0 beside the paid guard. Reason: A is the gate's own promise on the maintainer's real setup, costs one builder-day, and its over-denies are the kind the contract already accepts (one turn each); B widens the older RULES, which 0.6.0 froze, and would be the second slip of the demo; C leaves default-settings Windows users unprotected and the published promise false for them.
 
+## 7b. Review round 1 (2026-11-10): decisions
+Fresh review of `da50316..36ee0ab` found 4 majors (M1 wrapper heads can no longer be a `publish:` head, a regression; M2 a quoted word spanning lines hides the lines in it: a regression under the F2 cap, new on PowerShell, already true on Bash; M3 `_ps_match` quadratic, past the hook timeout; M4 frozen `HEREDOC` long-delimiter backtracking and `STATE_CALL` exponential failure, both pre-existing) and minors m1–m4, n1–n3. Decided by the orchestrator, same class as F2 (§7: a check in front of a frozen regex, the regex stays byte-identical):
+- M1, M3, M2a, M2b and the minors are fixed in this batch (fix round C, one builder).
+- M4 gets pre-checks in front of `strip_heredocs` and `strip_state_args` (an over-long heredoc delimiter is read as "many"; a state call text the pre-check cannot clear is not stripped, so the gate reads it raw). `HEREDOC` and `STATE_CALL` stay byte-identical.
+- M2c (Bash, at or under the cap, pre-existing): fixed only if no existing allow case flips; otherwise documented in the contract's limits and ROADMAP.
+
 ## 8. Risks
 - **The merge of two builders in `bash-guard.py`.** Distinct functions, but both touch the file; the orchestrator merges B then A and runs `run.sh` and `fresh-gate-test.sh` once more after the merge, before the fresh review.
 - **False denies in the maintainer's primary shell.** F1's coarse rule over-denies `Write-Host git push` (unquoted), a publish word in an array or a data here-string, and `Get-Help`/`Select-String` lines that quote a pattern. Each costs one turn and the reason names the fix; the `a_` and `allow` cases are the regression bar, and phase 6 runs the maintainer's own everyday PowerShell commands against the guard before the demo.
