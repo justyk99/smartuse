@@ -996,6 +996,82 @@ make("d_g_gate_first_at_4097", ex(DENY, has=["3 of 3 sources not opened"], no=["
 make("d_g_rules_still_run_over_4096_when_opened", ex(DENY, prefix="bash-guard: sudo", has=["run it yourself"]), cmd=SUDO + "x" * (4097 - len(SUDO)), tr=OPENED)
 make("a_g_long_command_no_publish_over_4096", ex(ALLOW), cmd="echo " + "lorem ipsum " * 600, tr=lambda P: base(P))
 
+# --- round H: more ways to run text the matcher does not read. A string run by another shell (Git Bash's //c, a positional PowerShell
+# string, trap, Start-Process of a shell), a nested backtick substitution, a process substitution, a shell function and a PowerShell
+# script block count as a send while the sources are unopened (tagged, the tag named in the reason); with the sources opened there is
+# no deny from the gate. And three over-denies go: options AFTER a shell's script operand are not -c, `$((` is arithmetic, and
+# backticks inside single quotes are literal.
+H_CASES = (
+    ("cmd_double_slash_c", "a nested shell string", dict(cmd='cmd //c "git push"')),
+    ("cmd_double_slash_k", "a nested shell string", dict(cmd='cmd //k "echo hi"')),
+    ("cmd_double_slash_upper", "a nested shell string", dict(cmd='cmd //C "echo hi"')),
+    ("cmd_slash_upper_c", "a nested shell string", dict(cmd='cmd /C "echo hi"')),
+    ("pwsh_positional", "a nested shell string", dict(cmd='pwsh "git push"')),
+    ("powershell_positional", "a nested shell string", dict(cmd='powershell "git push"')),
+    ("powershell_exe_positional_after_options", "a nested shell string", dict(cmd='powershell.exe -NoProfile "echo hi"')),
+    ("ps_pwsh_positional", "a nested shell string", PS('pwsh "git push"')),
+    ("ps_powershell_positional", "a nested shell string", PS('powershell "git push"')),
+    ("trap_handler", "a nested shell string", dict(cmd="trap 'git push' EXIT")),
+    ("trap_other_handler", "a nested shell string", dict(cmd="trap 'echo hi' INT TERM")),
+    ("trap_dashdash", "a nested shell string", dict(cmd="trap -- 'echo hi' EXIT")),
+    ("bash_option_value_then_c", "a nested shell string", dict(cmd='bash -o pipefail -c "echo hi"')),
+    ("ps_start_process_cmd", "a nested shell string", PS('Start-Process -FilePath cmd -ArgumentList "/c git push"')),
+    ("ps_start_process_cmd_positional", "a nested shell string", PS('Start-Process cmd -ArgumentList "/c echo hi"')),
+    ("ps_start_process_powershell", "a nested shell string", PS('Start-Process powershell -ArgumentList "-Command","echo hi"')),
+    ("ps_start_process_pwsh_exe", "a nested shell string", PS('Start-Process pwsh.exe -ArgumentList "-c echo hi"')),
+    ("ps_start_process_bash", "a nested shell string", PS('Start-Process bash -ArgumentList "-c","echo hi"')),
+    ("ps_start_process_sh", "a nested shell string", PS('Start-Process sh -ArgumentList "-c echo hi"')),
+    ("ps_start_process_wsl", "a nested shell string", PS('Start-Process wsl -ArgumentList "echo hi"')),
+    ("ps_saps_cmd", "a nested shell string", PS('saps cmd -ArgumentList "/c echo hi"')),
+    ("nested_backticks", "a nested backtick substitution", dict(cmd="echo `echo \\`git push\\``")),
+    ("nested_backticks_other", "a nested backtick substitution", dict(cmd="echo `echo \\`date\\``")),
+    ("process_substitution_bash", "a process substitution", dict(cmd="bash <(echo hi)")),
+    ("process_substitution_source", "a process substitution", dict(cmd="source <(echo hi)")),
+    ("process_substitution_dot", "a process substitution", dict(cmd=". <(echo hi)")),
+    ("process_substitution_redirect", "a process substitution", dict(cmd="bash < <(echo hi)")),
+    ("process_substitution_output", "a process substitution", dict(cmd="echo hi | tee >(cat)")),
+    ("process_substitution_diff", "a process substitution", dict(cmd="diff <(ls a) <(ls b)")),
+    ("process_substitution_in_a_substitution", "a process substitution", dict(cmd='echo "$(cat <(echo hi))"')),
+    ("function_keyword", "a shell function", dict(cmd="function f { git push; }; f")),
+    ("function_parens", "a shell function", dict(cmd="f() { git push; }; f")),
+    ("function_keyword_parens", "a shell function", dict(cmd="function f() { echo hi; }")),
+    ("function_after_a_command", "a shell function", dict(cmd="cd out && g () { echo hi; }; g")),
+    ("ps_script_block_create", "a script block", PS("[scriptblock]::Create('git push').Invoke()")),
+    ("ps_script_block_create_full_name", "a script block", PS('[System.Management.Automation.ScriptBlock]::Create("echo hi")')),
+    ("ps_invoke_command_scriptblock", "a script block", PS("Invoke-Command -ScriptBlock { echo hi }")),
+    ("ps_invoke_command_positional", "a script block", PS("Invoke-Command { echo hi }")),
+    ("ps_icm", "a script block", PS("icm -ScriptBlock { echo hi }")),
+)
+for nm, tag, kw in H_CASES:
+    make("d_h_" + nm, ex(DENY, has=cx(tag), maxlen=2000), tr=lambda P: base(P), **kw)
+    make("a_h_" + nm + "_opened", ex(ALLOW), tr=OPENED, **kw)
+# a tagged command goes on to RULES when the sources are open (a RULES match keeps its reason), and is decided by the gate first otherwise
+make("d_h_process_substitution_then_rules_when_opened", ex(DENY, prefix="bash-guard: sudo", has=["run it yourself"]), cmd="sudo bash <(echo hi)", tr=OPENED)
+make("d_h_process_substitution_unopened_decided_before_rules", ex(DENY, has=cx("a process substitution")), cmd="sudo bash <(echo hi)", tr=lambda P: base(P))
+# the over-denies that go (each was a deny of a command with no send in it)
+for nm, cm in (("bash_script_operand_then_clean_option", "bash ./build.sh -clean out"), ("bash_script_operand_then_c", "bash ./build.sh -c out"),
+               ("sh_script_operand_then_c_file", "sh run.sh -c config.yml"), ("bash_options_before_the_script", "bash -x -e ./build.sh -c out"),
+               ("arithmetic_three", "echo $((1+2)) $((3+4)) $((5+6))"), ("arithmetic_in_quotes", 'echo "$((1+2)) $((3+4)) $((5+6))" done'),
+               ("single_quoted_backticks", "git commit -m 'Use `a`, `b`, `c`'"), ("single_quoted_backticks_many", "echo 'x `a` `b` `c` `d` `e`'"),
+               ("single_quoted_substitutions", "echo '$(a) $(b) $(c)'"), ("escaped_substitutions", "echo \\$(a) \\$(b) \\$(c)"),
+               ("escaped_backticks_in_double_quotes", 'echo "\\`a\\` and \\`b\\`"')):
+    make("a_h_overdeny_removed_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+# what stays tagged beside them: double quotes do not make backticks literal; arithmetic around real substitutions; a PowerShell single-quoted backtick
+make("d_h_double_quoted_backticks_stay_tagged", ex(DENY, has=cx("3 or more command substitutions")), cmd='git commit -m "Use `a`, `b`, `c`"', tr=lambda P: base(P))
+make("d_h_arithmetic_beside_substitutions_counts_them", ex(DENY, has=cx("3 or more command substitutions")), cmd="echo $(($(a)+$(b))) $(c)", tr=lambda P: base(P))
+make("d_h_ps_single_quoted_backtick_stays_tagged", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS("git commit -m 'Use `x`'"))
+make("d_h_bash_dash_c_after_options", ex(DENY, has=cx("a nested shell string")), cmd="bash -x -e -c 'echo hi'", tr=lambda P: base(P))
+# everyday commands stay allowed with the sources unopened
+for nm, cm in (("bash_script", "bash ./build.sh"), ("bash_script_flags", "bash -e ./build.sh --verbose"), ("parenthesised_text", 'echo "a (b) c"'),
+               ("subshell", "if [ -f x ]; then (cd d && ls); fi"), ("one_substitution_ls", "ls $(pwd)"), ("awk_program", "awk '{print $1}' notes.txt"),
+               ("grep_alternation", 'grep -E "(a|b)" notes.txt'), ("for_loop", "for f in *.md; do echo $f; done"), ("redirect_to_file", "echo hi > out.txt"),
+               ("pipes", "cat notes.txt | sort | uniq -c"), ("exit", "exit 0"), ("two_backtick_pairs", "echo `date` `pwd`"),
+               ("git_commit_heredoc_backticks", "git commit -F - <<'EOF'\nUse `a`, `b`, `c` and `d`\nEOF"), ("cmd_alone", "cmd"), ("pwsh_alone", "pwsh")):
+    make("a_h_everyday_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("pwsh_options_only", "pwsh -NoProfile"), ("start_process_notepad", "Start-Process notepad -ArgumentList notes.txt"),
+               ("start_process_git_status", "Start-Process git -ArgumentList status"), ("get_command", "Get-Command pwsh"), ("backtick_continuation", "Get-ChildItem `\n -Recurse")):
+    make("a_h_everyday_ps_" + nm, ex(ALLOW), tr=lambda P: base(P), **PS(cm))
+
 open(OUT + "/order.txt", "w", newline="\n").write("\n".join(ORDER) + "\n")
 open(OUT + "/skipped.txt", "w", newline="\n").write("".join(s + "\n" for s in SKIPS))
 PY
