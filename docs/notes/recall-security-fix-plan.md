@@ -164,6 +164,12 @@ Re-review of 961ce8a: 13 of 14 items fixed; one new major and four minors. Decid
 - N2 (PowerShell per-line pass over-denies a publish command on its own line inside a multi-line quoted argument) → accepted, same class as the coarse PowerShell match (one turn); documented in F7.
 - N4 (a string piped into iex / a shell across a line break or through parentheses is not followed) → documented limit in F7 (the Bash form predates this batch).
 
+## 7d. Review round 3 (2026-11-10): decisions
+Re-review of 780e0ba: N1 fixed; N3 partial; N5 partial. Decided by the orchestrator:
+- N3 nested (major, pre-existing, the same at 961ce8a): the heredoc budget is per text, so 16 `$( )` bodies each under budget cost 6.8 s in total → round E spends ONE budget across the whole command (nested bodies included); the wall-time test bound drops well below the hook timeout.
+- Single-quoted PowerShell strings are read strictly by PowerShell's rules (a backtick is literal, `''` is a doubled quote); the round-2 case that expected a deny where PowerShell reads one string is corrected to allow; the docstring says what the code does.
+- Not checked in round 3: an adversarial PowerShell tokenisation hunt (the reviewer's run was cut short by a safety classifier). It stays on the phase 6 / 0.6.1 list; nothing in this batch claims more than the cases pinned in the suites.
+
 ## 8. Risks
 - **The merge of two builders in `bash-guard.py`.** Distinct functions, but both touch the file; the orchestrator merges B then A and runs `run.sh` and `fresh-gate-test.sh` once more after the merge, before the fresh review.
 - **False denies in the maintainer's primary shell.** F1's coarse rule over-denies `Write-Host git push` (unquoted), a publish word in an array or a data here-string, and `Get-Help`/`Select-String` lines that quote a pattern. Each costs one turn and the reason names the fix; the `a_` and `allow` cases are the regression bar, and phase 6 runs the maintainer's own everyday PowerShell commands against the guard before the demo.
