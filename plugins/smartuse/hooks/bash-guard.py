@@ -17,15 +17,18 @@
 # A source value must be a plain local path (checked by its text before any file call); source expansion and the transcript pass
 # share one deadline, the expansion running in a worker thread that is abandoned when it does not answer. A relative source is
 # walked component by component without following links (a link or reparse point on the way refuses the pattern); every value
-# echoed in a reason is cut at 200 characters and a whole reason at 2,000.
+# echoed in a reason is cut at 200 characters and a whole reason at 2,000. The deadline starts when the hook starts, before any
+# scan of the command; the heredoc scans rescan their text once per unclosed opener, so a command with more than HEREDOC_CAP
+# openers is read as it stands (its heredoc bodies count as code: an over-deny, never a miss).
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
-import datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
+import base64, datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
 
 BUDGET_S = 4.0       # one deadline for the whole fresh-source check (source expansion and transcript pass); past it a matched publish is denied
 MAX_SOURCES = 200    # files one gate check will expand the sources to
 MAX_NAMES = 10       # unopened files named in a reason
 MAX_VALUE = 200      # characters of one adapter value or file name echoed in a reason
 MAX_REASON = 2000    # characters of a whole reason
+HEREDOC_CAP = 16     # `<<` openers a command may hold before its bodies are read as code: the opener scan rescans the text once per unclosed opener
 
 RULES = [
     (r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|zsh|dash|python3?|node|perl)\b",
@@ -70,7 +73,7 @@ _WORD = r"""(?:'[^']*'|\$'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\\.|[^\s|;&()<>'"\\
 LEX = re.compile(r"\s+|(?P<redir>\d*(?:<<<|<<-?|<>|>>|>&|<&|&>>?|>\||[<>]))\s*(?:" + _WORD + r")?"
                  r"|(?P<sep>\|\||&&|;;|\|&|[|;&()])|(?P<word>" + _WORD + ")", re.S)
 UNQUOTE = re.compile(r"""\$'((?:\\.|[^'\\])*)'|'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)""", re.S)
-SHELL = re.compile(r"(?:^|[\\/])(?:bash|sh|zsh|dash|ksh)(?:\.exe)?$", re.I)   # bash, /bin/sh, C:\…\bash.exe — not x.sh
+SHELL = re.compile(r"(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|ash|fish)(?:\.exe)?$|^\$\{?SHELL\}?$", re.I)   # bash, /bin/sh, C:\…\bash.exe, $SHELL — not x.sh
 STDIN_FILE = re.compile(r"^(?:-|/dev/stdin|/dev/fd/0|/proc/[^/]+/fd/0)$")     # a "script" that is the heredoc itself
 
 
@@ -518,7 +521,7 @@ def fresh_verdict(data, project, sources, deadline):
 FLEX = re.compile(r"[^\S\n]+|(?P<redir>\d*(?:<<<|<<-?|<>|>>|>&|<&|&>>?|>\||[<>]))[^\S\n]*(?:" + _WORD + r")?"
                   r"|(?P<sep>\n|\|\||&&|;;|\|&|[|;&()])|(?P<word>" + _WORD + ")", re.S)
 VAR_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-LEAD_WORDS = frozenset(("if", "then", "else", "elif", "do", "while", "until", "!", "{"))   # words that can stand before a command in a compound
+LEAD_WORDS = frozenset(("if", "then", "else", "elif", "do", "while", "until", "!", "{", "coproc"))   # words that can stand before a command in a compound
 # Programs that run the command that follows them: name -> (options that take a value, plain words before the command).
 WRAPPERS = {"command": (frozenset(), 0), "builtin": (frozenset(), 0), "exec": (frozenset(("-a",)), 0),
             "env": (frozenset(("-u", "-C", "-S")), 0), "nohup": (frozenset(), 0), "nice": (frozenset(("-n",)), 0),
@@ -526,11 +529,28 @@ WRAPPERS = {"command": (frozenset(), 0), "builtin": (frozenset(), 0), "exec": (f
             "xargs": (frozenset(("-n", "-I", "-P", "-d", "-L", "-s", "-a", "-E")), 0), "time": (frozenset(), 0),   # GNU -i / -l attach their value
             "winpty": (frozenset(), 0),
             "sudo": (frozenset(("-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-r", "-t", "-U")), 0),
-            "doas": (frozenset(("-u", "-C")), 0)}
+            "doas": (frozenset(("-u", "-C")), 0), "busybox": (frozenset(), 0), "setsid": (frozenset(), 0),
+            # PowerShell and Windows launchers; their option words compare without regard to case (PS_WRAPPERS). -FilePath and
+            # -ArgumentList are plain switches here so that their values stay in the word list.
+            "start-process": (frozenset(("-workingdirectory", "-windowstyle", "-verb", "-redirectstandardoutput", "-redirectstandarderror",
+                                         "-redirectstandardinput", "-credential")), 0),
+            "wsl": (frozenset(("-d", "--distribution", "-u", "--user", "--cd", "--shell-type")), 0)}
+WRAPPERS["saps"] = WRAPPERS["start"] = WRAPPERS["start-process"]
+# Package runners: `uv run python send.py` runs what follows the plain word `run` (after its own options).
+WRAPPERS["uv"] = (frozenset(("--with", "--python", "-p", "--directory", "--project", "--env-file", "--extra", "--group", "--with-requirements")), 1)
+for _runner in ("poetry", "pdm", "pipenv", "hatch", "rye", "pipx"):
+    WRAPPERS[_runner] = (frozenset(), 1)
+PS_WRAPPERS = frozenset(("start-process", "saps", "start", "wsl"))
+START_PROCESS = frozenset(("start-process", "saps", "start"))   # the program and its arguments are separate parameters, in any order
 
 
-def flex_split(text):
-    """[[word, …], …]: the commands of a shell text, or None when it does not split cleanly (an open quote)."""
+HERESTRING = "\x00"   # marks a here-string word (<<< WORD) in a segment: _hit takes it out again
+
+
+def flex_split(text, seps=None):
+    """[[word, …], …]: the commands of a shell text, or None when it does not split cleanly (an open quote). The word of a
+    here-string (<<< WORD) stays in its segment, marked with HERESTRING. When `seps` is a list, the separator that ended each
+    segment is appended to it, in order ("" for the last)."""
     out, cur, pos = [], [], 0
     while pos < len(text):
         m = FLEX.match(text, pos)
@@ -542,17 +562,29 @@ def flex_split(text):
         elif m.group("sep"):
             out.append(cur)
             cur = []
+            if seps is not None:
+                seps.append(m.group("sep"))
+        elif (m.group("redir") or "").lstrip("0123456789") == "<<<":
+            rest = m.group(0)[len(m.group("redir")):].strip()
+            if rest:
+                cur.append(HERESTRING + UNQUOTE.sub(lambda q: next(g for g in q.groups() if g is not None), rest))
     out.append(cur)
+    if seps is not None:
+        seps.append("")
     return out
 
 
-def command_segments(text):
+def command_segments(text, seps=None):
     """The commands of a shell text as word lists, split on newline ; && || | (and & and parentheses). Text that does not split
     cleanly is split by line, and a line that still does not is split crudely on separators: a match found by over-splitting
-    only errs towards the check."""
-    text = text.replace("\\\n", " ")
-    segs = flex_split(text)
+    only errs towards the check. With a `seps` list, the separator that ended each segment is appended to it (a crude split
+    counts as a pipe, which only errs towards the check)."""
+    text = text.replace("\\\n", "")
+    mine = [] if seps is not None else None
+    segs = flex_split(text, mine)
     if segs is not None:
+        if seps is not None:
+            seps.extend(mine)
         return segs
     segs = []
     for line in text.split("\n"):
@@ -560,11 +592,13 @@ def command_segments(text):
         if s is None:
             s = [[w.strip("'\"") for w in piece.split()] for piece in re.split(r"[;&|()]+", line)]
         segs.extend(s)
+        if seps is not None:
+            seps.extend(["|"] * len(s))
     return segs
 
 
 EXT = re.compile(r"\.[A-Za-z0-9]+$")
-PYFAM = re.compile(r"(?:python(?:3(?:\.\d+)?)?|py)")   # python, python3, python3.N, py: one name
+PYFAM = re.compile(r"(?:python(?:3(?:\.\d+)?)?|pythonw|pyw|py)")   # python, python3, python3.N, pythonw, pyw, py: one name
 
 
 def names_file(w):
@@ -575,9 +609,13 @@ def names_file(w):
 def path_parts(w):
     """The readings of a path word as component lists, compared case-insensitively: backslashes read as /, empty parts and .
     dropped. A word that starts with one letter as its first part (/c/proj, \\c\\proj) has a second reading with that letter as
-    a drive (c:, proj), so /c/proj/send.py and C:/proj/send.py are the same file."""
+    a drive (c:, proj), so /c/proj/send.py and C:/proj/send.py are the same file. The last component is read the Windows way
+    (win_part, as file-guard.py does): cut at the first :, trailing dots and spaces dropped, so send.py. = 'send.py ' =
+    send.py::$DATA = send.py."""
     s = w.replace("\\", "/")
     out = [[x.lower() for x in s.split("/") if x not in ("", ".")]]
+    if out[0]:
+        out[0][-1] = out[0][-1].split(":")[0].rstrip(". ") or out[0][-1]
     m = re.match(r"/([A-Za-z])/", s)
     if m:
         out.append([m.group(1).lower() + ":"] + out[0][1:])
@@ -587,16 +625,16 @@ def path_parts(w):
 def word_eq(p, c):
     """Does the command word c stand for the pattern word p? A word that names a file matches when c's path components end with
     p's (send.py = C:/proj/send.py = ./send.py; tools/send.py = C:\\p\\tools\\send.py, not send.py or xtools/send.py); any other
-    word must be equal. No file system call: an unrelated script of the same name is an over-deny, which costs one turn."""
+    word must be equal, without regard to case (a shell on Windows does not tell Git from git). No file system call: an unrelated
+    script of the same name is an over-deny, which costs one turn."""
     if names_file(p):
         return any(pp and len(cp) >= len(pp) and cp[-len(pp):] == pp for pp in path_parts(p) for cp in path_parts(c))
-    return p == c
+    return p.lower() == c.lower()
 
 
 def base_name(w):
-    """The last path component of a command word with a trailing .exe dropped."""
-    b = re.split(r"[\\/]", w)[-1]
-    return b[:-4] if b.lower().endswith(".exe") else b
+    """The last path component of a command word with a trailing .exe / .cmd / .bat / .ps1 / .com dropped."""
+    return re.sub(r"\.(?:exe|cmd|bat|ps1|com)$", "", re.split(r"[\\/]", w)[-1], flags=re.I)
 
 
 def head_eq(p, c):
@@ -606,11 +644,11 @@ def head_eq(p, c):
     if "/" in p or "\\" in p:
         return word_eq(p, c)
     p = base_name(p)
-    if PYFAM.fullmatch(p):
-        return bool(PYFAM.fullmatch(base_name(c)))
+    if PYFAM.fullmatch(p.lower()):
+        return bool(PYFAM.fullmatch(base_name(c).lower()))
     if names_file(p):
         return word_eq(p, c)
-    return base_name(c) == p
+    return base_name(c).lower() == p.lower()
 
 
 def _bt_end(t, i):
@@ -629,6 +667,17 @@ def _bt_end(t, i):
 HEREDOC_OPEN = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1")
 
 
+def many_heredocs(text):
+    """More `<<` than HEREDOC_CAP: the heredoc scans (each rescans the text once per unclosed opener) are skipped and every line
+    of the text is read as code. A command that long with that many openers is an over-deny at worst: one turn."""
+    return text.count("<<") > HEREDOC_CAP
+
+
+def cap_strip(text):
+    """gate_strip, except that a text with many heredoc openers is returned as it stands."""
+    return text if many_heredocs(text) else gate_strip(text)
+
+
 def _heredoc_end(t, i):
     """t[i:] starts with <<: the index just after the terminator line of a heredoc opened there, or i + 2 when there is none."""
     m = HEREDOC_OPEN.match(t, i)
@@ -637,8 +686,9 @@ def _heredoc_end(t, i):
     return e.end() if e else i + 2
 
 
-def _sub_end(t, i, depth=0):
-    """t[i:] starts just after "$(": the index of its matching ")", or len(t). Quotes, backticks and nested $( ) are respected."""
+def _sub_end(t, i, depth=0, many=False):
+    """t[i:] starts just after "$(": the index of its matching ")", or len(t). Quotes, backticks and nested $( ) are respected.
+    With many True (see HEREDOC_CAP) a heredoc is not looked for: its lines are read as code."""
     n, par, dq = len(t), 1, False
     while i < n:
         c = t[i]
@@ -655,8 +705,8 @@ def _sub_end(t, i, depth=0):
         elif c == "`":
             i = _bt_end(t, i + 1)
         elif c == "$" and t.startswith("$(", i) and depth < 20:
-            i = _sub_end(t, i + 2, depth + 1)
-        elif c == "<" and not dq and t.startswith("<<", i) and not t.startswith("<<<", i):
+            i = _sub_end(t, i + 2, depth + 1, many)
+        elif c == "<" and not many and not dq and t.startswith("<<", i) and not t.startswith("<<<", i):
             i = max(i, _heredoc_end(t, i) - 1)   # a heredoc's lines are text: quotes and parentheses in them do not count
         elif not dq:
             if c == "(":
@@ -675,6 +725,7 @@ def subst_bodies(text, quoted=True):
     With quoted False the text is the body of an unquoted heredoc, where quote characters are plain text and only a backslash
     keeps a $ or backtick from substituting."""
     out, n, i, dq = [], len(text), 0, False
+    many = many_heredocs(text)
     while i < n:
         c = text[i]
         if c == "\\":
@@ -692,7 +743,7 @@ def subst_bodies(text, quoted=True):
             out.append(text[i + 1:j])
             i = j
         elif c == "$" and text.startswith("$(", i):
-            j = _sub_end(text, i + 2)
+            j = _sub_end(text, i + 2, 0, many)
             out.append(text[i + 2:j])
             i = j
         i += 1
@@ -706,37 +757,65 @@ def command_start(seg):
     i = 0
     while i < len(seg):
         w = seg[i]
-        name = re.split(r"[\\/]", w)[-1]
-        if name.lower().endswith(".exe"):
-            name = name[:-4]
-        if VAR_ASSIGN.match(w) or w in LEAD_WORDS:
+        name = base_name(w).lower()
+        if w == "coproc" and i + 2 < len(seg) and seg[i + 2] == "{":   # coproc NAME { … }: the word before the brace is a name
+            i += 2
+        elif VAR_ASSIGN.match(w) or w in LEAD_WORDS:
             i += 1
         elif name in WRAPPERS:
             valued, plain = WRAPPERS[name]
             i += 1
-            while i < len(seg) and seg[i].startswith("-") and len(seg[i]) > 1:
-                if seg[i] == "--":
-                    i += 1
-                    break
-                i += 2 if seg[i] in valued else 1
-            i += plain
+            for skip in (0, 1):   # options, the plain words (run, 60), then options again (uv run --with x python …)
+                while i < len(seg) and seg[i].startswith("-") and len(seg[i]) > 1:
+                    if seg[i] == "--":
+                        i += 1
+                        break
+                    i += 2 if (seg[i] in valued or (name in PS_WRAPPERS and seg[i].lower() in valued)) else 1
+                if not skip:
+                    i += plain
         else:
             break
     return i
 
 
+SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "$shell", "${shell}")   # command names (lower case) of a shell; $SHELL is read as one
+
+
 def shell_string(cmd):
-    """The command string a shell -c or an eval is given (words after the command word), or None."""
-    name = re.split(r"[\\/]", cmd[0])[-1] if cmd else ""
-    if name.lower().endswith(".exe"):
-        name = name[:-4]
-    if name == "eval":
+    """The command string a shell -c, an eval, a PowerShell iex / pwsh -Command / pwsh -EncodedCommand or a cmd /c is given
+    (words after the command word), or None. A PowerShell encoded command is decoded (base64 of UTF-16LE); raises ValueError
+    when the value does not decode, which the caller treats as a publish it cannot read."""
+    name = base_name(cmd[0]).lower() if cmd else ""
+    if name == "eval" or name in ("iex", "invoke-expression"):
         return " ".join(cmd[1:]) if len(cmd) > 1 else None
-    if name in ("sh", "bash", "zsh", "dash", "ksh"):
+    if name in SHELLS:
         for k in range(1, len(cmd) - 1):
             if cmd[k].startswith("-") and not cmd[k].startswith("--") and "c" in cmd[k][1:]:
                 return cmd[k + 2] if cmd[k + 1] == "--" and k + 2 < len(cmd) else cmd[k + 1]   # bash -c -- 'text'
+    if name == "cmd":
+        for k in range(1, len(cmd) - 1):
+            if cmd[k].lower() in ("/c", "/k"):
+                return " ".join(cmd[k + 1:])
+    if name in ("pwsh", "powershell"):
+        for k in range(1, len(cmd) - 1):
+            o = cmd[k].lstrip("-/").lower() if cmd[k][:1] in ("-", "/") else ""
+            if o and (o == "c" or (len(o) >= 3 and "command".startswith(o))):
+                return " ".join(cmd[k + 1:])
+            if o and (o == "ec" or "encodedcommand".startswith(o)):
+                return base64.b64decode(cmd[k + 1], validate=True).decode("utf-16-le")
     return None
+
+
+UNREADABLE = []   # set when an encoded PowerShell command could not be decoded: the gate then denies with its own reason
+
+
+def ps_text(s):
+    """A PowerShell command as shell-like text the segment splitter reads: a backtick-newline joins lines and any other backtick
+    (PowerShell's escape character) is dropped, here-string fences (@" "@ @' '@) become line breaks, { and } (script blocks)
+    become ;, and commas (array literals) become blanks. Nothing else."""
+    s = re.sub(r"`\r?\n", "", s)
+    s = re.sub(r"@[\"']|[\"']@", "\n", s)
+    return s.replace("`", "").replace("{", ";").replace("}", ";").replace(",", " ")
 
 
 # an UNQUOTED heredoc: no quote or backslash in or after the delimiter (bash substitutes $( … ) and backticks in its body lines)
@@ -756,7 +835,7 @@ def heredoc_substs(text):
     """The $( … ) and backtick bodies inside the bodies of the unquoted heredocs of a shell text. strip_heredocs removes a data
     heredoc body whatever its quoting, but bash still runs the substitutions in an unquoted one; the plain lines stay data and a
     quoted or backslashed delimiter's body is not looked at."""
-    if "<<" not in text:
+    if "<<" not in text or many_heredocs(text):
         return []
     out = []
     for m in HEREDOC_OPEN_PLAIN.finditer(text):
@@ -764,14 +843,16 @@ def heredoc_substs(text):
     return out
 
 
-def publish_hit(text, patterns, depth=0, raw=None):
+def publish_hit(text, patterns, depth=0, raw=None, ps=False):
     """Does any command of `text` run a publish pattern? A pattern matches a command when its first word is the command word
     (after VAR=value, env / nohup / timeout / winpty / sudo … wrappers and their options; by base name, so /usr/bin/git and
     git.exe are git, and the python family is one name) and each later pattern word appears, in order, among the command's later
     words: `git push` matches `git -C dir push origin`, `python send.py` matches `python -u C:/proj/send.py` (a word that names a
     file matches by the end of its path, see word_eq). The string given to sh|bash|zsh|dash|ksh -c and to eval, and the body of
     each $( … ) and backtick pair, is checked the same way, to depth 2. `echo "python send.py"` is not a match: its command
-    word is echo. A word that only happens to appear later (git log --grep push) is an over-deny, which costs one turn."""
+    word is echo. A word that only happens to appear later (git log --grep push) is an over-deny, which costs one turn. With ps
+    True (a PowerShell command, see ps_text) a pattern's first word may be any word of a statement and the later ones follow it
+    in order (PowerShell puts the program after a parameter); for Start-Process they may come in any order."""
     pats = []
     for p in patterns:
         segs = flex_split(p)
@@ -779,18 +860,73 @@ def publish_hit(text, patterns, depth=0, raw=None):
             pats.append(segs[0])
     if not pats:
         return False
-    if _hit(text, pats, depth):
+    if _hit(text, pats, depth, ps):
         return True
     # `raw` is the command before strip_heredocs: the substitutions inside its unquoted heredocs run, whatever strip_heredocs did
-    return raw is not None and depth < 2 and any(_hit(gate_strip(b), pats, depth + 1) for b in heredoc_substs(raw))
+    return raw is not None and depth < 2 and any(_hit(cap_strip(b), pats, depth + 1) for b in heredoc_substs(raw))
 
 
-def _hit(text, pats, depth):
-    for seg in command_segments(text):
+def _ps_match(pw, seg, cmd):
+    """PowerShell: does the statement run pattern pw? Any word of cmd may be the program; the later pattern words follow it in
+    order. For Start-Process (and its aliases) the words after the verb may come in any order."""
+    for h, w in enumerate(cmd):
+        if head_eq(pw[0], w):
+            k = 0
+            for x in cmd[h + 1:]:
+                if k < len(pw) - 1 and word_eq(pw[k + 1], x):
+                    k += 1
+            if k == len(pw) - 1:
+                return True
+    if seg and base_name(seg[0]).lower() in START_PROCESS:
+        args = seg[1:]
+        for h, w in enumerate(args):
+            if head_eq(pw[0], w):
+                rest = args[:h] + args[h + 1:]
+                if all(any(word_eq(p, x) for x in rest) for p in pw[1:]):
+                    return True
+    return False
+
+
+def alias_words(cmd):
+    """git -c alias.NAME=VALUE: the words of each VALUE (a leading ! dropped), which git runs when NAME is given."""
+    out = []
+    if cmd and base_name(cmd[0]).lower() == "git":
+        for k in range(1, len(cmd) - 1):
+            if cmd[k] == "-c" and cmd[k + 1].lower().startswith("alias.") and "=" in cmd[k + 1]:
+                out.extend(cmd[k + 1].split("=", 1)[1].lstrip("!").split())
+    return out
+
+
+def piped_text(prev):
+    """The text an echo or printf segment writes (its words after the options and, for printf, a format word), or None."""
+    prev = [w for w in prev if w[:1] != HERESTRING]
+    pc = prev[command_start(prev):]
+    if not pc or base_name(pc[0]).lower() not in ("echo", "printf"):
+        return None
+    rest = pc[1:]
+    while rest and rest[0].startswith("-") and len(rest[0]) > 1:
+        rest = rest[1:]
+    if base_name(pc[0]).lower() == "printf" and rest and "%" in rest[0]:
+        rest = rest[1:]
+    return " ".join(rest).replace("\\n", "\n")
+
+
+def _hit(text, pats, depth, ps=False):
+    seps = []
+    segs = command_segments(text, seps)
+    for n, seg in enumerate(segs):
+        herestr = [w[1:] for w in seg if w[:1] == HERESTRING]
+        if herestr:
+            seg = [w for w in seg if w[:1] != HERESTRING]
         cmd = seg[command_start(seg):]
         if not cmd:
             continue
+        cmd = cmd + alias_words(cmd)
         for pw in pats:
+            if ps:
+                if _ps_match(pw, seg, cmd):
+                    return True
+                continue
             if not head_eq(pw[0], cmd[0]):
                 continue
             k = 0
@@ -799,22 +935,36 @@ def _hit(text, pats, depth):
                     k += 1
             if k == len(pw) - 1:
                 return True
-        inner = shell_string(cmd)
-        if inner and depth < 2 and _hit(inner, pats, depth + 1):
+        try:
+            inner = shell_string(cmd)
+        except ValueError:   # an encoded command that does not decode: nothing to look at, so the gate cannot clear it
+            UNREADABLE.append(1)
             return True
+        if inner and depth < 2 and _hit(inner, pats, depth + 1, ps):
+            return True
+        if depth < 2 and base_name(cmd[0]).lower() in SHELLS and reads_stdin_as_code("sh", cmd[1:]):
+            # a shell that runs its stdin as commands: a here-string word, and the text an echo / printf pipes into it
+            if any(_hit(h, pats, depth + 1, ps) for h in herestr):
+                return True
+            fed = piped_text(segs[n - 1]) if n and seps[n - 1] in ("|", "|&") else None
+            if fed and _hit(fed, pats, depth + 1, ps):
+                return True
     if depth < 2:
         for body in subst_bodies(text):
-            if _hit(gate_strip(body), pats, depth + 1):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
+            if _hit(cap_strip(body), pats, depth + 1, ps):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
                 return True
-            if any(_hit(gate_strip(b), pats, depth + 1) for b in heredoc_substs(body)):   # but an unquoted one still substitutes
+            if any(_hit(cap_strip(b), pats, depth + 1, ps) for b in heredoc_substs(body)):   # but an unquoted one still substitutes
                 return True
     return False
 
 
-def fresh_gate(data, text, raw=None):
-    """None to allow the call, else the reason to deny it. `text` is the Bash command with data heredocs stripped, or None for
-    a tool call (then the tool's name is matched against `publish_tools:`); `raw` is the same command before the stripping."""
-    deadline = time.monotonic() + BUDGET_S
+def fresh_gate(data, text, raw=None, deadline=None, ps=False):
+    """None to allow the call, else the reason to deny it. `text` is the Bash command with data heredocs stripped (or a
+    PowerShell command, normalised, with ps True), or None for a tool call (then the tool's name is matched against
+    `publish_tools:`); `raw` is the same command before the stripping. `deadline` is the time.monotonic() value the whole check
+    must end by: main() starts it when the hook starts."""
+    if deadline is None:
+        deadline = time.monotonic() + BUDGET_S
     try:
         project = project_dir(data)
         adapter = adapter_text(project)
@@ -822,7 +972,7 @@ def fresh_gate(data, text, raw=None):
         if not sources:
             return None
         if text is not None:
-            hit = publish_hit(text, adapter_list(adapter, "publish"), 0, raw)
+            hit = publish_hit(text, adapter_list(adapter, "publish"), 0, raw, ps)
         else:
             name = data.get("tool_name")
             hit = isinstance(name, str) and any(fnmatch.fnmatchcase(name, g) for g in adapter_list(adapter, "publish_tools"))
@@ -830,6 +980,8 @@ def fresh_gate(data, text, raw=None):
             return None
     except Exception:
         return None
+    if UNREADABLE:
+        return "fresh-source — the PowerShell command carries an encoded command the gate cannot read. Run it in plain text. Nothing was sent."
     try:
         return fresh_verdict(data, project, sources, deadline)
     except Exception as e:
@@ -853,20 +1005,34 @@ def main():
         return
     if not isinstance(data, dict):
         return
-    if data.get("tool_name") != "Bash":
-        why = fresh_gate(data, None)
+    deadline = time.monotonic() + BUDGET_S   # the fresh-source check's deadline starts with the hook, before any scan of the command
+    tool = data.get("tool_name")
+    if tool not in ("Bash", "PowerShell"):
+        why = fresh_gate(data, None, None, deadline)
         if why:
             deny(why)
         leave()
         return
     cmd = (data.get("tool_input") or {}).get("command") or ""
     pre = strip_state_args(cmd)
-    text = strip_heredocs(pre)
+    if tool == "PowerShell":   # no heredocs in PowerShell: RULES and the gate read the normalised text (the gate with / for \, which is no escape there)
+        text = ps_text(pre)
+        for pat, why in RULES:
+            if re.search(pat, text, re.I | re.S):
+                deny(why)
+                return
+        why = fresh_gate(data, text.replace("\\", "/"), None, deadline, True)
+        if why:
+            deny(why)
+        leave()
+        return
+    many = many_heredocs(pre)
+    text = pre if many else strip_heredocs(pre)
     for pat, why in RULES:
         if re.search(pat, text, re.I | re.S):
             deny(why)
             return
-    why = fresh_gate(data, gate_strip(pre), pre)
+    why = fresh_gate(data, pre if many else gate_strip(pre), None if many else pre, deadline)
     if why:
         deny(why)
     leave()

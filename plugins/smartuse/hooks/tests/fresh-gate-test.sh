@@ -305,6 +305,30 @@ make("d_deadline_overrun_literal_sources", ex(DENY, has=["could not verify which
      cmd="python send.py", adp=adapter(sources="jobs/demo/plan.pdf"), tr=lambda P: base(P).read(P + "/" + PLAN), guard=BG)
 make("d_deadline_overrun_tool", ex(DENY, has=["could not verify which sources were opened ("]), tool="mcp__demo__file_upload",
      tr=lambda P: reads_all(base(P), P), guard=BG)
+# the heredoc scan is bounded: a command with more than 16 `<<` openers is read as it stands (bodies count as code), and the deadline
+# starts when the hook starts. 8,000 unclosed openers (48 KB) before a publish word are decided well inside the 10 s hook timeout
+# (interpreter start included); 16 data heredocs behave as before; 17 are read as code (the documented over-deny at the cap).
+HD = lambda n, body: "".join("cat > f%d.txt <<'EOF'\n%s\nEOF\n" % (i, body if i == 5 else "data %d" % i) for i in range(n))
+make("d_many_heredocs_publish", ex(DENY, has=["3 of 3 sources not opened"], max=9), cmd="x <<a\n" * 8000 + "git push", tr=lambda P: base(P))
+make("d_cap_overdeny_pinned", ex(DENY, has=["3 of 3 sources not opened"]), cmd=HD(17, "python send.py"), tr=lambda P: base(P))
+make("a_sixteen_heredocs_data", ex(ALLOW), cmd=HD(16, "python send.py"), tr=lambda P: base(P))
+# the PowerShell tool (hooks.json matcher Bash|PowerShell) is gated as well. Its text is normalised and the pattern's first word may be
+# any word of a statement, without regard to case (coarse and fail-closed); the text-side cases are in run.sh.
+PS = lambda cm: dict(tool="PowerShell", tinput={"command": cm})
+PSENC = "the PowerShell command carries an encoded command the gate cannot read. Run it in plain text. Nothing was sent."
+make("d_ps_git_push_unopened", ex(DENY, has=["3 of 3 sources not opened since the last compaction (", "Open each with Read, then retry. Nothing was sent."], rx=[r"\(\d\d:\d\d\)"]),
+     tr=lambda P: base(P), **PS("git push origin main"))
+make("d_ps_start_process_unopened", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Start-Process git -ArgumentList push"))
+make("d_ps_python_script_unopened", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("py -3 .\\jobs\\send.py"))
+make("d_ps_encoded_command_unreadable", ex(DENY, has=[PSENC]), tr=lambda P: reads_all(base(P), P), **PS("pwsh -enc not-base64!!"))
+make("d_ps_replay_first_call", ex(DENY, has=["3 of 3 sources not opened since the last compaction"]),
+     tr=lambda P: base(P).use("PowerShell", {"command": "git push"}), cut=-1, **PS("git push"))
+make("a_ps_all_opened", ex(ALLOW), tr=lambda P: reads_all(base(P), P), **PS("git push origin main"))
+make("a_ps_replay_second_call", ex(ALLOW), tr=lambda P: reads_all(base(P).use("PowerShell", {"command": "git push"}), P).say("Read them; pushing again."), **PS("git push"))
+make("a_ps_quoted_words_are_data", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "git push"'))
+make("a_ps_other_script", ex(ALLOW), tr=lambda P: base(P), **PS("python .\\other.py"))
+# the accepted over-deny: a publish word inside a here-string that is only data (a PowerShell here-string fence is a statement break)
+make("d_ps_data_herestring_overdeny_pinned", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS('@"\nnote: git push\n"@ | Out-File x.txt'))
 # commands that run a publish through a wrapper, or have it in the middle: the pattern's first word is the command word (after the
 # wrappers) and its later words appear in order among the command's later words
 for nm, cm in (("timeout", "timeout 60 python send.py"), ("timeout_options", "timeout -s KILL 60 python send.py"), ("env_nohup", "env A=1 nohup python send.py"),
@@ -321,6 +345,27 @@ make("a_git_log", ex(ALLOW), cmd="git log", tr=lambda P: base(P))
 make("a_git_status_dash_c", ex(ALLOW), cmd="git -C dir status", tr=lambda P: base(P))
 make("a_wrapped_other_command", ex(ALLOW), cmd="timeout 60 python other.py", tr=lambda P: base(P))
 make("a_wrapped_publish_all_opened", ex(ALLOW), cmd="env A=1 nohup python -u send.py", tr=lambda P: reads_all(base(P), P))
+# spellings a shell runs that an exact-case, exact-name match missed: letter case, a trailing dot / space / stream on the script name, the
+# Windows interpreter names, package-runner wrappers, setsid / coproc, more shells, a here-string, text echoed into a shell, a git alias,
+# and a backslash-newline inside a word (bash joins without a space). Not seen, by design: brace and glob expansion, ${IFS}, $'…' quoting,
+# a command held in a variable, 8.3 names, bash <(…) and text produced by a program other than echo / printf.
+for nm, cm in (("case_python", "Python send.py"), ("case_git", "GIT push"), ("trailing_dot", "python send.py."), ("trailing_space", "python 'send.py '"),
+               ("ntfs_stream", "python 'send.py::$DATA'"), ("uv_run", "uv run python send.py"), ("uv_run_with", "uv run --with x python send.py"),
+               ("poetry_run", "poetry run python send.py"), ("pdm_run", "pdm run python send.py"), ("pipenv_run", "pipenv run python send.py"),
+               ("hatch_run", "hatch run python send.py"), ("rye_run", "rye run python send.py"), ("pipx_run", "pipx run python send.py"),
+               ("pythonw", "pythonw send.py"), ("pyw", "pyw send.py"), ("setsid", "setsid git push"), ("coproc", "coproc git push"),
+               ("coproc_named", "coproc JOB { git push; }"), ("ash_c", "ash -c 'git push'"), ("fish_c", "fish -c 'git push'"),
+               ("busybox_sh_c", "busybox sh -c 'git push'"), ("dollar_shell_c", "$SHELL -c 'git push'"), ("herestring", "bash <<< 'git push'"),
+               ("herestring_double_quoted", "bash <<< \"python send.py\""), ("echo_into_bash", "echo git push | bash"), ("echo_quoted_into_sh", 'echo "python send.py" | sh -s'),
+               ("printf_into_bash", "printf 'git push\\n' | bash"), ("git_alias", "git -c alias.p=push p"), ("git_alias_shell", "git -c alias.p='!git push' p"),
+               ("dollar_shell_heredoc", "$SHELL <<EOF\ncd out\ngit push\nEOF"), ("braced_shell_heredoc", "${SHELL} <<EOF\ngit push\nEOF"),
+               ("fish_heredoc", "fish <<EOF\npython send.py\nEOF"), ("ash_heredoc", "ash <<'EOF'\ngit push\nEOF"),
+               ("backslash_newline_in_a_word", "gi\\\nt push"), ("continued_pattern_word", "python send.\\\npy")):
+    make("d_spelling_" + nm, ex(DENY, has=["sources not opened"]), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("pyc", "python send.pyc"), ("uv_other", "uv run python other.py"), ("echo_no_shell", "echo git push"), ("echo_into_cat", "echo git push | cat"),
+               ("git_alias_status", "git -c alias.s=status s"), ("herestring_other_program", "cat <<< 'git push'"), ("shell_script_with_herestring", "bash check.sh <<< 'git push'"),
+               ("python_other_w", "pythonw other.py"), ("cat_heredoc_data", "cat <<EOF > notes.txt\ngit push\nEOF")):
+    make("a_spelling_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
 make("a_network_path_no_publish", ex(ALLOW, max=5), cmd="python other.py", adp=adapter(sources="//192.0.2.7/share/plan.pdf"), tr=lambda P: base(P))
 # an absolute source is taken literally: no glob expansion; it must exist as a file
 make("d_absolute_pattern_is_literal", ex(DENY, has=["source pattern matches no file: "]), cmd="python send.py",
@@ -711,7 +756,7 @@ elif mode == "imports":  # imports <bash-guard.py>: stdlib only, no process or n
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading"} and not calls
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading", "base64"} and not calls
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "execsilent":   # execsilent <bash-guard.py>: until-done.py's way of reusing RULES prints nothing, and the file has one main() line to cut
     src = rd(sys.argv[2])
@@ -760,11 +805,40 @@ elif mode == "units":    # units <bash-guard.py> <empty dir>: the size caps on t
     except Exception as e:
         bad.append("is_link_stat: " + type(e).__name__)
     print("ok" if not bad else "; ".join(bad))
+elif mode == "bounded":  # bounded <bash-guard.py> <empty dir>: the heredoc scan is capped, the deadline is a parameter
+    import time
+    ns = {}
+    exec(compile(rd(sys.argv[2]).replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
+    bad = []
+    # three shapes of 8,000 unclosed openers (the publish word last) are found in under 1 s each, measured around the stripping and
+    # the match (no interpreter start in the number); the stripping is cap_strip, else gate_strip (the guard before the cap)
+    strip = ns.get("cap_strip") or ns["gate_strip"]
+    opens = "x <<a\n" * 8000
+    for label, cmd in (("plain openers", opens + "git push"), ("openers inside $( )", 'echo "$(' + opens + 'git push)"'),
+                       ("openers inside backticks", 'echo "`' + opens + 'git push`"')):
+        t0 = time.perf_counter()
+        hit = ns["publish_hit"](strip(cmd), ["git push"], 0, cmd)
+        took = time.perf_counter() - t0
+        if hit is not True or took >= 1.0:
+            bad.append("8000 %s: publish_hit=%r in %.1f s (needs True in under 1 s)" % (label, hit, took))
+    # a deadline already past: the gate denies (never lets a matched publish through) with the budget in the reason
+    proj = sys.argv[3] + "/f2proj"
+    os.makedirs(proj + "/.claude", exist_ok=True)
+    with open(proj + "/.claude/smartuse.local.md", "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("sources: a.pdf\npublish: git push\n")
+    os.environ["CLAUDE_PROJECT_DIR"] = proj
+    try:
+        why = ns["fresh_gate"]({"cwd": proj, "transcript_path": proj + "/t.jsonl"}, "git push", None, time.monotonic() - 1)
+        if not why or "could not verify" not in why or "(source expansion over 4 s)" not in why:
+            bad.append("fresh_gate with a deadline in the past returned %r" % (why,))
+    except Exception as e:
+        bad.append("fresh_gate(data, text, raw, deadline): " + type(e).__name__)
+    print("ok" if not bad else "; ".join(bad))
 elif mode == "hooks":    # hooks <hooks.json>
     d = json.loads(rd(sys.argv[2]))
     pre = d["hooks"]["PreToolUse"]
     bg = [e for e in pre if any("bash-guard.py" in h["command"] for h in e["hooks"])]
-    bash = [e for e in pre if e.get("matcher") == "Bash"]
+    bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell"]
     pub = [e for e in bg if e.get("matcher") == "mcp__.*(upload|send|publish|post|share|submit).*"]
     others = [(e.get("matcher"), re.search(r"hooks/([a-z-]+)\.py", e["hooks"][0]["command"]).group(1), e["hooks"][0].get("timeout")) for e in pre if e not in bg]
     good = (len(bash) == 1 and len(bash[0]["hooks"]) == 1 and len(pub) == 1 and len(bg) == 2 and len(pub[0]["hooks"]) == 1
@@ -813,7 +887,8 @@ cmp -s "$D/snap.before" "$D/snap.after" && ok "no file was created, changed or r
 # --- structure
 r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time stat fnmatch datetime threading), no process call, Python 3.9 grammar" || ko "imports: $r"
 mkdir -p "$D/empty"; r=$(py "$D/chk.py" units "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "unit checks on the functions: a value echoed in a reason is cut at 200 characters, a whole reason at 2,000; only link-like reparse points are links" || ko "size caps: $r"
+r=$(py "$D/chk.py" bounded "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "bounded scan: three 8,000-opener shapes found in under 1 s each; a deadline in the past denies ('source expansion over 4 s')" || ko "bounded scan: $r"
 r=$(py "$D/chk.py" execsilent "$G" </dev/null); [ "$r" = ok ] && ok "until-done.py's exec of this file without main() prints nothing and yields RULES" || ko "exec without main(): $r"
-r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
+r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash|PowerShell entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
 
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

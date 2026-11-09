@@ -1,9 +1,9 @@
 {
-  "description": "smartuse: bash-guard safety floor + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 wait gate (Stop: a hand-off with nothing armed to wake the session is blocked once) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, stopped, or stalled?) \u00b7 recall (PreCompact / SessionStart: the summary is not a source), all deterministic",
+  "description": "smartuse: bash-guard safety floor (Bash, PowerShell) + file-guard (PreToolUse) \u00b7 receipts ledger with one receipt per plan step (Stop / SubagentStop) \u00b7 until-done gate (Stop) \u00b7 wait gate (Stop: a hand-off with nothing armed to wake the session is blocked once) \u00b7 heartbeat status file (every event: is Claude working, waiting on an agent, waiting on you, stopped, or stalled?) \u00b7 recall (PreCompact / SessionStart: the summary is not a source), all deterministic",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
