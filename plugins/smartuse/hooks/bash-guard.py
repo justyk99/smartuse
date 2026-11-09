@@ -255,12 +255,17 @@ AUTOMOUNT = ("/net/", "/network/")   # automounted network trees (any case): a p
 AUTOMOUNT_RESOLVED = re.compile(r"/(?:net|network)(?:/|$)", re.I)   # the same trees after . and .. parts are folded away (text only)
 
 
+def odd_part(p):   # only dots and spaces before any :stream, and not exactly "", "." or ".." (file-guard.py's rule, copied)
+    return p not in ("", ".", "..") and p.split(":")[0].strip(". ") == ""
+
+
 def is_plain_local(s):
     """A text test, no file system call: is this source value one of the plain spellings of a local file? Relative (no leading
     slash, no drive letter, no .. part), a drive path (C:\\x or C:/x, not C://x), or a POSIX absolute path (/x, not //x or /\\x,
     and not under the automount trees /net/ and /Network/). Everything else (//host/share, \\\\host\\share, the device and
-    GLOBALROOT forms) is refused. A mapped network drive letter cannot be told apart from a local one by its text and is
-    accepted."""
+    GLOBALROOT forms) is refused, and so is any spelling with a ":" in a part after the leading drive or a part of only dots and
+    spaces (Windows reads those as another drive or a stream, or as the folder before them). A mapped network drive letter cannot
+    be told apart from a local one by its text and is accepted."""
     if DEVICE_FORMS.search(s):
         return False
     t = s.replace("\\", "/")
@@ -268,11 +273,13 @@ def is_plain_local(s):
         return False
     if t.startswith("/") and AUTOMOUNT_RESOLVED.match(posixpath.normpath(t)):   # /x/../net/h/s and /./net/h/s resolve to the same tree
         return False
-    if re.match(r"[A-Za-z]:[\\/](?![\\/])", s) or re.match(r"/(?![/\\])", s):
-        return True
-    if s[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", s):
-        return False
-    return ".." not in re.split(r"[\\/]", s)
+    drive = bool(re.match(r"[A-Za-z]:[\\/](?![\\/])", s))
+    if not (drive or re.match(r"/(?![/\\])", s)):
+        if s[:1] in ("/", "\\") or re.match(r"[A-Za-z]:", s) or ".." in re.split(r"[\\/]", s):
+            return False
+    # no part may hold a ":" (a drive letter in the middle, an NTFS stream; the leading drive of a drive path is skipped) or be only dots
+    # and spaces: decided on the text, so the file system is never asked about such a spelling
+    return not any(":" in p or odd_part(p) for p in re.split(r"[\\/]", s)[1 if drive else 0:])
 
 
 def clip(s, n=MAX_VALUE):
@@ -451,17 +458,20 @@ def expand_by_deadline(project, patterns, deadline):
 def opened_since_compaction(tp, project, deadline):
     """One forward pass over the transcript: -> (keys of the files the model itself Read since the last compaction, the time
     of that compaction or None when there was none). A Read is an assistant tool_use record named Read, not a subagent's
-    (isSidechain). The last compaction is the last compact_boundary system record; with none, the last isCompactSummary user
-    record; with neither, every Read counts. Only lines that can matter are parsed. Raises on an unreadable file or when the
+    (isSidechain). A Read whose result record says is_error (a missing file, a Read the permission rules denied) does not count;
+    a Read with no result record yet does. The last compaction is the last compact_boundary system record; with none, the last
+    isCompactSummary user record; with neither, every Read counts. Only lines that can matter are parsed. Raises on an unreadable file or when the
     pass runs past the deadline."""
     sets = {"b": set(), "s": set(), "all": set()}     # reads since the last boundary / summary record / ever
     seen = {"b": None, "s": None}                    # the timestamp of the last boundary / summary record (None: there was none)
+    pending = {}                                     # a Read's tool_use id -> its path key, until a result for it says it failed
     with open(tp, "rb") as fh:
         for n, line in enumerate(fh, 1):
             if not n & 127 and time.monotonic() >= deadline:
                 raise TimeoutError("transcript pass over %g s" % BUDGET_S)
             use = b'"tool_use"' in line and b'"Read"' in line
-            if not (use or b"compact_boundary" in line or b"isCompactSummary" in line):
+            err = b'"is_error":true' in line or b'"is_error": true' in line   # a result that says its call failed (a missing file, a denied Read)
+            if not (use or err or b"compact_boundary" in line or b"isCompactSummary" in line):
                 continue
             try:
                 r = json.loads(line.decode("utf-8", "replace"))
@@ -483,6 +493,15 @@ def opened_since_compaction(tp, project, deadline):
                             k = path_key(fp, project)
                             for s in sets.values():
                                 s.add(k)
+                            if isinstance(blk.get("id"), str):
+                                pending[blk["id"]] = k
+            elif kind == "user" and err:
+                msg = r.get("message")
+                for blk in (msg.get("content") if isinstance(msg, dict) else None) or []:
+                    if isinstance(blk, dict) and blk.get("type") == "tool_result" and blk.get("is_error") is True \
+                            and isinstance(blk.get("tool_use_id"), str) and blk["tool_use_id"] in pending:
+                        for s in sets.values():   # the Read failed: that path was not opened (a later Read that works adds it again)
+                            s.discard(pending[blk["tool_use_id"]])
     if time.monotonic() >= deadline:
         raise TimeoutError("transcript pass over %g s" % BUDGET_S)
     which = "b" if seen["b"] is not None else ("s" if seen["s"] is not None else "all")

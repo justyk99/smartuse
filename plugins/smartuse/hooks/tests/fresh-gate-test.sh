@@ -86,15 +86,27 @@ class T(object):
     def say(self, text):
         return self.rec(type="assistant", message={"role": "assistant", "model": "test-model", "content": [{"type": "text", "text": text}]})
 
-    def use(self, name, inp, side=False):
+    def use(self, name, inp, side=False, err=None, result=True):
+        """A tool call and its result record. err: the text of an error result (the record shape of a failed call, pinned from a real
+        transcript: a user record whose message content holds one tool_result block with content, is_error true and tool_use_id).
+        result=False: the call has no result record."""
         self.rec(type="assistant", isSidechain=side, message={"role": "assistant", "model": "test-model", "stop_reason": "tool_use",
                  "content": [{"type": "tool_use", "id": "toolu_T%04d" % self.n, "name": name, "input": inp}]})
-        return self.rec(type="user", isSidechain=side, message={"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_T%04d" % (self.n - 1), "content": "ok"}]})
+        self.last_id = "toolu_T%04d" % (self.n - 1)
+        if not result:
+            return self
+        if err is None:
+            return self.rec(type="user", isSidechain=side, message={"role": "user", "content": [{"type": "tool_result", "tool_use_id": self.last_id, "content": "ok"}]})
+        return self.error_result(self.last_id, err, side)
 
-    def read(self, path, side=False, **extra):
+    def error_result(self, tool_use_id, text, side=False):
+        return self.rec(type="user", isSidechain=side, toolUseResult="Error: " + text, message={"role": "user", "content": [
+            {"type": "tool_result", "content": text, "is_error": True, "tool_use_id": tool_use_id}]})
+
+    def read(self, path, side=False, err=None, result=True, **extra):
         inp = {"file_path": path}
         inp.update(extra)
-        return self.use("Read", inp, side)
+        return self.use("Read", inp, side, err, result)
 
     def bash(self, cmd):
         return self.use("Bash", {"command": cmd, "description": "test"})
@@ -269,6 +281,26 @@ make("d_no_boundary_no_reads", ex(DENY, has=["3 of 3 sources not opened in this 
      cmd="python send.py", tr=lambda P: base(P, boundary=False))
 make("d_two_of_three", ex(DENY, has=["2 of 3 sources not opened since the last compaction", "jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg"], no=["jobs/demo/plan.pdf"]),
      cmd="python send.py", tr=lambda P: base(P).read(P + "/" + PLAN))
+# a Read whose result record says is_error (a missing file, a Read the permission rules denied) is not an opened source; a later Read that
+# works counts again; a Read with no result record counts (the documented limit); an error result in a subagent's sidechain is ignored
+NOFILE = "File does not exist."
+make("d_failed_read_not_opened", ex(DENY, has=["1 of 3 sources not opened since the last compaction", "jobs/demo/photos/b.jpg"], no=["jobs/demo/plan.pdf", "jobs/demo/photos/a.jpg"]),
+     cmd="python send.py", tr=lambda P: base(P).read(P + "/" + PLAN).read(P + "/" + PA).read(P + "/" + PB, err=NOFILE))
+make("a_failed_then_successful_read", ex(ALLOW), cmd="python send.py",
+     tr=lambda P: base(P).read(P + "/" + PLAN).read(P + "/" + PA).read(P + "/" + PB, err=NOFILE).read(P + "/" + PB))
+make("d_denied_read_not_opened", ex(DENY, has=["1 of 3 sources not opened since the last compaction", "jobs/demo/plan.pdf"], no=["jobs/demo/photos/"]),
+     cmd="python send.py", tr=lambda P: base(P).read(P + "/" + PLAN, err="denied").read(P + "/" + PA).read(P + "/" + PB))
+make("a_read_without_result_counts", ex(ALLOW), cmd="python send.py",
+     tr=lambda P: base(P).read(P + "/" + PLAN).read(P + "/" + PA).read(P + "/" + PB, result=False))
+
+
+def sidechain_error(P):
+    t = reads_all(base(P), P)
+    return t.error_result(t.last_id, NOFILE, side=True)   # the result of the last main-thread Read, but written in a subagent's records
+
+
+make("a_error_result_in_sidechain_ignored", ex(ALLOW), cmd="python send.py", tr=sidechain_error)
+make("a_failed_read_of_another_file", ex(ALLOW), cmd="python send.py", tr=lambda P: reads_all(base(P), P).read(P + "/jobs/demo/other.txt", err=NOFILE))
 make("d_glob_no_match", ex(DENY, has=["source pattern matches no file: jobs/demo/nothing/*.png", "The owner fixes sources: in .claude/smartuse.local.md. Nothing was sent."]),
      cmd="python send.py", adp=adapter(sources="jobs/demo/nothing/*.png"), tr=lambda P: reads_all(base(P), P))
 make("d_literal_path_missing", ex(DENY, has=["source pattern matches no file: jobs/demo/gone.pdf"]),
@@ -294,7 +326,8 @@ make("d_network_path_in_a_read", ex(DENY, has=["3 of 3 sources not opened"], max
 # the allowlist: relative (no .. part), C:\x or C:/x (not C://x), /x (not //x); the device, \??\ and GLOBALROOT forms never
 for nm, val in (("nt_object_path", "\\??\\UNC\\192.0.2.7\\s\\a.pdf"), ("device_pipe", "\\\\.\\pipe\\x"), ("drive_double_slash", "C://x"),
                 ("drive_relative", "C:x"), ("dotdot_part", "jobs/../x"), ("dotdot_backslash", "jobs\\..\\x"), ("leading_backslash", "\\jobs\\demo\\plan.pdf"),
-                ("slash_backslash", "/\\192.0.2.7/share/a.pdf"), ("globalroot_any_case", "/dev/globalroot/x"), ("posix_double_slash", "//x/y")):
+                ("slash_backslash", "/\\192.0.2.7/share/a.pdf"), ("globalroot_any_case", "/dev/globalroot/x"), ("posix_double_slash", "//x/y"),
+                ("drive_in_the_middle", "sub/D:/x.pdf"), ("stream_part", "jobs/demo/plan.pdf:zone"), ("odd_part", "jobs/.../plan.pdf")):   # a ":" in a part (a drive letter mid-path, an NTFS stream) and a part of only dots and spaces are refused by text
     make("d_not_plain_" + nm, ex(DENY, has=[val + NET], max=5), cmd="python send.py", adp=adapter(sources=val), tr=lambda P: base(P))
 make("a_not_plain_but_no_publish", ex(ALLOW, max=5), cmd="python other.py", adp=adapter(sources="jobs/../x"), tr=lambda P: base(P))
 # one deadline (BUDGET_S, 4 s) for the glob expansion and the transcript pass: the expansion runs in a worker thread joined with the time

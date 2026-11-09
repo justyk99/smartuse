@@ -168,6 +168,20 @@ for i in range(1, 2201):
 t.human("PROMPT-BIG-LAST the end")
 t.save("big")
 
+# blob: one prompt that is a sentence and then a 128 KB run of letters (a pasted blob), and a squeeze after it
+t = T()
+t.human("PROMPT-BLOB-SENTENCE read this first " + "a" * 131072)
+t.boundary(60)
+t.summary()
+t.save("blob")
+
+# pin: a token that starts at character n + 4096 + 3 of a prompt (n = 300), past the point where one_line() pre-cuts
+t = T()
+t.human("PROMPT-PIN " + "b" * (300 + 4096 + 3 - len("PROMPT-PIN ") - 1) + " sk-xxxxxxxxxxxxxxxxxxxx tail")
+t.boundary(60)
+t.summary()
+t.save("pin")
+
 # garbage: lines that are not records, then one genuine prompt
 with open(os.path.join(OUT, "garbage.jsonl"), "wb") as f:
     f.write(b'not json at all "user"\n{"type":"user"\n[]\n"user"\n\xff\xfe\x00 "user"\n')
@@ -198,7 +212,8 @@ elif mode == "plain":      # plain <recall.py>: plain_local_target() on gitdir: 
     f = g["plain_local_target"]
     want = {"/net/192.0.2.7/x": False, "/Network/x": False, "/NET/x": False, "/network": False, "/netx/a": True, "/home/yk/x": True,
             "/x/../net/192.0.2.7/s": False, "/./Network/x": False, "/x/./../NET/h": False, "\\x\\..\\net\\h": False, "/x/../home/y": True, "/net/../home/y": False,
-            "C:/demo/x": True, "../gd": True, "gd/x": True, "//192.0.2.7/x": False}
+            "C:/demo/x": True, "../gd": True, "gd/x": True, "//192.0.2.7/x": False, "sub/D:/gd": False, "C:/demo/D:/gd": False, "gd/x:zone": False,
+            "C:\\demo\\x": True, "/home/yk/gd": True, "../.git/worktrees/w": True}
     bad = ["%s -> %s" % (k, f(k)) for k, v in want.items() if f(k) != v]
     print("ok" if not bad else "; ".join(bad))
 elif mode == "linkstat":   # linkstat <recall.py>: the link predicate on fake lstat results (a cloud-sync reparse point is not a link; a symlink or a mount point is)
@@ -234,6 +249,36 @@ elif mode == "timed":      # timed <recall.py> <event file>: runs the hook in th
     got = sys.stdout.buffer.getvalue().decode("utf-8", "replace")
     sys.stdout = real
     sys.stdout.write(got + "\nELAPSED_MS=%d\n" % ms)
+elif mode == "scrub":      # scrub <recall.py> <check>: e-mail masking through the module's own scrub() (it has the same name before and after the linear rewrite)
+    import random, runpy, time
+    g = runpy.run_path(sys.argv[2], run_name="recall_under_test")
+    f = g["scrub"]
+    OLD = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")   # the pre-rewrite rule: the new one must make the same matches
+    which = sys.argv[3]
+    if which == "end":     # an address at the end of a long run of letters: the whole run is its local part
+        got = f("a" * 32768 + "user@example.test")
+        print("ok" if got == "[email]" else "got %r" % got[:80])
+    elif which == "short":  # no local part, no dot in the host, a one-letter top level: not addresses
+        want = {"a@b": "a@b", "a@b.c": "a@b.c", "@example.test": "@example.test", "x @ y.test": "x @ y.test", "a@b@c.com": "a@[email]",
+                "x@a.com@b.org": "[email]@b.org", "yk@example.test,yk2@example.test": "[email],[email]", "(a.b-c+d%e_f@g-h.example.test)": "([email])"}
+        bad = ["%r -> %r" % (k, f(k)) for k, v in want.items() if f(k) != v]
+        print("ok" if not bad else "; ".join(bad))
+    elif which == "same":   # 3000 random short strings over an alphabet full of address characters: same result as the old rule
+        rnd, alpha, bad = random.Random(20261109), "ab.@-_%+ c1", []
+        for _ in range(3000):
+            s = "".join(rnd.choice(alpha) for _ in range(rnd.randint(0, 24)))
+            if f(s) != OLD.sub("[email]", s):
+                bad.append("%r: %r vs %r" % (s, f(s), OLD.sub("[email]", s)))
+        print("ok" if not bad else "; ".join(bad[:3]))
+    elif which == "time":   # 128 KB of text in the shapes that made the old rule slow: a few seconds at most for all four together, and the right result
+        cases = [("a" * 131072, "a" * 131072), ("a" * 131072 + "user@example.test", "[email]"), ("x@" + "a." * 60000, "x@" + "a." * 60000),
+                 ("a@" * 60000, "a@" * 60000)]
+        t0, bad = time.perf_counter(), []
+        for s, want in cases:
+            if f(s) != want:
+                bad.append("wrong result for a %d-character case" % len(s))
+        secs = time.perf_counter() - t0
+        print("ok" if not bad and secs < 2.0 else "%s in %.1f s" % (bad or "right results", secs))
 elif mode == "hooks":      # hooks <hooks.json>: the PreCompact entry and the second SessionStart command
     d = json.load(open(sys.argv[2], encoding="utf-8"))
     want = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/recall.py"'
@@ -379,6 +424,24 @@ has "scrub: a handoff line masks an IBAN-style run" "IBAN MY[number]"
 has "scrub: a handoff line masks an account-prefix run" "acct ACC[number]"
 has "scrub: a handoff line masks a hyphenated run" "mobile 011-[number]"
 adapter "$A_FULL"
+# the e-mail scrub is linear in the text: the unit checks first (same matches as the old rule), then the hook on a pasted 128 KB blob in a prompt and in a handoff line
+r=$(py "$D/chk.py" scrub "$HOOK" end </dev/null); [ "$r" = ok ] && ok "scrub: an address at the end of a 32 KB letter run prints as [email], the run with it" || ko "scrub end of a run: $r"
+r=$(py "$D/chk.py" scrub "$HOOK" short </dev/null); [ "$r" = ok ] && ok "scrub: a@b, a@b.c and @host are not addresses; two in a row and one after a stray @ are" || ko "scrub short forms: $r"
+r=$(py "$D/chk.py" scrub "$HOOK" same </dev/null); [ "$r" = ok ] && ok "scrub: 3000 random strings give the same result as the old e-mail rule" || ko "scrub vs old rule: $r"
+r=$(py "$D/chk.py" scrub "$HOOK" time </dev/null); [ "$r" = ok ] && ok "scrub: 128 KB of text in four slow shapes takes under 2 s together" || ko "scrub time: $r"
+runt "$(ev SessionStart compact blob)"
+has "scrub: a 128 KB prompt still prints its first words" "PROMPT-BLOB-SENTENCE read this first"
+[ "$MS" -le $NETMAX ] && ok "scrub: a pasted 128 KB prompt costs $MS ms (limit $NETMAX)" || ko "128 KB prompt took $MS ms"
+{ printf 'BLOB-HANDOFF-SENTENCE visible start '; head -c 131072 /dev/zero | tr '\0' a; printf '\nsecond line\n'; } > "$D/proj/docs/BLOB.md"
+adapter "handoff: docs/BLOB.md"; runt "$(ev SessionStart startup -)"
+has "scrub: a 128 KB handoff line still prints its first words" "BLOB-HANDOFF-SENTENCE visible start"
+[ "$MS" -le $NETMAX ] && ok "scrub: a 128 KB handoff line costs $MS ms (limit $NETMAX)" || ko "128 KB handoff line took $MS ms"
+rm -f "$D/proj/docs/BLOB.md"
+adapter "$A_FULL"; run "$(ev SessionStart compact pin)"
+has "scrub: the pin transcript is read (its first words print)" "PROMPT-PIN"
+lacks "scrub: a token that starts past the pre-cut of a prompt never prints" "sk-xxxxxxxx"
+lacks "scrub: nor does its [secret] mask" "[secret]"
+adapter "$A_FULL"
 
 # ===== 3. the 9,000 cap
 S=""; for i in $(seq 1 400); do S="$S${S:+, }jobs/demo/folder-$i/photo.jpg"; done
@@ -520,6 +583,14 @@ EOF
 runt "$(ev SessionStart startup -)"
 has "handoff: a \\\\host\\share path is not read" "$NR"
 [ "$MS" -le $NETMAX ] && ok "handoff: a \\\\host\\share path is decided at once ($MS ms)" || ko "handoff: \\\\host\\share took $MS ms"
+# a ":" in any part (a drive letter mid-path, an NTFS stream) and a part of only dots and spaces are refused by text, before any file call
+adapter "handoff: docs/D:/STATUS.md"; runt "$(ev SessionStart startup -)"
+has "handoff: a drive letter in the middle of the path is not read" "$NR"
+[ "$MS" -le $NETMAX ] && ok "handoff: a drive letter in the middle is decided at once ($MS ms, no file call)" || ko "handoff: docs/D:/STATUS.md took $MS ms"
+adapter "handoff: docs/STATUS.md:zone"; run "$(ev SessionStart startup -)"
+has "handoff: a stream part is not read" "$NR"
+adapter "handoff: docs/.../STATUS.md"; run "$(ev SessionStart startup -)"
+has "handoff: a part of only dots is not read" "$NR"
 cat > "$D/proj/.claude/smartuse.local.md" <<'EOF'
 handoff: \\?\C:\demo\STATUS.md
 EOF
