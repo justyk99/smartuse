@@ -14,7 +14,6 @@
 # matches `publish_tools:`), the call is denied until each source has a Read in this session after the last compaction; the reason
 # names the unopened files. Detection errors (bad input, no adapter, no sources, no publish match) allow, as every check here does;
 # once a publish matched, a failure to verify (no transcript, unreadable, past the deadline) denies. The adapter is only ever read.
-# A command the gate cannot read counts as a send while the sources are unopened (rather than reading shell and PowerShell ever deeper).
 # A source value must be a plain local path (checked by its text before any file call); source expansion and the transcript pass
 # share one deadline, the expansion running in a worker thread that is abandoned when it does not answer. A relative source is
 # walked component by component without following links (a link or reparse point on the way refuses the pattern); every value
@@ -25,12 +24,10 @@
 # characters taken as plain text, so it can over-deny (one turn) where a quote would have hidden a substitution. A PowerShell text, and a
 # text read as it stands, is read twice: whole, and one line at a time (a quote never reaches past its line there). Any other
 # Bash text is read whole: a known limit, see ROADMAP.
-# The tags (complexity() decides them from the text, before RULES and before any scan of the command): over 32 KB, heredoc openers past
-# the scan cap, three or more command substitutions, a nested backtick substitution, a process substitution, a shell function
-# (Bash), typographic quotes or dashes, an escaped quote, a script block (PowerShell). One more is set during the scan itself, so after
-# RULES for a command of RULES_FIRST_MAX characters or fewer: a nested shell string (a string run by another shell, see _scan:
-# sh -c, eval, trap, cmd /c, pwsh "text", Start-Process of a shell). With the sources opened a tagged command goes on to RULES as any
-# command does, its text unscanned for a publish. That is an over-deny at worst (open the sources, retry, or simplify).
+# A command the source check cannot read cleanly counts as a send while the sources are unopened (complexity(), and a string run by
+# another shell, see _scan): over 32 KB, heredoc openers past the scan cap, three or more command substitutions, typographic quotes or
+# dashes and an escaped quote (PowerShell), a nested shell string. It is decided before RULES and before any scan of the command; with
+# the sources opened it goes on to RULES as any command does. That is an over-deny at worst (open the sources, retry, or simplify).
 # A command over RULES_FIRST_MAX characters has the whole fresh-source block run before RULES (the frozen RULES are slow on long dense text).
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
 import base64, datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
@@ -748,82 +745,32 @@ COMPLEX_SUBST = 3                                   # command substitutions that
 RULES_FIRST_MAX = 4096                              # a command longer than this has the fresh-source block run before RULES (see main)
 PS_TYPOGRAPHIC = re.compile("[\u2013-\u2015\u2018-\u201e]")   # the dashes and quotes PowerShell reads as plain ones
 PS_ESCAPED_QUOTE = re.compile("`[`\"']")            # a backtick before a quote or another backtick
-PS_SCRIPT_BLOCK = re.compile(r"scriptblock\]\s*::\s*create|\b(?:invoke-command|icm)\b", re.I)   # a script block built from text, or run
-# a function definition (`function f`, `f ()`) at the start of a command, in the text outside quotes (see bash_marks)
-SHELL_FUNCTION = re.compile(r"(?:^|[;&|\n(){])\s*(?:function\s+[\w.:@+-]+|[\w.:@+-]+\s*\(\s*\))")
-
-
-def bash_marks(t):
-    """One left-to-right pass over a Bash text: (command substitutions, nested backtick substitution, process substitution, the
-    text outside quotes). A single-quoted span and a backslash-escaped character are literal and not counted; `$((` is arithmetic,
-    not a substitution; a backtick pair is one substitution, and an escaped backtick inside one (\\`) is a nested substitution. A
-    single quote that is never closed is a plain character (more is checked, not less). Double quotes do not make a substitution
-    literal, so `$(` and backticks inside them count; the text outside quotes has each quoted span blanked."""
-    n, i, dq = len(t), 0, False
-    subst = backticks = escaped = 0
-    proc = False
-    bare = []
-    while i < n:
-        c = t[i]
-        if c == "\\":
-            if t.startswith("`", i + 1):
-                escaped += 1
-            bare.append(" ")
-            i += 2
-            continue
-        if c == "'" and not dq:
-            j = t.find("'", i + 1)
-            if j >= 0:
-                bare.append(" ")
-                i = j + 1
-                continue
-        elif c == '"':
-            dq = not dq
-        elif c == "`":
-            backticks += 1
-        elif c == "$":
-            if t.startswith("$(", i) and not t.startswith("$((", i):
-                subst += 1
-        elif (c == "<" or c == ">") and t.startswith("(", i + 1):
-            proc = True
-        bare.append(" " if dq else c)
-        i += 1
-    return subst + backticks // 2, escaped > 0 and backticks >= 2, proc, "".join(bare)
 
 
 def complexity(pre, ps):
     """A short tag naming why the source check cannot read this command (`pre`: the command before any heredoc stripping), or ""
     when it can. In order: over COMPLEX_MAX characters; heredoc openers past the scan cap (many_heredocs); COMPLEX_SUBST or more
-    command substitutions; then in Bash a nested backtick substitution, a process substitution (<( or >( outside single quotes) and
-    a shell function definition, and in PowerShell typographic quotes or dashes, an escaped quote and a script block. A Bash count
-    is made by bash_marks (a backtick pair is one substitution, single-quoted text is literal, `$((` is arithmetic) on the text with
-    the bodies of its heredocs cut out (data_text: the frozen HEREDOC pattern, bounded by the heredoc budget that many_heredocs has
-    just checked), so a quoted heredoc body with markdown backticks is data; the substitutions bash runs in an unquoted body count
-    too. In PowerShell the backtick is the escape character, so only $( counts. Every other step is one linear pass."""
+    command substitutions (a backtick pair counts as one in Bash; in PowerShell the backtick is the escape character, so only $( counts;
+    the text of a data heredoc is not counted);
+    PowerShell only: typographic quotes or dashes, an escaped quote. One pass of linear scans: no scan depends on the shape of the
+    text."""
     if len(pre) > COMPLEX_MAX:
         return "over 32 KB"
     if many_heredocs(pre):
         return "heredocs past the scan cap"
+    n = pre.count("$(") + (0 if ps else pre.count("`") // 2)
+    if n >= COMPLEX_SUBST and not ps:
+        # a data heredoc body (a quoted delimiter: a commit message with markdown backticks) is text, not substitutions; the
+        # substitutions bash runs in an unquoted body still count. Counted again on the stripped text only when the raw count says so.
+        t = data_text(pre)
+        n = t.count("$(") + t.count("`") // 2 + len(heredoc_substs(pre))
+    if n >= COMPLEX_SUBST:
+        return "3 or more command substitutions"
     if ps:
-        if pre.count("$(") >= COMPLEX_SUBST:
-            return "3 or more command substitutions"
         if PS_TYPOGRAPHIC.search(pre):
             return "typographic quotes or dashes"
         if PS_ESCAPED_QUOTE.search(pre):
             return "an escaped quote"
-        if PS_SCRIPT_BLOCK.search(pre):
-            return "a script block"
-        return ""
-    heredoc = "<<" in pre
-    n, nested, proc, bare = bash_marks(data_text(pre) if heredoc else pre)
-    if n + (len(heredoc_substs(pre)) if heredoc else 0) >= COMPLEX_SUBST:
-        return "3 or more command substitutions"
-    if nested:
-        return "a nested backtick substitution"
-    if proc:
-        return "a process substitution"
-    if SHELL_FUNCTION.search(bare):
-        return "a shell function"
     return ""
 
 
@@ -937,42 +884,22 @@ def command_start(seg, points=None):
 
 
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "$shell", "${shell}")   # command names (lower case) of a shell; $SHELL is read as one
-PS_SHELLS = frozenset(SHELLS + ("cmd", "powershell", "pwsh", "wsl"))   # programs a PowerShell Start-Process can hand a command string to
 
 
 def shell_string(cmd):
-    """The command string a shell -c, an eval, a trap, a PowerShell iex / pwsh -Command / pwsh -EncodedCommand / pwsh "text" or a
-    cmd /c (Git Bash spells it //c) is given (words after the command word), or None. A shell's options are read up to its first
-    non-option word (the script): what follows a script operand is the script's, not the shell's. A PowerShell encoded command is
-    decoded (base64 of UTF-16LE); raises ValueError when the value does not decode, which the caller treats as a publish it
-    cannot read."""
+    """The command string a shell -c, an eval, a PowerShell iex / pwsh -Command / pwsh -EncodedCommand or a cmd /c is given
+    (words after the command word), or None. A PowerShell encoded command is decoded (base64 of UTF-16LE); raises ValueError
+    when the value does not decode, which the caller treats as a publish it cannot read."""
     name = base_name(cmd[0]).lower() if cmd else ""
     if name == "eval" or name in ("iex", "invoke-expression"):
         return " ".join(cmd[1:]) if len(cmd) > 1 else None
-    if name == "trap":   # trap 'text' SIGNAL: the text runs when the signal comes
-        for k in range(1, len(cmd)):
-            if cmd[k] == "--":
-                return cmd[k + 1] if k + 2 < len(cmd) else None
-            if cmd[k] == "-":
-                return None
-            if not (cmd[k][:1] == "-" and len(cmd[k]) > 1):
-                return cmd[k] if k + 1 < len(cmd) else None
-        return None
     if name in SHELLS:
-        k = 1
-        while k < len(cmd) - 1 and cmd[k][:1] in ("-", "+") and len(cmd[k]) > 1:
-            a = cmd[k]
-            if a == "--":
-                break
-            if a.startswith("--"):
-                k += 2 if a in ("--rcfile", "--init-file") else 1
-            elif a[0] == "-" and "c" in a[1:]:
+        for k in range(1, len(cmd) - 1):
+            if cmd[k].startswith("-") and not cmd[k].startswith("--") and "c" in cmd[k][1:]:
                 return cmd[k + 2] if cmd[k + 1] == "--" and k + 2 < len(cmd) else cmd[k + 1]   # bash -c -- 'text'
-            else:
-                k += 2 if ("o" in a or "O" in a) else 1   # -o / -O take an option name
     if name == "cmd":
         for k in range(1, len(cmd) - 1):
-            if cmd[k].lower() in ("/c", "/k", "//c", "//k"):
+            if cmd[k].lower() in ("/c", "/k"):
                 return " ".join(cmd[k + 1:])
     if name in ("pwsh", "powershell"):
         for k in range(1, len(cmd) - 1):
@@ -981,9 +908,6 @@ def shell_string(cmd):
                 return " ".join(cmd[k + 1:])
             if o and (o == "ec" or "encodedcommand".startswith(o)):
                 return base64.b64decode(cmd[k + 1], validate=True).decode("utf-16-le")
-        for k in range(1, len(cmd)):   # a word that is no option is the command text (-Command is the default parameter)
-            if cmd[k][:1] not in ("-", "/"):
-                return " ".join(cmd[k:])
     return None
 
 
@@ -1265,9 +1189,6 @@ def _scan(segs, seps, pats, depth, ps, seen, many=False):
                     return True
             elif _strict(pw, full, starts) or (loose >= 0 and _loose(pw, full, loose)):
                 return True
-        if ps and sp >= 0 and any(base_name(w).lower() in PS_SHELLS for w in seg[sp + 1:]):
-            COMPLEX.append("a nested shell string")   # Start-Process of a shell: the arguments it is given are a command string, whatever they are called
-            return True
         if not cmd:
             continue
         try:
