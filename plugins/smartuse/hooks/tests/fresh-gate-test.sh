@@ -355,6 +355,32 @@ make("a_n3_sixteen_long_delimiters_128kb_no_publish", ex(ALLOW, max=10), cmd=LD1
 NB16 = lambda last: "".join('echo "$(%s)"\n' % ("echo " + " ".join(["<<" + "D" * 64] * 16) + "\n" + ("x" * 63 + "\n") * 120) for _ in range(16)) + last
 make("d_nested_bodies_budget_once_publish", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=NB16("git push"), tr=lambda P: base(P))
 make("a_nested_bodies_budget_once_no_publish", ex(ALLOW, max=6), cmd=NB16("git status"), tr=lambda P: base(P))
+# the same shape with the publish INSIDE one body's substitution (an apostrophe line in the body, as bash reads a heredoc line literally): the deny
+# is decided in a nested body, not at the top level after the bodies
+NB16IN = lambda inner: "".join('echo "$(%s)"\n' % ("echo " + " ".join(["<<" + "D" * 64] * 16) + "\n" + ("x" * 63 + "\n") * 120 + (inner if k == 9 else ""))
+                               for k in range(16))
+make("d_f1_nested_bodies_budget_once_publish_in_body", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=NB16IN("it's $(git push) don't"), tr=lambda P: base(P))
+make("a_f1_nested_bodies_budget_once_no_publish_in_body", ex(ALLOW, max=6), cmd=NB16IN("it's $(git status) don't"), tr=lambda P: base(P))
+make("d_f1_nested_bodies_budget_once_publish_in_body_heredoc", ex(DENY, has=["3 of 3 sources not opened"], max=6),
+     cmd=NB16IN("cat <<EOF\nit's $(git push) don't\nEOF"), tr=lambda P: base(P))
+make("a_f1_nested_bodies_budget_once_no_publish_in_body_heredoc", ex(ALLOW, max=6), cmd=NB16IN("cat <<EOF\nit's $(git status) don't\nEOF"), tr=lambda P: base(P))
+# F1/F2: a text read as it stands (over the heredoc cap, a delimiter over HEREDOC_DELIM_MAX, over the budget) is not heredoc-stripped, so a
+# substitution in an unquoted heredoc body is found only if quotes are taken as plain characters there: an apostrophe in a heredoc line is
+# literal to bash, but paired as a quote it would hide the substitution. (a) the heredoc is inside a $( ) body, (b) at the top level.
+DATA17 = "".join("cat > f%d.md <<'EOF'\nx\nEOF\n" % i for i in range(17))
+LONGD = "cat > g.md <<'%s'\nx\n%s\n" % ("E" * 65, "E" * 65)
+NEST = lambda line: 'git commit -m "$(cat <<EOF\n%s\nEOF\n)"\n' % line
+for nm, line in (("apostrophe_pair", "'$(git push)'"), ("apostrophe_words", "it's $(git push) don't"), ("backticks", "it's `git push` don't"),
+                 ("backticks_quoted", "'`git push`'")):
+    for tn, tail in (("17_blocks", DATA17), ("long_delimiter", LONGD)):
+        make("d_f1_nested_%s_%s" % (nm, tn), ex(DENY, has=["3 of 3 sources not opened"]), cmd=NEST(line) + tail, tr=lambda P: base(P))
+        make("a_f1_nested_%s_%s_no_publish" % (nm, tn), ex(ALLOW), cmd=NEST(line.replace("git push", "git status")) + tail, tr=lambda P: base(P))
+for nm, line in (("apostrophe_words", "it's $(git push) don't"), ("backticks", "it's `git push` don't")):
+    for tn, tail in (("17_blocks", DATA17), ("long_delimiter", LONGD)):
+        make("d_f2_top_%s_%s" % (nm, tn), ex(DENY, has=["3 of 3 sources not opened"]), cmd="cat <<EOF\n%s\nEOF\n" % line + tail, tr=lambda P: base(P))
+        make("a_f2_top_%s_%s_no_publish" % (nm, tn), ex(ALLOW), cmd="cat <<EOF\n%s\nEOF\n" % line.replace("git push", "git status") + tail, tr=lambda P: base(P))
+# not over the cap the heredoc is stripped as before: an apostrophe line with a substitution is found through the plain-heredoc scan
+make("d_f2_top_under_cap_apostrophe_words", ex(DENY, has=["3 of 3 sources not opened"]), cmd="cat <<EOF\nit's $(git push) don't\nEOF\n", tr=lambda P: base(P))
 # the PowerShell tool (hooks.json matcher Bash|PowerShell) is gated as well. Its text is normalised and the pattern's first word may be
 # any word of a statement, without regard to case (coarse and fail-closed); the text-side cases are in run.sh.
 PS = lambda cm: dict(tool="PowerShell", tinput={"command": cm})
@@ -768,8 +794,31 @@ make("a_m2b_herestring_apostrophes_no_publish", ex(ALLOW), tr=lambda P: base(P),
 make("d_m2b_two_herestrings_one_quote_each", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
      **PS('$a = @"\nsize 5"\n"@\ngit push\n$n = @"\n"quoted\n"@'))
 make("d_m2b_escaped_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS('Write-Host "a`""; git push; Write-Host "`"b"'))
-# PowerShell reads this as one string (a backtick is literal inside single quotes, '' is a doubled quote), so the git push in it is text
+# PowerShell reads the first part of this as ONE string (a backtick is literal inside single quotes and '' is a doubled quote: the string is
+# a`'; git push; Write-Host ), and what trails it is not a valid statement, so PowerShell reports a parse error and runs nothing. The git
+# push sits inside that string; the guard reads the same string and allows
 make("a_ps_single_quoted_string_holds_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
+# the valid twin that pins the rule: in 'a`''; git push' the doubled quote is one escaped quote, so PowerShell reads ONE string, a`'; git push
+make("a_ps_single_quoted_doubled_quote_holds_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push'"))
+# F3: PowerShell's tokenizer reads U+2018..U+201B as single quotes and U+201C..U+201E as double quotes, mixed freely with the ASCII ones: a
+# typographic quote closes an ASCII one, so the statement between two strings runs
+CURLY = dict(ls="‘", rs="’", ld="“", rd="”", lw="‚", rw="‛", dl="„")
+make("d_f3_curly_single_closes_ascii", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS("Write-Host 'a%(rs)s; git push; Write-Host %(ls)sb'" % CURLY))
+make("d_f3_curly_double_closes_ascii", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS('Write-Host "a%(rd)s; git push; Write-Host %(ld)sb"' % CURLY))
+make("d_f3_low9_and_reversed_single", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS("Write-Host '%(lw)s; git push; Write-Host %(rw)s'" % CURLY))
+make("d_f3_low9_double", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS('Write-Host "%(dl)s; git push; Write-Host %(ld)s"' % CURLY))
+make("d_f3_curly_then_publish_encoded", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS("pwsh -enc " + __import__("base64").b64encode(("Write-Host 'a%(rs)s; git push; Write-Host %(ls)sb'" % CURLY).encode("utf-16-le")).decode()))
+make("a_f3_curly_single_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a%(rs)s; git status; Write-Host %(ls)sb'" % CURLY))
+make("a_f3_curly_double_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a%(rd)s; git status; Write-Host %(ld)sb"' % CURLY))
+make("a_f3_curly_string_no_command", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host %(ls)sit%(rs)ss fine%(rs)s" % CURLY))
+make("a_f3_curly_double_quoted_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host %(ld)sgit push%(rd)s" % CURLY))
+make("a_f3_curly_single_quoted_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host %(ls)sgit push%(rs)s" % CURLY))
+make("d_f3_curly_double_quoted_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host %(ld)sgit push%(rd)s; git push" % CURLY))
 # a single quote that is never closed has nothing to pair with: it is dropped and the rest is read as it stands (the twin of the case above)
 make("d_ps_unclosed_single_quote_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host 'a; git push"))
 make("a_m2b_escaped_quotes_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a`""; git status; Write-Host "`"b"'))
@@ -1031,6 +1080,16 @@ elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-
         for last, want in (("git status", False), ("git push", True)):
             cmd = nested_bodies(each, openers, last)
             timed("16 nested $( ) bodies just under the heredoc budget each, %s, then %s" % (size, last),
+                  lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), want, 1.5)
+    # the same bodies with the publish inside one body's substitution (an apostrophe line, read with quotes as plain characters when a text
+    # is read as it stands): found, and no slower than the bound above
+    for size, each, openers in (("125 KB", 7800, 16), ("250 KB", 15600, 7)):
+        head = "echo " + " ".join(["<<" + "D" * 64] * openers) + "\n"
+        body = head + ("x" * 63 + "\n") * ((each - len(head)) // 64)
+        for line, want in (("it's $(git push) don't", True), ("it's $(git status) don't", False),
+                           ("cat <<EOF\nit's $(git push) don't\nEOF", True), ("cat <<EOF\nit's $(git status) don't\nEOF", False)):
+            cmd = "".join('echo "$(%s)"\n' % (body + (line if k == 9 else "")) for k in range(16))
+            timed("16 nested $( ) bodies just under the heredoc budget each, %s, %s inside one body" % (size, line.replace("\n", " ")[:32]),
                   lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), want, 1.5)
     # ps_text: a left-to-right scan of single quotes, double quotes, backticks, here-strings and comments, 96 KB of them mixed
     mix = "git commit -m 'a `b`' ; Write-Host \"c `\"d`\" it's\" ; @'\nq's `x\n'@ # e'f\n<# g'h #> ''`'' \"\"\n"

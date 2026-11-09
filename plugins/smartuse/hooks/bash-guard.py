@@ -20,7 +20,8 @@
 # echoed in a reason is cut at 200 characters and a whole reason at 2,000. The deadline starts when the hook starts, before any
 # scan of the command; the heredoc scans rescan their text once per unclosed opener, so a command with more than HEREDOC_CAP
 # openers (or an opener with a delimiter over HEREDOC_DELIM_MAX characters, or delimiters times text length over
-# HEREDOC_BUDGET) is read as it stands (its heredoc bodies count as code: an over-deny, never a miss). A PowerShell text, and a
+# HEREDOC_BUDGET) is read as it stands: its heredoc bodies count as code, and each $( ) and backtick body in it is also read with quote
+# characters taken as plain text, so it can over-deny (one turn) where a quote would have hidden a substitution. A PowerShell text, and a
 # text read as it stands, is read twice: whole, and one line at a time (a quote never reaches past its line there). Any other
 # Bash text is read whole: a known limit, see ROADMAP.
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
@@ -874,6 +875,8 @@ UNREADABLE = []   # set when an encoded PowerShell command could not be decoded:
 
 PS_PAIR = re.compile(r"``|`[\"']")
 PS_HERE_OPEN = re.compile(r"[ \t]*\r?\n")
+PS_CURLY_SINGLE = re.compile("[‘’‚‛]")   # PowerShell's tokenizer reads these as single quotes ...
+PS_CURLY_DOUBLE = re.compile("[“”„]")   # ... and these as double quotes, mixed freely with the ASCII ones
 
 
 def ps_unescape(s):
@@ -882,7 +885,8 @@ def ps_unescape(s):
     (a backtick in it is an ordinary character and a doubled '' is one escaped quote; nothing else is special, so a backtick before
     the closing quote leaves that quote in place) and is kept as it stands; in a double-quoted string, and outside any string, a
     backtick and the quote or backtick after it are dropped. A single quote that is never closed has nothing to pair with, so it is
-    dropped and the rest read as it stands. Here-strings and comments are read as data, their pairs dropped."""
+    dropped and the rest read as it stands. Here-strings and comments are read as data, their pairs dropped. Only the ASCII ' and "
+    are quotes here: the typographic ones PowerShell also reads as quotes are folded to them by ps_text before this runs."""
     out, i, n = [], 0, len(s)
     while i < n:
         c = s[i]
@@ -945,8 +949,11 @@ def ps_text(s):
     """A PowerShell command as shell-like text the segment splitter reads: a backtick-newline joins lines, an escaped quote or
     backtick is dropped whole outside single-quoted strings (see ps_unescape) so that it can never open or close a quoted word, any
     other backtick (PowerShell's escape character) is dropped, here-string fences (@" "@ @' '@) become line breaks, { and } (script
-    blocks) become ;, and commas (array literals) become blanks. Nothing else."""
+    blocks) become ;, and commas (array literals) become blanks. The typographic quotes PowerShell's tokenizer reads as quotes
+    (U+2018 to U+201B as ', U+201C to U+201E as ") are folded to the ASCII ones first. Nothing else."""
     s = re.sub(r"`\r?\n", "", s)
+    s = PS_CURLY_SINGLE.sub("'", s)
+    s = PS_CURLY_DOUBLE.sub('"', s)
     s = ps_unescape(s)
     s = re.sub(r"@[\"']|[\"']@", "\n", s)
     return s.replace("`", "").replace("{", ";").replace("}", ";").replace(",", " ")
@@ -1178,11 +1185,20 @@ def _hit(text, pats, depth, ps=False, many=False):
         if _scan(line_segments(text.replace("\\\n", ""), seps, True), seps, pats, depth, ps, seen, many):
             return True
     if depth < 2:
+        done = set()
         for body in subst_bodies(text, True, many):
+            done.add(body)
             if _hit(cap_strip(body, many), pats, depth + 1, ps, many):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
                 return True
             if any(_hit(cap_strip(b, many), pats, depth + 1, ps, many) for b in heredoc_substs(body, many)):   # but an unquoted one still substitutes
                 return True
+        if many:
+            # A text read as it stands is not heredoc-stripped, so the substitutions in an unquoted heredoc body are seen only through the
+            # quote-aware split above, where an apostrophe in a heredoc line (a plain character to bash) pairs as a quote and hides them. So
+            # its substitutions are collected once more with quote characters taken as plain text (over-checking only), at every level.
+            for body in subst_bodies(text, False, many):
+                if body not in done and _hit(cap_strip(body, many), pats, depth + 1, ps, many):
+                    return True
     return False
 
 
