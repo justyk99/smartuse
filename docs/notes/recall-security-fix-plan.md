@@ -154,7 +154,15 @@ One Python start per tool-call hook event (no subprocess, no second interpreter,
 Fresh review of `da50316..36ee0ab` found 4 majors (M1 wrapper heads can no longer be a `publish:` head, a regression; M2 a quoted word spanning lines hides the lines in it: a regression under the F2 cap, new on PowerShell, already true on Bash; M3 `_ps_match` quadratic, past the hook timeout; M4 frozen `HEREDOC` long-delimiter backtracking and `STATE_CALL` exponential failure, both pre-existing) and minors m1–m4, n1–n3. Decided by the orchestrator, same class as F2 (§7: a check in front of a frozen regex, the regex stays byte-identical):
 - M1, M3, M2a, M2b and the minors are fixed in this batch (fix round C, one builder).
 - M4 gets pre-checks in front of `strip_heredocs` and `strip_state_args` (an over-long heredoc delimiter is read as "many"; a state call text the pre-check cannot clear is not stripped, so the gate reads it raw). `HEREDOC` and `STATE_CALL` stay byte-identical.
-- M2c (Bash, at or under the cap, pre-existing): fixed only if no existing allow case flips; otherwise documented in the contract's limits and ROADMAP.
+- M2c (Bash, at or under the cap, pre-existing): fixed only if no existing allow case flips; otherwise documented in the contract's limits and ROADMAP. Outcome: 7 existing allows flipped (quoted commit messages and PR bodies), so it is pinned as a known limit (961ce8a).
+
+## 7c. Review round 2 (2026-11-10): decisions
+Re-review of 961ce8a: 13 of 14 items fixed; one new major and four minors. Decided by the orchestrator:
+- N1 (major, regression vs 36ee0ab): the escaped-quote drop in `ps_text` also fires inside PowerShell single-quoted strings, where a backtick is literal → fixed in round D (drop an escaped quote only outside single-quoted strings).
+- N3 (timing margin: 16 openers with 64-character delimiters at ~96 KB come within ~0.2 s of the hook timeout once a slow interpreter start is added) → round D tightens the bound so the worst case stays far inside the timeout.
+- N5 (a header comment claims a per-line read the Bash path does not do; comments and test names spell out an open gap's method) → round D rewords them to the class of the problem.
+- N2 (PowerShell per-line pass over-denies a publish command on its own line inside a multi-line quoted argument) → accepted, same class as the coarse PowerShell match (one turn); documented in F7.
+- N4 (a string piped into iex / a shell across a line break or through parentheses is not followed) → documented limit in F7 (the Bash form predates this batch).
 
 ## 8. Risks
 - **The merge of two builders in `bash-guard.py`.** Distinct functions, but both touch the file; the orchestrator merges B then A and runs `run.sh` and `fresh-gate-test.sh` once more after the merge, before the fresh review.
