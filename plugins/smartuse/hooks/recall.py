@@ -254,10 +254,14 @@ def scrub(text, path=False):
 
 def one_line(text, n, path=False):
     """Scrubbed (see scrub), control characters out, whitespace collapsed to single spaces, cut at n characters (the cut comes last,
-    so a token is masked whole before it can be cut in half). The text is pre-cut at n + 4096 characters before the scrub, so a
-    pasted blob costs no more than a line: the pre-cut is far beyond the printed length, and a token that straddles it could only
-    reach the output if the scrub had shrunk the text by over 4,096 characters before position n."""
-    s = " ".join(CTRL.sub(" ", scrub(str(text)[:n + 4096], path)).split())
+    so a token is masked whole before it can be cut in half). Control characters and whitespace are collapsed first (one linear
+    pass), and the collapsed text is pre-cut at n + 4096 characters before the scrub, so a pasted blob costs no more than a line:
+    the pre-cut counts characters that can be printed (a run of blank lines before the real text does not use it up), it is far
+    beyond the printed length, and a token that straddles it could only reach the output if the scrub had shrunk the text by over
+    4,096 characters before position n. Collapsing first gives the same text as scrubbing first: neither the token, the address
+    nor the digit rules look at the kind or the number of the blanks around a match."""
+    s = " ".join(CTRL.sub(" ", str(text)).split())[:n + 4096]
+    s = scrub(s, path)
     return s if len(s) <= n else s[:n - 1].rstrip() + "…"
 
 

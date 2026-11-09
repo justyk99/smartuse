@@ -724,6 +724,77 @@ make("d_size_1mb_link", ex(DENY, has=[linkmsg("jobs/linked/" + "w" * 188 + "\u20
 make("d_size_many_unopened_still_capped", ex(DENY, has=["12 of 12 sources not opened"], maxlen=2000), cmd="python send.py",
      adp=adapter(sources="many/*.txt"), files=[], nfiles=("many", 12), tr=lambda P: base(P))
 
+# --- review fixes (round 7). M1: a pattern whose FIRST word is a wrapper the guard skips (uv, poetry, hatch, pdm, rye, pipx, wsl,
+# start, setsid, busybox, Start-Process, saps) still matches: the pattern is tried from every wrapper position of a statement, not only
+# from the command word after the wrappers. Other uses of the same runner stay allowed.
+WPUB = "uv publish, poetry publish, hatch publish, pdm publish, rye publish, pipx run twine upload, wsl ./deploy.sh, start deploy.bat, setsid ./ship.sh, busybox sh ship.sh, Start-Process ./go.ps1, saps ./go2.ps1"
+for nm, cm in (("uv", "uv publish dist/*"), ("poetry", "poetry publish --build"), ("hatch", "hatch publish"), ("pdm", "pdm publish"), ("rye", "rye publish"),
+               ("pipx", "pipx run twine upload dist/*"), ("wsl", "wsl ./deploy.sh"), ("start", "start deploy.bat"), ("setsid", "setsid ./ship.sh"),
+               ("busybox", "busybox sh ship.sh"), ("env_uv", "env A=1 uv publish"), ("timeout_uv", "timeout 60 uv publish dist/*"), ("var_uv", "A=1 uv publish"),
+               ("compound_uv", "if true; then uv publish; fi"), ("startprocess", "Start-Process ./go.ps1"), ("saps", "saps ./go2.ps1"),
+               ("nohup_poetry", "nohup poetry publish")):
+    make("d_m1_" + nm, ex(DENY, has=["sources not opened"]), cmd=cm, adp=adapter(publish=WPUB), tr=lambda P: base(P))
+    make("d_m1_ps_" + nm, ex(DENY, has=["sources not opened"]), adp=adapter(publish=WPUB), tr=lambda P: base(P), **PS(cm))
+for nm, cm in (("uv_run_other", "uv run python other.py"), ("uv_pip", "uv pip list"), ("poetry_run", "poetry run pytest"), ("pipx_run_other", "pipx run black ."),
+               ("wsl_other", "wsl ls"), ("start_other", "start other.bat"), ("hatch_build", "hatch build"), ("env_other", "env A=1 python other.py")):
+    make("a_m1_" + nm, ex(ALLOW), cmd=cm, adp=adapter(publish=WPUB), tr=lambda P: base(P))
+    make("a_m1_ps_" + nm, ex(ALLOW), adp=adapter(publish=WPUB), tr=lambda P: base(P), **PS(cm))
+# M3: one PowerShell statement of 6,000 words that all match the pattern's first word, then a real publish: decided inside the hook's
+# 10 s timeout (the time went quadratic: the words after every head match were scanned again)
+make("d_m3_ps_many_heads", ex(DENY, has=["3 of 3 sources not opened"], max=9), tr=lambda P: base(P), **PS("Write-Output " + "git " * 6000 + "; git push"))
+make("a_m3_ps_many_heads_no_publish", ex(ALLOW, max=9), tr=lambda P: base(P), **PS("Write-Output " + "git " * 6000))
+make("d_m3_ps_start_process_many_heads", ex(DENY, has=["3 of 3 sources not opened"], max=9), tr=lambda P: base(P),
+     **PS("Start-Process git -ArgumentList " + "git " * 6000 + " push"))
+# M2: a quoted word that spans lines must not hide the lines inside it. (a) the cap: 17 heredocs read as code, an apostrophe in one body
+# and another in a later one used to pair up and hide the publish line between them; (b) PowerShell: an apostrophe in a here-string
+# and one in a comment, two here-strings that each hold one quote, an escaped quote; (c) Bash comments with an apostrophe (a known limit)
+CAP17 = "cat > a.md <<EOF\nit's data\nEOF\ngit push\ncat > b.md <<EOF\ndon't\nEOF\n" + "".join("cat > f%d.md <<EOF\nnote %d\nEOF\n" % (i, i) for i in range(15))
+make("d_m2a_cap_apostrophes", ex(DENY, has=["3 of 3 sources not opened"]), cmd=CAP17, tr=lambda P: base(P))
+make("a_m2a_cap_apostrophes_no_publish", ex(ALLOW), cmd=CAP17.replace("git push", "git status"), tr=lambda P: base(P))
+make("d_m2b_herestring_apostrophes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS('git commit -m @"\nFix the user\'s login\n"@\ngit push  # it\'s ready'))
+make("a_m2b_herestring_apostrophes_no_publish", ex(ALLOW), tr=lambda P: base(P),
+     **PS('git commit -m @"\nFix the user\'s login\n"@\ngit status  # it\'s ready'))
+make("d_m2b_two_herestrings_one_quote_each", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
+     **PS('$a = @"\nsize 5"\n"@\ngit push\n$n = @"\n"quoted\n"@'))
+make("d_m2b_escaped_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS('Write-Host "a`""; git push; Write-Host "`"b"'))
+make("d_m2b_escaped_single_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
+make("a_m2b_escaped_quotes_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a`""; git status; Write-Host "`"b"'))
+# (c) KNOWN LIMIT, pinned: on Bash a quoted word that spans lines is read whole (reading every Bash text line by line as well turned seven
+# existing allows, quoted commit messages and PR bodies with a line that is a publish command, into denies), so an apostrophe in one comment
+# pairs with one in a later comment and hides the line between them. Allowed today; the day this is fixed the case flips (ROADMAP).
+make("a_m2c_known_limit_bash_comment_apostrophes_pinned", ex(ALLOW), cmd="# it's ready\ngit push origin main\n# check the PR's status", tr=lambda P: base(P))
+make("a_m2c_bash_comment_apostrophes_no_publish", ex(ALLOW), cmd="# it's ready\ngit status\n# check the PR's status", tr=lambda P: base(P))
+# M4 (a): one heredoc opener with a 12,000-character delimiter and 6,000 body lines before a publish (the opener scan backtracked once per
+# delimiter character); (b) a state write whose plain argument cannot be split in a hurry
+make("d_m4a_long_delimiter", ex(DENY, has=["3 of 3 sources not opened"], max=9), cmd="cat <<" + "a" * 12000 + "\n" + "x\n" * 6000 + "git push", tr=lambda P: base(P))
+make("a_m4a_short_delimiter_data", ex(ALLOW), cmd="cat <<" + "a" * 64 + "\ngit push\n" + "a" * 64 + "\n", tr=lambda P: base(P))
+STATE = 'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --unit 3 status=done note='
+make("d_m4b_state_arg_then_publish", ex(DENY, has=["3 of 3 sources not opened"], max=9), cmd=STATE + "a" * 12 + " && git push", tr=lambda P: base(P))
+make("d_m4b_state_arg_then_publish_ps", ex(DENY, has=["3 of 3 sources not opened"], max=9), tr=lambda P: base(P), **PS(STATE + "a" * 12 + " && git push"))
+make("a_m4b_state_write_stays_data", ex(ALLOW, max=9), cmd=STATE + "a" * 12 + " 'git push was refused'", tr=lambda P: base(P))
+# minors. m1: a string piped into iex / Invoke-Expression is code; m2: a decoded -EncodedCommand is normalised like the rest;
+# m3: runner options the guard does not know (uv run --package app python send.py); n3: Start-Process after an assignment
+ENC_BT = __import__("base64").b64encode("gi`t push".encode("utf-16-le")).decode()
+for nm, cm in (("iex_single", "'git push' | iex"), ("iex_double", '"git push" | iex'), ("invoke_expression", "'python send.py' | Invoke-Expression"),
+               ("iex_write_output", "Write-Output 'git push' | iex"), ("iex_alias_case", "'git push' | IEX")):
+    make("d_m1b_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(cm))
+make("a_m1b_iex_other_text", ex(ALLOW), tr=lambda P: base(P), **PS("'Get-Date' | iex"))
+make("a_m1b_piped_text_not_into_iex", ex(ALLOW), tr=lambda P: base(P), **PS("'git push' | Out-File notes.txt"))
+make("d_m2m_encoded_backtick", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("pwsh -enc " + ENC_BT))
+for nm, cm in (("uv_package", "uv run --package app python send.py"), ("uv_index", "uv run --index-url https://x.test python send.py"),
+               ("poetry_C", "poetry -C sub run python send.py"), ("pdm_p", "pdm -p sub run python send.py"), ("hatch_env", "hatch -e prod run python send.py"),
+               ("pipx_spec", "pipx run --spec foo python send.py"), ("uv_isolated", "uv --quiet run --no-project --isolated python send.py")):
+    make("d_m3m_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("uv_run_other", "uv run python other.py"), ("poetry_run_pytest", "poetry run pytest"), ("uv_package_other", "uv run --package app python other.py"),
+               ("poetry_C_other", "poetry -C sub run pytest")):
+    make("a_m3m_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("assign", "$p = Start-Process -ArgumentList push -FilePath git -PassThru"), ("assign_glued", "$p=Start-Process -ArgumentList push -FilePath git"),
+               ("assign_saps", "$p = saps -ArgumentList push -FilePath git"), ("in_pipeline", "Get-Date | Start-Process -ArgumentList push -FilePath git"),
+               ("after_semicolon", "Write-Host x; Start-Process -ArgumentList push -FilePath git")):
+    make("d_n3_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(cm))
+make("a_n3_start_process_other", ex(ALLOW), tr=lambda P: base(P), **PS("$p = Start-Process -ArgumentList status -FilePath git -PassThru"))
+
 open(OUT + "/order.txt", "w", newline="\n").write("\n".join(ORDER) + "\n")
 open(OUT + "/skipped.txt", "w", newline="\n").write("".join(s + "\n" for s in SKIPS))
 PY
@@ -866,6 +937,68 @@ elif mode == "bounded":  # bounded <bash-guard.py> <empty dir>: the heredoc scan
             bad.append("fresh_gate with a deadline in the past returned %r" % (why,))
     except Exception as e:
         bad.append("fresh_gate(data, text, raw, deadline): " + type(e).__name__)
+    # the unreadable-encoded-command flag belongs to one call: a second call in the same namespace must not inherit it
+    try:
+        data = {"cwd": proj, "transcript_path": proj + "/t.jsonl"}
+        first = ns["fresh_gate"](data, "pwsh -enc not-base64!!", None, None, True)
+        second = ns["fresh_gate"](data, "git push", None, time.monotonic() - 1, True)
+        if not first or "encoded command" not in first:
+            bad.append("an undecodable encoded command gave %r" % (first,))
+        if not second or "encoded command" in second or "could not verify" not in second:
+            bad.append("a second fresh_gate call inherited the first call's unreadable flag: %r" % (second,))
+    except Exception as e:
+        bad.append("per-call flag: " + type(e).__name__)
+    print("ok" if not bad else "; ".join(bad))
+elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-write strip and the heredoc pre-check take time linear in the text
+    import time
+    ns = {}
+    exec(compile(rd(sys.argv[2]).replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
+    bad = []
+
+    def timed(label, f, want):
+        """True when f() gives `want` in under 1 s (function time: no interpreter start in the number); else a note is added."""
+        t0 = time.perf_counter()
+        got = f()
+        took = time.perf_counter() - t0
+        if got != want or took >= 1.0:
+            bad.append("%s: %r in %.1f s (needs %r in under 1 s)" % (label, got, took, want))
+            return False
+        return True
+
+    def ps(t, pats):
+        return ns["publish_hit"](ns["ps_text"](t).replace("\\", "/"), pats, 0, None, True)
+
+    def sh(t, pats):
+        return ns["publish_hit"](t, pats, 0)
+    # (label, function, wanted): each family is run at 24 KB and at 96 KB; a family that is already slow at 24 KB is not run at 96 KB
+    for label, mk in (
+            ("PowerShell: heads then a publish", lambda n: (lambda: ps("Write-Output " + "git " * n + "; git push", ["git push"]), True)),
+            ("PowerShell: heads, no publish", lambda n: (lambda: ps("Write-Output " + "git " * n, ["git push"]), False)),
+            ("PowerShell: Start-Process heads, no publish", lambda n: (lambda: ps("Start-Process " + "git " * n, ["git push"]), False)),
+            ("PowerShell: Start-Process heads then the argument", lambda n: (lambda: ps("Start-Process git -ArgumentList " + "git " * n + " push", ["git push"]), True)),
+            ("PowerShell: a string piped into iex", lambda n: (lambda: ps("'" + "git " * n + "push' | iex", ["git push"]), True)),
+            ("Bash: runner words then a publish", lambda n: (lambda: sh("uv run " + "x " * n + "python send.py", ["python send.py"]), True)),
+            ("Bash: runner words, no publish", lambda n: (lambda: sh("uv run " + "python " * n, ["python send.py"]), False)),
+            ("Bash: a chain of wrappers", lambda n: (lambda: sh("env " * n + "uv publish", ["uv publish"]), True)),
+            ("Bash: a chain of runners", lambda n: (lambda: sh("uv " * n + "x", ["uv publish"]), False)),
+            ("PowerShell: many lines, an apostrophe in each", lambda n: (lambda: ps("# it's\n" * (n // 2) + "git push\n# it's", ["git push"]), True)),
+            ("Bash: 17 heredocs read as code, many lines", lambda n: (lambda: sh("x <<a\n" * 17 + "# it's\n" * (n // 2) + "git push\n# it's", ["git push"]), True))):
+        for size, n in (("24 KB", 6000), ("96 KB", 24000)):
+            f, want = mk(n)
+            if not timed("%s, %s" % (label, size), f, want):
+                break
+    # the heredoc opener with a very long delimiter: read as code, not scanned; found at 96 KB too
+    for body in (6000, 24000):
+        cmd = "cat <<" + "a" * 12000 + "\n" + "x\n" * body + "git push"
+        timed("one heredoc opener with a 12,000-character delimiter, %d lines" % body, lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), True)
+    # the state-write strip: a plain argument that cannot be split in a hurry, at a length that took over 10 s before; the shape stays data
+    st = 'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --unit 3 status=done note='
+    for plain in (12, 4000, 100000):
+        c = st + "a" * plain + " && git push"
+        if not timed("state write, %d plain characters then && git push" % plain, lambda: ns["strip_state_args"](c) == c, True):
+            break
+    ok_c = st + "a" * 100000 + " 'git push was refused'"
+    timed("state write, a 100,000-character plain argument and a quoted note", lambda: "git push" not in ns["strip_state_args"](ok_c), True)
     print("ok" if not bad else "; ".join(bad))
 elif mode == "hooks":    # hooks <hooks.json>
     d = json.loads(rd(sys.argv[2]))
@@ -921,6 +1054,7 @@ cmp -s "$D/snap.before" "$D/snap.after" && ok "no file was created, changed or r
 r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time stat fnmatch datetime threading), no process call, Python 3.9 grammar" || ko "imports: $r"
 mkdir -p "$D/empty"; r=$(py "$D/chk.py" units "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "unit checks on the functions: a value echoed in a reason is cut at 200 characters, a whole reason at 2,000; only link-like reparse points are links" || ko "size caps: $r"
 r=$(py "$D/chk.py" bounded "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "bounded scan: three 8,000-opener shapes found in under 1 s each; a deadline in the past denies ('source expansion over 4 s')" || ko "bounded scan: $r"
+r=$(py "$D/chk.py" linear "$G" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "linear time: ten shapes of 6,000 and 24,000 words (PowerShell heads, Start-Process, iex, runner and wrapper chains, apostrophe lines), a 12,000-character heredoc delimiter and a state-write argument of 100,000 characters each decided in under 1 s" || ko "linear time: $r"
 r=$(py "$D/chk.py" execsilent "$G" </dev/null); [ "$r" = ok ] && ok "until-done.py's exec of this file without main() prints nothing and yields RULES" || ko "exec without main(): $r"
 r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash|PowerShell entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
 

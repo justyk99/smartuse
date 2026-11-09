@@ -175,12 +175,22 @@ t.boundary(60)
 t.summary()
 t.save("blob")
 
-# pin: a token that starts at character n + 4096 + 3 of a prompt (n = 300), past the point where one_line() pre-cuts
+# pin (a BEHAVIOUR pin, not a regression test: it passes on the code before the pre-cut as well): a token that starts at character
+# n + 4096 + 3 of a prompt (n = 300) is past what is printed, so it never prints, cut or not
 t = T()
 t.human("PROMPT-PIN " + "b" * (300 + 4096 + 3 - len("PROMPT-PIN ") - 1) + " sk-xxxxxxxxxxxxxxxxxxxx tail")
 t.boundary(60)
 t.summary()
 t.save("pin")
+
+# gap: blank lines in front of the text that matters must not use up the pre-cut of one_line() (it counts the characters left
+# after the whitespace is collapsed): an address and a token that sit past character n + 4096 of the RAW prompt are still masked whole
+t = T()
+t.human("PROMPT-GM see below" + "\n\n" * 2190 + "jane.doe@example.test")
+t.save("gapmail")
+t = T()
+t.human("PROMPT-GT" + "\n" * 4380 + " sk-xxxxxxxxxxxxxxxxxxxx rest")
+t.save("gaptoken")
 
 # garbage: lines that are not records, then one genuine prompt
 with open(os.path.join(OUT, "garbage.jsonl"), "wb") as f:
@@ -269,6 +279,18 @@ elif mode == "scrub":      # scrub <recall.py> <check>: e-mail masking through t
             s = "".join(rnd.choice(alpha) for _ in range(rnd.randint(0, 24)))
             if f(s) != OLD.sub("[email]", s):
                 bad.append("%r: %r vs %r" % (s, f(s), OLD.sub("[email]", s)))
+        print("ok" if not bad else "; ".join(bad[:3]))
+    elif which == "oneline":   # one_line() against the formula it had before any pre-cut existed (scrub, then collapse, then cut): same output
+        def old_one_line(t, n, path=False):
+            s = " ".join(g["CTRL"].sub(" ", g["scrub"](str(t), path)).split())
+            return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+        rnd, bad = random.Random(20261110), []
+        parts = ["sk-", "xxxxxxxxxx", " ", "\n", "\t", "\x01", "​", "@", "jane.doe", ".test", "12345678", "9", "-", "/", "a.pdf", "  ", "ghp_", "tok", "\n" * 5000, " " * 4500, "\r\n" * 2300]
+        for _ in range(800):
+            s = "".join(rnd.choice(parts) for _ in range(rnd.randint(0, 40)))
+            for n, path in ((300, False), (20, True), (300, True), (1000, False)):
+                if g["one_line"](s, n, path) != old_one_line(s, n, path):
+                    bad.append("%r (n=%d): %r vs %r" % (s[:40], n, g["one_line"](s, n, path)[:40], old_one_line(s, n, path)[:40]))
         print("ok" if not bad else "; ".join(bad[:3]))
     elif which == "time":   # 128 KB of text in the shapes that made the old rule slow: a few seconds at most for all four together, and the right result
         cases = [("a" * 131072, "a" * 131072), ("a" * 131072 + "user@example.test", "[email]"), ("x@" + "a." * 60000, "x@" + "a." * 60000),
@@ -428,6 +450,7 @@ adapter "$A_FULL"
 r=$(py "$D/chk.py" scrub "$HOOK" end </dev/null); [ "$r" = ok ] && ok "scrub: an address at the end of a 32 KB letter run prints as [email], the run with it" || ko "scrub end of a run: $r"
 r=$(py "$D/chk.py" scrub "$HOOK" short </dev/null); [ "$r" = ok ] && ok "scrub: a@b, a@b.c and @host are not addresses; two in a row and one after a stray @ are" || ko "scrub short forms: $r"
 r=$(py "$D/chk.py" scrub "$HOOK" same </dev/null); [ "$r" = ok ] && ok "scrub: 3000 random strings give the same result as the old e-mail rule" || ko "scrub vs old rule: $r"
+r=$(py "$D/chk.py" scrub "$HOOK" oneline </dev/null); [ "$r" = ok ] && ok "scrub: one_line() prints what the formula without a pre-cut printed, for 800 random texts with blank runs of 2,300 to 5,000 characters" || ko "one_line vs the formula without a pre-cut: $r"
 r=$(py "$D/chk.py" scrub "$HOOK" time </dev/null); [ "$r" = ok ] && ok "scrub: 128 KB of text in four slow shapes takes under 2 s together" || ko "scrub time: $r"
 runt "$(ev SessionStart compact blob)"
 has "scrub: a 128 KB prompt still prints its first words" "PROMPT-BLOB-SENTENCE read this first"
@@ -438,10 +461,18 @@ has "scrub: a 128 KB handoff line still prints its first words" "BLOB-HANDOFF-SE
 [ "$MS" -le $NETMAX ] && ok "scrub: a 128 KB handoff line costs $MS ms (limit $NETMAX)" || ko "128 KB handoff line took $MS ms"
 rm -f "$D/proj/docs/BLOB.md"
 adapter "$A_FULL"; run "$(ev SessionStart compact pin)"
-has "scrub: the pin transcript is read (its first words print)" "PROMPT-PIN"
-lacks "scrub: a token that starts past the pre-cut of a prompt never prints" "sk-xxxxxxxx"
-lacks "scrub: nor does its [secret] mask" "[secret]"
+has "scrub: (behaviour pin) the pin transcript is read (its first words print)" "PROMPT-PIN"
+lacks "scrub: (behaviour pin) a token that starts past the printed part of a prompt never prints" "sk-xxxxxxxx"
+lacks "scrub: (behaviour pin) nor does its [secret] mask" "[secret]"
 adapter "$A_FULL"
+# the pre-cut counts the characters left after the whitespace is collapsed: 2,190 blank lines in front of an address, or 4,380 line
+# breaks in front of a token, must not leave the address cut in half ("jane.do") or the token's head ("sk-xxx") in the output
+run "$(ev PreCompact - gapmail)"
+has "scrub: an address after 2,190 blank lines is masked whole" "PROMPT-GM see below [email]"
+lacks "scrub: the address is not cut in half by the pre-cut" "jane.do"
+run "$(ev PreCompact - gaptoken)"
+has "scrub: a token after 4,380 line breaks is masked whole" "PROMPT-GT [secret] rest"
+lacks "scrub: the token's head is not printed" "sk-xx"
 
 # ===== 3. the 9,000 cap
 S=""; for i in $(seq 1 400); do S="$S${S:+, }jobs/demo/folder-$i/photo.jpg"; done

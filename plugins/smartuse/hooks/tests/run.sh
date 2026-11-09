@@ -212,6 +212,24 @@ case "$out" in *"bash-guard: sudo"*) if [ $((t1 - t0)) -lt 10 ]; then echo "PASS
 M=""; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do M+=$'cat > notes'"$i"$'.md <<\'EOF\'\nsudo ls\nEOF\n'; done
 check allow "$M"   # 16 data heredocs: the cap is not reached, behaviour as before
 check deny  "$M"$'cat > notes17.md <<\'EOF\'\nsudo ls\nEOF\n'   # 17: read as code (the documented over-deny at the cap)
+# --- two more shapes the frozen regexes took seconds on, now decided inside the timeout with the rules still firing. (a) one heredoc
+#     opener with a 12,000-character delimiter and 6,000 body lines: the opener scan backtracked once per delimiter character, so a
+#     delimiter over 64 characters reads the text as it stands, like the cap. (b) a state write whose plain argument is followed by a
+#     second command: the state-write pattern tried every split of the plain word (12 characters took 37 s); a linear look comes first.
+for shape in long-delimiter state-argument; do
+  BIG=$(mktemp)
+  py - "$shape" > "$BIG" <<'PY'
+import json, sys
+c = "cat <<" + "a" * 12000 + "\n" + "x\n" * 6000 + "sudo ls" if sys.argv[1] == "long-delimiter" else 'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --unit 3 status=done note=' + "a" * 12 + " && sudo ls"
+print(json.dumps({"tool_name": "Bash", "tool_input": {"command": c}}))
+PY
+  t0=$(date +%s); out=$(bash "$H/py.sh" "$G" < "$BIG"); t1=$(date +%s); rm -f "$BIG"
+  case "$out" in *"bash-guard: sudo"*) if [ $((t1 - t0)) -lt 10 ]; then echo "PASS deny  $shape then sudo, in $((t1 - t0)) s (hook timeout 10 s)"; else echo "FAIL $shape took $((t1 - t0)) s (limit 10)"; fail=1; fi;; *) echo "FAIL $shape then sudo must be denied with the sudo reason -> '${out:0:60}'"; fail=1;; esac
+done
+check allow $'cat > notes.md <<\'EOF\'\nsudo ls\nEOF'
+E64=$(printf 'E%.0s' $(seq 1 64)); E65="${E64}E"
+check allow "cat <<$E64"$'\nsudo ls\n'"$E64"   # a 64-character delimiter: a data heredoc, as before
+check deny  "cat <<$E65"$'\nsudo ls\n'"$E65"   # 65: the text is read as it stands (the documented over-deny, like the cap)
 FP=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-fresh-run.XXXXXX") && [ -d "$FP" ] || { echo "FAIL could not create a temp dir"; exit 1; }
 fwp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 mkdir -p "$FP/with/.claude" "$FP/with/jobs/demo" "$FP/none/.claude"
@@ -244,20 +262,34 @@ fcheck deny  'Python send.py' with
 fcheck deny  'uv run python send.py' with
 fcheck deny  'echo git push | bash' with
 fcheck allow 'uv run python other.py' with
+# --- review fixes (round 7): a package runner with options the guard does not list, and a quote that spans lines
+fcheck deny  'uv run --package app python send.py' with
+fcheck deny  'poetry -C sub run python send.py' with
+fcheck deny  'pdm -p sub run python send.py' with
+fcheck allow 'poetry run pytest' with
+fcheck allow 'uv run --package app python other.py' with
+fcheck allow $'# it\'s ready\ngit push origin main\n# check the PR\'s status' with   # a known limit, pinned (ROADMAP): reading every Bash text line by line turned seven quoted commit-message allows into denies
+fcheck allow $'# it\'s ready\ngit status\n# check the PR\'s status' with
+fcheck deny  $'cat > a.md <<EOF\nit\'s data\nEOF\ngit push\ncat > b.md <<EOF\ndon\'t\nEOF' with
 # --- the same gate through the PowerShell tool (hooks.json matcher Bash|PowerShell): the text is normalised (here-string fences and
 #     braces are statement breaks, backticks and commas go) and the publish pattern's first word may be any word of a statement,
 #     compared without regard to case. Coarse and fail-closed: a publish word anywhere in a statement is a match.
 ENC=$(py -c 'import base64; print(base64.b64encode("git push".encode("utf-16-le")).decode())' </dev/null)
+ENCBT=$(py -c 'import base64; print(base64.b64encode("gi`t push".encode("utf-16-le")).decode())' </dev/null)   # gi`t push: the backtick is only normalised once the text is decoded
 ENCOK=$(py -c 'import base64; print(base64.b64encode("Get-Date".encode("utf-16-le")).decode())' </dev/null)
 for c in 'git push origin main' 'Git Push' '& git push' 'git.exe push' 'py -3 .\send.py' 'python .\jobs\send.py' 'Start-Process git -ArgumentList "push","origin"' \
          'Start-Process -ArgumentList push -FilePath git' 'saps git push' 'iex "git push"' "Invoke-Expression 'python send.py'" 'cmd /c "git push"' \
          'pwsh -NoProfile -Command "git push"' "pwsh -enc $ENC" 'pwsh -enc not-base64!!' 'bash -c "git push"' 'wsl -d Ubuntu -- git push' \
          'if ($ok) { git push }' '1..3 | ForEach-Object { python send.py }' 'Invoke-Command -ScriptBlock { git push }' 'gi`t push' \
          "$(printf 'git `\n push')" "$(printf 'iex @"\ngit push\n"@')" 'Write-Host "$(git push)"' '& "C:\Program Files\Git\cmd\git.exe" push' \
+         "'git push' | iex" "'python send.py' | Invoke-Expression" 'Write-Output "git push" | IEX' "pwsh -enc $ENCBT" \
+         '$p = Start-Process -ArgumentList push -FilePath git -PassThru' '$p=saps -ArgumentList push -FilePath git' \
+         "$(printf 'git commit -m @"\nFix the user'"'"'s login\n"@\ngit push  # it'"'"'s ready')" 'Write-Host "a`""; git push; Write-Host "`"b"' \
          'Write-Host git push'; do   # the last one is the accepted over-deny: the publish words unquoted
   fcheck deny "$c" with PowerShell
 done
-for c in 'Write-Host "git push"' '"git push" | Out-File notes.txt' 'git log --oneline' 'python other.py' "pwsh -enc $ENCOK" 'git status'; do
+for c in 'Write-Host "git push"' '"git push" | Out-File notes.txt' 'git log --oneline' 'python other.py' "pwsh -enc $ENCOK" 'git status' \
+         "'Get-Date' | iex" '$p = Start-Process -ArgumentList status -FilePath git -PassThru' 'Write-Host "a`""; git status; Write-Host "`"b"'; do
   fcheck allow "$c" with PowerShell
 done
 out=$(py - <<'PY' | env CLAUDE_PROJECT_DIR="$(fwp "$FP/with")" bash "$H/py.sh" "$G"
