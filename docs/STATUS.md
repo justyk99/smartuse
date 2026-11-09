@@ -1,23 +1,22 @@
-STATUS: smartuse · updated 2026-11-09
+STATUS: smartuse · updated 2026-11-10
 FINISH LINE: smartuse 1.0, driven by the plan in docs/ROADMAP.md (the old STATUS: "drive smartuse to 1.0")
 Done when (assumed from the old Next list): 1 0.6.0 recall released 2 0.7.0 paid-call guard released 3 the 1.0 items on docs/ROADMAP.md closed
-Now: 0.6.0 recall · phase 8 security review found 2 majors (the PowerShell tool skips bash-guard; a crafted heredoc command runs past the 10 s hook timeout) and 4 minors · fix plan approved, option A · build not started; nothing pushed
-Next: Claude: build per docs/notes/recall-security-fix-brief.md (builder A F2→F1→F3, then builder B F5→F4→F6, one at a time), T2, fresh review + security re-check, F7 docs, then phase 6 once the adapter exists (Wed 11 Nov), demo Thu 12 Nov | maintainer: UAT and "push", post Fri 13 Nov on his word
-NEEDS YOU (2): 1 (recommended) create the phase 6 scratch adapter by hand: copy p6/adapter.txt to p6/yk-demo/.claude/smartuse.local.md in the session scratchpad that holds p6-brief.md (guards keep smartuse.local.md human-only) 2 go to push a41adb2 (CI on main is red until then); the pre-push scan needs .smartuse-terms.local on this machine first
+Now: 0.6.0 security fix batch · F1–F6 + review rounds C–F merged on the dev branch (d47d901), T2 green at every merge (last: run 231 · ledger 46 · until-done 40 · file-guard 26 · heartbeat 121 · ab 36 · watch 63 · wait 187 · fresh 522 · recall 210 · term-scan 6) · phase 6 passed at d47d901, no hook failure (Claude Code 2.1.321; PowerShell and Monitor denied live) · round G (plan §7e: a command the gate cannot read counts as a send while sources are unopened) being built in .claude/worktrees/sec-g · F7 docs drafted in .claude/worktrees/sec-docs, not committed (number markers to fill) · nothing pushed
+Next: Claude: merge G, T2, review 6, fill the F7 markers (counts from the last T2; 48 KB = 0.38 s median wall; Monitor confirmed on 2.1.321), commit docs | maintainer: veto §7e or not; UAT and "push"; post Fri 13 Nov on his word
+NEEDS YOU (2): 1 keep or veto plan §7e (one extra denied turn for an unusual command after a squeeze; revert is one line) 2 at ship: .smartuse-terms.local on this machine, then "push" (CI on main red until then)
 ## Last 3 cards
-- 2026-11-09 plan docs/notes/recall-security-fix-plan.md approved; the maintainer left A/B to Claude, Claude chose A (B's extra PowerShell rules guard against deliberate tampering that stays open through Bash, so they cost the demo without making that promise true); brief docs/notes/recall-security-fix-brief.md
-- 2026-11-09 security review of 1a1e62c..HEAD: majors re-verified (hooks.json:6 matches Bash only; 48 KB heredoc probe 4.84 s + 5.39 s); `claude plugin validate --strict` passes (ICON_MISSING only)
-- 2026-11-09 acb65d0: project CLAUDE.md; STATUS in the card format, the old one kept unchanged in docs/STATUS-history-2026-11.md
+- 2026-11-10 direction change §7e after five review rounds kept finding crafted-input classes (planner on claude-fable-5-1 agreed; owner may veto)
+- 2026-11-10 phase 6 at d47d901: all scripted scenarios PASS, live B/C PASS except the send step (fixture photos are not valid images); report in the session scratchpad p6-report-d47d901.md
+- 2026-11-10 review rounds 1–5 on the batch: majors fixed in rounds C–F (87b3cc2..d47d901); decisions in plan §7b–§7d
 ## Unknowns
-- later, asked of the maintainer: put .smartuse-terms.local on this machine (pre-push scan refuses without it) · day-45 check Thu 26 Nov (1 star, 0 forks on 2026-11-06) · plugin icon before the 1.0 listing (square PNG 512-2048 px at .claude-plugin/icon.png) · release page + tag v0.4.0 · README's new lead line · Typefully for LinkedIn
-- does PreCompact output add to or replace the owner's /compact text → phase 6 headless runs
-- does Monitor reach a Bash matcher on the laptop's Claude Code version → phase 6 Part C records the version
+- later, asked of the maintainer: .smartuse-terms.local on this machine · day-45 check Thu 26 Nov · plugin icon before the 1.0 listing · release page + tag v0.4.0 · README's new lead line · Typefully for LinkedIn
+- new, low: on Windows a very long project path pushes ~/.claude/smartuse/projects/<key> past 248 chars and heartbeat/recall silently write no state → ROADMAP
+- not checked: an adversarial PowerShell tokenisation hunt (a review run was cut short) → 0.6.1
 - CLAUDE.md names all.sh (parallel) as T2; this laptop runs the suites one at a time → the maintainer confirms which
-- the old recall worktrees .claude/worktrees/f1 and f23 (merged branches) → remove with the maintainer's ok
-- docs/notes/input-2026-10-24-claude-system.md is on no machine searched → if it turns up, pick its 1.0 candidates and update the ROADMAP
-- the CI 3.9 job pin (ubuntu-24.04) → not proven until a push · paid-f3's 3 failures predate the move → check before it merges
+- old worktrees: .claude/worktrees/f1, f23 (merged) and this batch's sec-a…sec-g, sec-docs → remove with the maintainer's ok
+- leftover scratch outside the repo (agents' deletes were denied): listed in the session report, not here (public repo)
 - locked rules and traps (one Python start per hook, history rewrite 2026-11-06, run suites one at a time) → see the history file
 ## Job sheets (repo-relative: this repo is public)
-- docs/notes/recall-security-fix-brief.md (next) · docs/notes/recall-security-fix-plan.md
+- docs/notes/recall-security-fix-plan.md (§7b–§7e: review rounds and the direction change) · docs/notes/recall-security-fix-brief.md
 - docs/STATUS-history-2026-11.md (the old STATUS, unchanged) · docs/ROADMAP.md
 - docs/notes/recall-design.md · docs/notes/paid-guard-plan.md · docs/notes/py-cache-fix-plan.md
