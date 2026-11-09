@@ -148,6 +148,11 @@ def ex(mode, prefix=FS, has=(), no=(), rx=(), max=0, maxlen=0):
     return {"mode": mode, "prefix": prefix, "has": list(has), "no": list(no), "rx": list(rx), "max": max, "maxlen": maxlen}
 
 
+def cx(tag, n="3 of 3"):
+    """The `has=` of a deny for a command the source check cannot read (round G): sources unopened, and the tag named in the reason."""
+    return [n + " sources not opened", "The command is also too complex for the source check to read (%s), so it counts as a send: open each with Read, then retry, or simplify it. Nothing was sent." % tag]
+
+
 def reads_all(t, P, side=False):
     for f in FILES:
         t.read(P + "/" + f, side=side)
@@ -349,21 +354,22 @@ make("a_sixteen_heredocs_data", ex(ALLOW), cmd=HD(16, "python send.py"), tr=lamb
 # length), so this shape is read as code too, and is decided well inside the 10 s hook timeout (interpreter start included).
 LD16 = lambda first: first + "\necho " + " ".join(["<<" + "D" * 64] * 16) + "\n" + "x\n" * 64000
 make("d_n3_sixteen_long_delimiters_128kb", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=LD16("git push"), tr=lambda P: base(P))
-make("a_n3_sixteen_long_delimiters_128kb_no_publish", ex(ALLOW, max=10), cmd=LD16("git status"), tr=lambda P: base(P))
+# round G: a command over 32 KB is too complex for the source check to read, so with the sources unopened it counts as a send (decided at once)
+make("d_n3_sixteen_long_delimiters_128kb_no_publish_complex", ex(DENY, has=cx("over 32 KB"), max=6), cmd=LD16("git status"), tr=lambda P: base(P))
 # one heredoc budget per command: 16 $( ) bodies, each just under the budget on its own (16 openers with 64-character delimiters in about
 # 7,800 characters), 125 KB in all. The command is over the budget as a whole, so every body is read as code without scanning it for heredocs.
 NB16 = lambda last: "".join('echo "$(%s)"\n' % ("echo " + " ".join(["<<" + "D" * 64] * 16) + "\n" + ("x" * 63 + "\n") * 120) for _ in range(16)) + last
 make("d_nested_bodies_budget_once_publish", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=NB16("git push"), tr=lambda P: base(P))
-make("a_nested_bodies_budget_once_no_publish", ex(ALLOW, max=6), cmd=NB16("git status"), tr=lambda P: base(P))
+make("d_nested_bodies_budget_once_no_publish_complex", ex(DENY, has=cx("over 32 KB"), max=6), cmd=NB16("git status"), tr=lambda P: base(P))
 # the same shape with the publish INSIDE one body's substitution (an apostrophe line in the body, as bash reads a heredoc line literally): the deny
 # is decided in a nested body, not at the top level after the bodies
 NB16IN = lambda inner: "".join('echo "$(%s)"\n' % ("echo " + " ".join(["<<" + "D" * 64] * 16) + "\n" + ("x" * 63 + "\n") * 120 + (inner if k == 9 else ""))
                                for k in range(16))
 make("d_f1_nested_bodies_budget_once_publish_in_body", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=NB16IN("it's $(git push) don't"), tr=lambda P: base(P))
-make("a_f1_nested_bodies_budget_once_no_publish_in_body", ex(ALLOW, max=6), cmd=NB16IN("it's $(git status) don't"), tr=lambda P: base(P))
+make("d_f1_nested_bodies_budget_once_no_publish_in_body_complex", ex(DENY, has=cx("over 32 KB"), max=6), cmd=NB16IN("it's $(git status) don't"), tr=lambda P: base(P))
 make("d_f1_nested_bodies_budget_once_publish_in_body_heredoc", ex(DENY, has=["3 of 3 sources not opened"], max=6),
      cmd=NB16IN("cat <<EOF\nit's $(git push) don't\nEOF"), tr=lambda P: base(P))
-make("a_f1_nested_bodies_budget_once_no_publish_in_body_heredoc", ex(ALLOW, max=6), cmd=NB16IN("cat <<EOF\nit's $(git status) don't\nEOF"), tr=lambda P: base(P))
+make("d_f1_nested_bodies_budget_once_no_publish_in_body_heredoc_complex", ex(DENY, has=cx("over 32 KB"), max=6), cmd=NB16IN("cat <<EOF\nit's $(git status) don't\nEOF"), tr=lambda P: base(P))
 # F1/F2: a text read as it stands (over the heredoc cap, a delimiter over HEREDOC_DELIM_MAX, over the budget) is not heredoc-stripped, so a
 # substitution in an unquoted heredoc body is found only if quotes are taken as plain characters there: an apostrophe in a heredoc line is
 # literal to bash, but paired as a quote it would hide the substitution. (a) the heredoc is inside a $( ) body, (b) at the top level.
@@ -374,11 +380,11 @@ for nm, line in (("apostrophe_pair", "'$(git push)'"), ("apostrophe_words", "it'
                  ("backticks_quoted", "'`git push`'")):
     for tn, tail in (("17_blocks", DATA17), ("long_delimiter", LONGD)):
         make("d_f1_nested_%s_%s" % (nm, tn), ex(DENY, has=["3 of 3 sources not opened"]), cmd=NEST(line) + tail, tr=lambda P: base(P))
-        make("a_f1_nested_%s_%s_no_publish" % (nm, tn), ex(ALLOW), cmd=NEST(line.replace("git push", "git status")) + tail, tr=lambda P: base(P))
+        make("d_f1_nested_%s_%s_no_publish_complex" % (nm, tn), ex(DENY, has=cx("heredocs past the scan cap")), cmd=NEST(line.replace("git push", "git status")) + tail, tr=lambda P: base(P))
 for nm, line in (("apostrophe_words", "it's $(git push) don't"), ("backticks", "it's `git push` don't")):
     for tn, tail in (("17_blocks", DATA17), ("long_delimiter", LONGD)):
         make("d_f2_top_%s_%s" % (nm, tn), ex(DENY, has=["3 of 3 sources not opened"]), cmd="cat <<EOF\n%s\nEOF\n" % line + tail, tr=lambda P: base(P))
-        make("a_f2_top_%s_%s_no_publish" % (nm, tn), ex(ALLOW), cmd="cat <<EOF\n%s\nEOF\n" % line.replace("git push", "git status") + tail, tr=lambda P: base(P))
+        make("d_f2_top_%s_%s_no_publish_complex" % (nm, tn), ex(DENY, has=cx("heredocs past the scan cap")), cmd="cat <<EOF\n%s\nEOF\n" % line.replace("git push", "git status") + tail, tr=lambda P: base(P))
 # not over the cap the heredoc is stripped as before: an apostrophe line with a substitution is found through the plain-heredoc scan
 make("d_f2_top_under_cap_apostrophe_words", ex(DENY, has=["3 of 3 sources not opened"]), cmd="cat <<EOF\nit's $(git push) don't\nEOF\n", tr=lambda P: base(P))
 # the PowerShell tool (hooks.json matcher Bash|PowerShell) is gated as well. Its text is normalised and the pattern's first word may be
@@ -586,10 +592,12 @@ for nm, cm in (("dquote_subst", 'echo "$(python send.py)"'), ("dquote_subst_text
                ("xargs_I_valued", "echo x | xargs -I % python send.py")):
     make("d_gap_" + nm, ex(DENY, has=[SRC]), cmd=cm, tr=lambda P: base(P))
 for nm, cm in (("dquote_subst_other", 'echo "$(python other.py)"'), ("backtick_other", "echo `ls`"), ("dquote_subst_pull", 'echo "$(git pull)"'),
-               ("subst_text_only", 'echo "python send.py is $(date)"'), ("winpty_other", "winpty python other.py"), ("ksh_c_other", "ksh -c 'python other.py'"),
-               ("bash_c_dashdash_other", "bash -c -- 'python other.py'"), ("xargs_i_other", "echo x | xargs -i python other.py"),
-               ("xargs_l_other", "echo x | xargs -l python other.py")):
+               ("subst_text_only", 'echo "python send.py is $(date)"'), ("winpty_other", "winpty python other.py"),
+               ("xargs_i_other", "echo x | xargs -i python other.py"), ("xargs_l_other", "echo x | xargs -l python other.py")):
     make("a_gap_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+# (round G: a string run by another shell is not read into, so with the sources unopened these two no-publish commands count as a send)
+make("d_gap_ksh_c_other_complex", ex(DENY, has=cx("a nested shell string")), cmd="ksh -c 'python other.py'", tr=lambda P: base(P))
+make("d_gap_bash_c_dashdash_other_complex", ex(DENY, has=cx("a nested shell string")), cmd="bash -c -- 'python other.py'", tr=lambda P: base(P))
 make("a_gap_subst_all_opened", ex(ALLOW), cmd='echo "$(python send.py)"', tr=lambda P: reads_all(base(P), P))
 # a quoted-delimiter heredoc inside $( … ) is text, not commands (Claude Code's own commit and PR form); one a shell runs still is code
 EOFQ = "<<'EOF'"
@@ -786,7 +794,7 @@ make("d_m3_ps_start_process_many_heads", ex(DENY, has=["3 of 3 sources not opene
 # and one in a comment, two here-strings that each hold one quote, an escaped quote; (c) a Bash quote that spans lines (a known limit)
 CAP17 = "cat > a.md <<EOF\nit's data\nEOF\ngit push\ncat > b.md <<EOF\ndon't\nEOF\n" + "".join("cat > f%d.md <<EOF\nnote %d\nEOF\n" % (i, i) for i in range(15))
 make("d_m2a_cap_apostrophes", ex(DENY, has=["3 of 3 sources not opened"]), cmd=CAP17, tr=lambda P: base(P))
-make("a_m2a_cap_apostrophes_no_publish", ex(ALLOW), cmd=CAP17.replace("git push", "git status"), tr=lambda P: base(P))
+make("d_m2a_cap_apostrophes_no_publish_complex", ex(DENY, has=cx("heredocs past the scan cap")), cmd=CAP17.replace("git push", "git status"), tr=lambda P: base(P))
 make("d_m2b_herestring_apostrophes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
      **PS('git commit -m @"\nFix the user\'s login\n"@\ngit push  # it\'s ready'))
 make("a_m2b_herestring_apostrophes_no_publish", ex(ALLOW), tr=lambda P: base(P),
@@ -797,9 +805,10 @@ make("d_m2b_escaped_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lam
 # PowerShell reads the first part of this as ONE string (a backtick is literal inside single quotes and '' is a doubled quote: the string is
 # a`'; git push; Write-Host ), and what trails it is not a valid statement, so PowerShell reports a parse error and runs nothing. The git
 # push sits inside that string; the guard reads the same string and allows
-make("a_ps_single_quoted_string_holds_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
+# (round G: a PowerShell command with an escaped quote is too complex to read, so with the sources unopened these count as a send)
+make("d_ps_single_quoted_string_holds_publish_text_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
 # the valid twin that pins the rule: in 'a`''; git push' the doubled quote is one escaped quote, so PowerShell reads ONE string, a`'; git push
-make("a_ps_single_quoted_doubled_quote_holds_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push'"))
+make("d_ps_single_quoted_doubled_quote_holds_publish_text_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push'"))
 # F3: PowerShell's tokenizer reads U+2018..U+201B as single quotes and U+201C..U+201E as double quotes, mixed freely with the ASCII ones: a
 # typographic quote closes an ASCII one, so the statement between two strings runs
 CURLY = dict(ls="‘", rs="’", ld="“", rd="”", lw="‚", rw="‛", dl="„")
@@ -813,15 +822,16 @@ make("d_f3_low9_double", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda 
      **PS('Write-Host "%(dl)s; git push; Write-Host %(ld)s"' % CURLY))
 make("d_f3_curly_then_publish_encoded", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
      **PS("pwsh -enc " + __import__("base64").b64encode(("Write-Host 'a%(rs)s; git push; Write-Host %(ls)sb'" % CURLY).encode("utf-16-le")).decode()))
-make("a_f3_curly_single_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a%(rs)s; git status; Write-Host %(ls)sb'" % CURLY))
-make("a_f3_curly_double_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a%(rd)s; git status; Write-Host %(ld)sb"' % CURLY))
-make("a_f3_curly_string_no_command", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host %(ls)sit%(rs)ss fine%(rs)s" % CURLY))
-make("a_f3_curly_double_quoted_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host %(ld)sgit push%(rd)s" % CURLY))
-make("a_f3_curly_single_quoted_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host %(ls)sgit push%(rs)s" % CURLY))
+# (round G: typographic quotes and dashes in a PowerShell command make it too complex to read: with the sources unopened these count as a send)
+make("d_f3_curly_single_no_publish_complex", ex(DENY, has=cx("typographic quotes or dashes")), tr=lambda P: base(P), **PS("Write-Host 'a%(rs)s; git status; Write-Host %(ls)sb'" % CURLY))
+make("d_f3_curly_double_no_publish_complex", ex(DENY, has=cx("typographic quotes or dashes")), tr=lambda P: base(P), **PS('Write-Host "a%(rd)s; git status; Write-Host %(ld)sb"' % CURLY))
+make("d_f3_curly_string_no_command_complex", ex(DENY, has=cx("typographic quotes or dashes")), tr=lambda P: base(P), **PS("Write-Host %(ls)sit%(rs)ss fine%(rs)s" % CURLY))
+make("d_f3_curly_double_quoted_publish_text_complex", ex(DENY, has=cx("typographic quotes or dashes")), tr=lambda P: base(P), **PS("Write-Host %(ld)sgit push%(rd)s" % CURLY))
+make("d_f3_curly_single_quoted_publish_text_complex", ex(DENY, has=cx("typographic quotes or dashes")), tr=lambda P: base(P), **PS("Write-Host %(ls)sgit push%(rs)s" % CURLY))
 make("d_f3_curly_double_quoted_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host %(ld)sgit push%(rd)s; git push" % CURLY))
 # a single quote that is never closed has nothing to pair with: it is dropped and the rest is read as it stands (the twin of the case above)
 make("d_ps_unclosed_single_quote_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host 'a; git push"))
-make("a_m2b_escaped_quotes_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a`""; git status; Write-Host "`"b"'))
+make("d_m2b_escaped_quotes_no_publish_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS('Write-Host "a`""; git status; Write-Host "`"b"'))
 # N1: inside a PowerShell single-quoted string a backtick is a plain character, so a backtick before the closing quote does not escape it:
 # the string ends there and the statements after it run (dropping the pair re-paired the quotes and hid them). An escaped quote is dropped
 # only outside single-quoted strings.
@@ -830,8 +840,8 @@ N1B = "git commit -m 'Use `a`'; git push; git tag -m 'Tag `b`' v1"
 make("d_n1_single_quoted_backtick_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(N1A))
 make("d_n1_two_single_quoted_backticks_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(N1B))
 make("d_n1_encoded", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("pwsh -enc " + __import__("base64").b64encode(N1A.encode("utf-16-le")).decode()))
-make("a_n1_single_quoted_backtick_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS(N1A.replace("git push", "git status")))
-make("a_n1_double_quoted_escaped_quote_is_data", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "say `"git push`" now"; git status'))
+make("d_n1_single_quoted_backtick_no_publish_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS(N1A.replace("git push", "git status")))
+make("d_n1_double_quoted_escaped_quote_is_data_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS('Write-Host "say `"git push`" now"; git status'))
 make("a_n1_single_quoted_publish_text_is_data", ex(ALLOW), tr=lambda P: base(P), **PS("git commit -m 'run `git push` later'"))
 # (c) known limit, pinned: on Bash at or under the heredoc cap a quoted word that spans lines is read whole (see ROADMAP). Allowed today; the
 # day the limit is lifted the case flips.
@@ -866,6 +876,125 @@ for nm, cm in (("assign", "$p = Start-Process -ArgumentList push -FilePath git -
                ("after_semicolon", "Write-Host x; Start-Process -ArgumentList push -FilePath git")):
     make("d_n3_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(cm))
 make("a_n3_start_process_other", ex(ALLOW), tr=lambda P: base(P), **PS("$p = Start-Process -ArgumentList status -FilePath git -PassThru"))
+
+# --- round G: a command the source check cannot read cleanly counts as a send while the sources are unopened. Rather than reading shell and
+# PowerShell quoting ever deeper, complexity() tags the command (and _scan a string run by another shell) before RULES and before any scan;
+# the reason names the tag. With the sources opened the call goes on to RULES as any other (no deny from the gate); with no `sources:`, no
+# `publish:` or no adapter it is as before. The tags: over 32 KB, heredocs past the scan cap, 3 or more command substitutions (Bash: $( and
+# backtick pairs; PowerShell: $( only), PowerShell typographic quotes or dashes, a PowerShell escaped quote, a nested shell string.
+OPENED = lambda P: reads_all(base(P), P)
+BIGCMD = lambda n: "echo " + "a" * (n - 5)          # a command of exactly n characters
+G_CASES = (
+    ("size_32kb_plus_one", "over 32 KB", dict(cmd=BIGCMD(32769)), None),
+    ("size_128kb", "over 32 KB", dict(cmd="echo " + "x " * 64000), None),
+    ("heredocs_17", "heredocs past the scan cap", dict(cmd=HD(17, "data")), None),
+    ("heredoc_long_delimiter", "heredocs past the scan cap", dict(cmd=LONGD), None),
+    ("substitutions_dollar_3", "3 or more command substitutions", dict(cmd="echo $(date) $(whoami) $(pwd)"), None),
+    ("substitutions_backtick_3", "3 or more command substitutions", dict(cmd="echo `date` `whoami` `pwd`"), None),
+    ("substitutions_mixed_3", "3 or more command substitutions", dict(cmd="echo $(date) `whoami` `pwd`"), None),
+    ("substitutions_nested_3", "3 or more command substitutions", dict(cmd='echo "$(echo $(echo $(date)))"'), None),
+    ("ps_substitutions_3", "3 or more command substitutions", PS('Write-Host "$(1) $(2) $(3)"'), None),
+    ("ps_typographic_single", "typographic quotes or dashes", PS("Write-Host ‘hi’"), None),
+    ("ps_typographic_double", "typographic quotes or dashes", PS("Write-Host “hi”"), None),
+    ("ps_en_dash", "typographic quotes or dashes", PS("Get-ChildItem –Recurse"), None),
+    ("ps_em_dash", "typographic quotes or dashes", PS("Get-ChildItem —Recurse"), None),
+    ("ps_horizontal_bar", "typographic quotes or dashes", PS("Get-ChildItem ―Recurse"), None),
+    ("ps_low9_quote", "typographic quotes or dashes", PS("Write-Host „hi\""), None),
+    ("ps_escaped_double_quote", "an escaped quote", PS('Write-Host "say `"hi`""'), None),
+    ("ps_escaped_single_quote", "an escaped quote", PS("Write-Host 'a`'b'"), None),
+    ("ps_escaped_backtick", "an escaped quote", PS("Write-Host a``b"), None),
+    ("nested_bash_c", "a nested shell string", dict(cmd='bash -c "echo hi"'), None),
+    ("nested_sh_c_single", "a nested shell string", dict(cmd="sh -c 'echo hi'"), None),
+    ("nested_bash_lc", "a nested shell string", dict(cmd='bash -lc "echo hi"'), None),
+    ("nested_cmd_c", "a nested shell string", dict(cmd='cmd /c "echo hi"'), None),
+    ("nested_pwsh_c", "a nested shell string", dict(cmd='pwsh -c "echo hi"'), None),
+    ("nested_pwsh_command", "a nested shell string", dict(cmd='pwsh -NoProfile -Command "echo hi"'), None),
+    ("nested_eval", "a nested shell string", dict(cmd='eval "echo hi"'), None),
+    ("nested_wrapped", "a nested shell string", dict(cmd='timeout 60 bash -c "echo hi"'), None),
+    ("nested_deep", "a nested shell string", dict(cmd="bash -c \"sh -c 'echo hi'\""), None),
+    ("nested_in_a_pipeline", "a nested shell string", dict(cmd='echo x | bash -c "cat"'), None),
+    ("nested_in_a_substitution", "a nested shell string", dict(cmd='echo "$(bash -c "echo hi")"'), None),
+    ("ps_nested_pwsh_c", "a nested shell string", PS('pwsh -c "echo hi"'), None),
+    ("ps_nested_iex", "a nested shell string", PS('iex "echo hi"'), None),
+    ("ps_nested_cmd_c", "a nested shell string", PS('cmd /c "echo hi"'), None),
+    ("ps_nested_encoded", "a nested shell string", PS("pwsh -enc " + __import__("base64").b64encode("Get-Date".encode("utf-16-le")).decode()), None),
+    ("ps_nested_bash_c", "a nested shell string", PS('bash -c "echo hi"'), None),
+)
+for nm, tag, kw, _ in G_CASES:
+    make("d_g_" + nm, ex(DENY, has=cx(tag), maxlen=2000), tr=lambda P: base(P), **kw)
+    make("a_g_" + nm + "_opened", ex(ALLOW), tr=OPENED, **kw)   # the same command, sources opened: no deny from the gate (RULES as before)
+# the limits of each tag, and the first tag that applies is the one named
+make("a_g_size_exactly_32kb", ex(ALLOW), cmd=BIGCMD(32768), tr=lambda P: base(P))
+make("a_g_heredocs_16_is_under_the_cap", ex(ALLOW), cmd=HD(16, "data"), tr=lambda P: base(P))
+make("a_g_substitutions_2", ex(ALLOW), cmd="echo $(date) $(pwd)", tr=lambda P: base(P))
+make("a_g_backtick_pairs_2", ex(ALLOW), cmd="echo `date` `pwd`", tr=lambda P: base(P))
+make("a_g_ps_backticks_are_not_substitutions", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host a ` b ` c ` d ` e ` f"))
+make("a_g_ps_two_subexpressions", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "$(1) $(2)"'))
+make("a_g_bash_backtick_quote_is_not_a_ps_tag", ex(ALLOW), cmd="echo `date`'x' \"`pwd`\"", tr=lambda P: base(P))   # a backtick before a quote is ordinary in Bash (two pairs here)
+make("a_g_bash_typographic_is_not_a_tag", ex(ALLOW), cmd="echo ‘hi’ – “there”", tr=lambda P: base(P))
+make("d_g_first_tag_wins_size_over_nested", ex(DENY, has=cx("over 32 KB")), cmd='bash -c "echo hi"; echo ' + "a" * 33000, tr=lambda P: base(P))
+make("d_g_first_tag_wins_heredocs_over_substitutions", ex(DENY, has=cx("heredocs past the scan cap")), cmd=HD(17, "data") + "echo $(a) $(b) $(c)", tr=lambda P: base(P))
+make("d_g_two_of_three_unopened", ex(DENY, has=cx("an escaped quote", "2 of 3") + ["jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg"], no=["jobs/demo/plan.pdf"]),
+     tr=lambda P: base(P).read(P + "/" + PLAN), **PS('Write-Host "say `"hi`""'))
+make("d_g_a_real_publish_in_a_complex_command_names_the_tag", ex(DENY, has=cx("a nested shell string")), cmd='bash -c "git push"', tr=lambda P: base(P))
+make("d_g_a_plain_publish_has_no_complex_sentence", ex(DENY, has=["3 of 3 sources not opened"], no=["too complex"]), cmd="git push origin main", tr=lambda P: base(P))
+# the order: a complex command is decided by the gate first when the sources are unopened (no time spent on RULES), by RULES once they are open
+make("d_g_complex_unopened_is_decided_before_rules", ex(DENY, has=cx("3 or more command substitutions")), cmd="sudo echo $(a) $(b) $(c)", tr=lambda P: base(P))
+make("d_g_complex_opened_goes_on_to_rules", ex(DENY, prefix="bash-guard: sudo", has=["run it yourself"], no=["too complex"]), cmd="sudo echo $(a) $(b) $(c)", tr=OPENED)
+make("d_g_complex_opened_nested_goes_on_to_rules", ex(DENY, prefix="bash-guard: sudo", has=["run it yourself"]), cmd='bash -c "sudo ls"', tr=OPENED)
+# no adapter, no sources, no publish list: the command is not a send, complex or not (a project that lists no publish pattern has no send to protect)
+for nm, kw in (("no_adapter", dict(noadp=True)), ("no_sources", dict(adp=adapter(sources=None))), ("no_publish_keys", dict(adp=adapter(publish=None, tools=None))),
+               ("empty_sources_value", dict(adp=adapter(sources=" , ")))):
+    make("a_g_" + nm + "_complex_command", ex(ALLOW), cmd='bash -c "echo hi"', tr=lambda P: base(P), **kw)
+    make("a_g_" + nm + "_huge_command", ex(ALLOW, max=9), cmd=BIGCMD(200000), tr=lambda P: base(P), **kw)
+# the gate's own failure modes still deny for a complex command: a transcript that cannot be read, a deadline already past, a source that matches nothing
+make("d_g_complex_transcript_missing", ex(DENY, has=["could not verify which sources were opened (", "Nothing was sent."]), cmd='bash -c "echo hi"', tr=lambda P: base(P), tpath="missing")
+make("d_g_complex_no_transcript_path", ex(DENY, has=["could not verify which sources were opened ("]), cmd='bash -c "echo hi"', tr=lambda P: base(P), tpath="none")
+make("d_g_complex_deadline_overrun", ex(DENY, has=["could not verify which sources were opened (source expansion over 0 s)"]), cmd='bash -c "echo hi"',
+     tr=lambda P: OPENED(P), guard=BG)
+make("d_g_complex_source_matches_nothing", ex(DENY, has=["source pattern matches no file: jobs/demo/nothing/*.png"]), cmd='bash -c "echo hi"',
+     adp=adapter(sources="jobs/demo/nothing/*.png"), tr=lambda P: OPENED(P))
+# the encoded command that does not decode keeps its own reason
+make("d_g_undecodable_encoded_keeps_its_reason", ex(DENY, has=[PSENC], no=["too complex"]), tr=lambda P: OPENED(P), **PS("pwsh -enc not-base64!!"))
+# a huge command is decided at once, whatever its shape (128 KB): the deny comes before RULES and before any scan
+make("d_g_128kb_quoted_substitutions_unopened", ex(DENY, has=cx("over 32 KB"), max=4), cmd="".join('echo "$(echo \'$(\' x)"\n' for _ in range(4000)) + "git status", tr=lambda P: base(P))
+make("d_g_128kb_sixteen_delimiters_unopened", ex(DENY, has=cx("over 32 KB"), max=4), cmd=LD16("echo hi"), tr=lambda P: base(P))
+# everyday commands stay allowed with the sources unopened
+for nm, cm in (("git_status", "git status"), ("git_log_oneline", "git log --oneline"), ("git_commit_message", 'git commit -m "fix the login"'),
+               ("git_commit_heredoc_message", "git commit -m \"$(cat <<'EOF'\nFix the user's login, don't retry it\n\nCo-Authored-By: Test <t@example.com>\nEOF\n)\""),
+               ("git_commit_doubled_apostrophe", "git commit -m 'it''s done'"), ("npm_test", "npm test"), ("ls_la", "ls -la"),
+               ("one_substitution", 'echo "today is $(date)"'), ("two_substitutions", 'echo "$(date) $(pwd)"'), ("pipeline", "git log --oneline | head -5"),
+               ("python_c_is_not_a_shell", 'python -c "print(1)"'), ("bash_script", "bash check.sh"), ("heredoc_data", "cat > notes.txt <<'EOF'\nhello\nEOF"),
+               ("a_4kb_command", "echo " + "lorem ipsum " * 350)):
+    make("a_g_everyday_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("get_childitem", "Get-ChildItem -Recurse"), ("write_host_publish_text", 'Write-Host "git push"'), ("doubled_apostrophe", "git commit -m 'it''s done'"),
+               ("git_status", "git status"), ("two_subexpressions", 'Write-Host "$(Get-Date) $(1)"'), ("hyphen_parameter", "Get-ChildItem -Path . -Filter *.md"),
+               ("backtick_continuation", "Get-ChildItem `\n  -Recurse"), ("ordinary_double_quotes", 'Write-Host "hello world"')):
+    make("a_g_everyday_ps_" + nm, ex(ALLOW), tr=lambda P: base(P), **PS(cm))
+# the substitution count leaves out the text of a data heredoc (a quoted delimiter: a commit message with markdown backticks); the same
+# backticks on the command line, and the substitutions of an unquoted heredoc body (bash runs those), still count
+BT8 = "Fix: use `a`, `b`, `c` and `d` in it's body"
+make("a_g_heredoc_message_backticks_are_data", ex(ALLOW), cmd="git commit -F - <<'EOF'\n" + BT8 + "\nEOF", tr=lambda P: base(P))
+make("a_g_heredoc_message_backticks_are_data_substitution_form", ex(ALLOW), cmd="git commit -m \"$(cat <<'EOF'\n" + BT8 + "\nEOF\n)\"", tr=lambda P: base(P))
+make("a_g_heredoc_backslashed_delimiter_backticks_are_data", ex(ALLOW), cmd="git commit -F - <<\\EOF\n" + BT8 + "\nEOF", tr=lambda P: base(P))
+make("a_g_heredoc_quoted_body_substitutions_are_data", ex(ALLOW), cmd="cat <<'EOF'\n$(a) $(b) $(c)\nEOF", tr=lambda P: base(P))
+make("d_g_same_backticks_on_the_command_line", ex(DENY, has=cx("3 or more command substitutions")), cmd='git commit -m "Fix: use `a`, `b`, `c` and `d` in its body"', tr=lambda P: base(P))
+make("d_g_unquoted_heredoc_body_substitutions_count", ex(DENY, has=cx("3 or more command substitutions")), cmd="cat <<EOF\n$(a) $(b) $(c)\nEOF", tr=lambda P: base(P))
+make("d_g_substitutions_outside_a_data_heredoc_count", ex(DENY, has=cx("3 or more command substitutions")),
+     cmd="git commit -F - <<'EOF'\n" + BT8 + "\nEOF\necho $(a) $(b) $(c)", tr=lambda P: base(P))
+make("a_g_heredoc_message_backticks_are_data_opened", ex(ALLOW), cmd="git commit -F - <<'EOF'\n" + BT8 + "\nEOF", tr=OPENED)
+# a long command (over 4,096 characters) has the fresh-source block run before RULES: the frozen RULES take time quadratic in the text on a
+# dense run of command words (14 to 18 s at 32 KB), past the hook's timeout. A real publish after the run is denied at once, sources unopened.
+make("d_g_dense_cp_24kb_then_publish", ex(DENY, has=["3 of 3 sources not opened"], max=5), cmd="cp " * 8000 + "; git push", tr=lambda P: base(P))
+make("d_g_dense_cat_32kb_then_publish", ex(DENY, has=["3 of 3 sources not opened"], max=5), cmd="cat " * 8000 + "; git push", tr=lambda P: base(P))
+make("d_g_dense_curl_32kb_then_publish", ex(DENY, has=["3 of 3 sources not opened"], max=5), cmd="curl " * 6400 + "; git push", tr=lambda P: base(P))
+make("d_g_dense_cp_ps_then_publish", ex(DENY, has=["3 of 3 sources not opened"], max=5), tr=lambda P: base(P), **PS("cp " * 8000 + "; git push"))
+# the boundary: at 4,096 characters RULES come first (the sudo reason wins over the fresh-source one); at 4,097 the gate comes first
+SUDO = "sudo python send.py # "
+make("d_g_rules_first_at_4096", ex(DENY, prefix="bash-guard: sudo", has=["run it yourself"], no=["sources not opened"]), cmd=SUDO + "x" * (4096 - len(SUDO)), tr=lambda P: base(P))
+make("d_g_gate_first_at_4097", ex(DENY, has=["3 of 3 sources not opened"], no=["run it yourself"]), cmd=SUDO + "x" * (4097 - len(SUDO)), tr=lambda P: base(P))
+make("d_g_rules_still_run_over_4096_when_opened", ex(DENY, prefix="bash-guard: sudo", has=["run it yourself"]), cmd=SUDO + "x" * (4097 - len(SUDO)), tr=OPENED)
+make("a_g_long_command_no_publish_over_4096", ex(ALLOW), cmd="echo " + "lorem ipsum " * 600, tr=lambda P: base(P))
 
 open(OUT + "/order.txt", "w", newline="\n").write("\n".join(ORDER) + "\n")
 open(OUT + "/skipped.txt", "w", newline="\n").write("".join(s + "\n" for s in SKIPS))

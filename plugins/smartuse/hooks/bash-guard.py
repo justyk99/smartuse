@@ -24,6 +24,11 @@
 # characters taken as plain text, so it can over-deny (one turn) where a quote would have hidden a substitution. A PowerShell text, and a
 # text read as it stands, is read twice: whole, and one line at a time (a quote never reaches past its line there). Any other
 # Bash text is read whole: a known limit, see ROADMAP.
+# A command the source check cannot read cleanly counts as a send while the sources are unopened (complexity(), and a string run by
+# another shell, see _scan): over 32 KB, heredoc openers past the scan cap, three or more command substitutions, typographic quotes or
+# dashes and an escaped quote (PowerShell), a nested shell string. It is decided before RULES and before any scan of the command; with
+# the sources opened it goes on to RULES as any command does. That is an over-deny at worst (open the sources, retry, or simplify).
+# A command over RULES_FIRST_MAX characters has the whole fresh-source block run before RULES (the frozen RULES are slow on long dense text).
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
 import base64, datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
 
@@ -733,6 +738,42 @@ def many_heredocs(text):
     return sum(len(w) for w in OPENER_WORD.findall(text)) * len(text) > HEREDOC_BUDGET
 
 
+# A command the source check cannot read cleanly is treated like a send while the sources are unopened: reading shell and PowerShell
+# quoting ever deeper is a race the guard cannot win, and the cost of being wrong is one turn (open the sources, retry).
+COMPLEX_MAX = 32768                                 # characters of a command the source check reads at all
+COMPLEX_SUBST = 3                                   # command substitutions that make a command too tangled to read
+RULES_FIRST_MAX = 4096                              # a command longer than this has the fresh-source block run before RULES (see main)
+PS_TYPOGRAPHIC = re.compile("[\u2013-\u2015\u2018-\u201e]")   # the dashes and quotes PowerShell reads as plain ones
+PS_ESCAPED_QUOTE = re.compile("`[`\"']")            # a backtick before a quote or another backtick
+
+
+def complexity(pre, ps):
+    """A short tag naming why the source check cannot read this command (`pre`: the command before any heredoc stripping), or ""
+    when it can. In order: over COMPLEX_MAX characters; heredoc openers past the scan cap (many_heredocs); COMPLEX_SUBST or more
+    command substitutions (a backtick pair counts as one in Bash; in PowerShell the backtick is the escape character, so only $( counts;
+    the text of a data heredoc is not counted);
+    PowerShell only: typographic quotes or dashes, an escaped quote. One pass of linear scans: no scan depends on the shape of the
+    text."""
+    if len(pre) > COMPLEX_MAX:
+        return "over 32 KB"
+    if many_heredocs(pre):
+        return "heredocs past the scan cap"
+    n = pre.count("$(") + (0 if ps else pre.count("`") // 2)
+    if n >= COMPLEX_SUBST and not ps:
+        # a data heredoc body (a quoted delimiter: a commit message with markdown backticks) is text, not substitutions; the
+        # substitutions bash runs in an unquoted body still count. Counted again on the stripped text only when the raw count says so.
+        t = data_text(pre)
+        n = t.count("$(") + t.count("`") // 2 + len(heredoc_substs(pre))
+    if n >= COMPLEX_SUBST:
+        return "3 or more command substitutions"
+    if ps:
+        if PS_TYPOGRAPHIC.search(pre):
+            return "typographic quotes or dashes"
+        if PS_ESCAPED_QUOTE.search(pre):
+            return "an escaped quote"
+    return ""
+
+
 def cap_strip(text, many=False):
     """gate_strip, except that a text with many heredoc openers is returned as it stands. With many True (the command this text
     was cut from is already over the cap) it is returned as it stands without looking."""
@@ -871,6 +912,7 @@ def shell_string(cmd):
 
 
 UNREADABLE = []   # set when an encoded PowerShell command could not be decoded: the gate then denies with its own reason (emptied at the start of each check)
+COMPLEX = []      # the tag of a command the scan gave up on (a nested shell string): the gate then counts the command as a send (emptied at the start of each check)
 
 
 PS_PAIR = re.compile(r"``|`[\"']")
@@ -972,6 +1014,14 @@ def gate_strip(text):
     return strip_heredocs(BACKSLASH_DELIM.sub(lambda m: "<<" + m.group(1) + "'" + m.group(2) + "'", text))
 
 
+def data_text(text):
+    """text with the body of every heredoc cut out (HEREDOC, after the backslashed delimiter is read as a quoted one), whoever reads
+    it: for counting what is on the command line itself. strip_heredocs would leave a body in place when its opener line does not
+    split (the `"$(cat <<'EOF'` of a commit message has an open quote there). A heredoc a shell runs is scanned for a publish as usual."""
+    return HEREDOC.sub(lambda m: m.group(0)[:m.start(3) - m.start()] + m.group(0)[m.end(3) - m.start():],
+                       BACKSLASH_DELIM.sub(lambda m: "<<" + m.group(1) + "'" + m.group(2) + "'", text))
+
+
 def heredoc_substs(text, many=False):
     """The $( … ) and backtick bodies inside the bodies of the unquoted heredocs of a shell text. strip_heredocs removes a data
     heredoc body whatever its quoting, but bash still runs the substitutions in an unquoted one; the plain lines stay data and a
@@ -989,15 +1039,17 @@ def publish_hit(text, patterns, depth=0, raw=None, ps=False):
     (after VAR=value, env / nohup / timeout / winpty / sudo … wrappers and their options; by base name, so /usr/bin/git and
     git.exe are git, and the python family is one name) and each later pattern word appears, in order, among the command's later
     words: `git push` matches `git -C dir push origin`, `python send.py` matches `python -u C:/proj/send.py` (a word that names a
-    file matches by the end of its path, see word_eq). The string given to sh|bash|zsh|dash|ksh -c and to eval, and the body of
-    each $( … ) and backtick pair, is checked the same way, to depth 2. `echo "python send.py"` is not a match: its command
-    word is echo. A word that only happens to appear later (git log --grep push) is an over-deny, which costs one turn. With ps
+    file matches by the end of its path, see word_eq). The body of each $( … ) and backtick pair is checked the same way, to depth 2.
+    A command that runs a string through another shell (sh|bash|zsh|dash|ksh -c, eval, iex, cmd /c, pwsh -Command / -EncodedCommand)
+    is not read into: it counts as a hit and COMPLEX names why (the gate reports it as too complex to read). `echo "python send.py"`
+    is not a match: its command word is echo. A word that only happens to appear later (git log --grep push) is an over-deny, which costs one turn. With ps
     True (a PowerShell command, see ps_text) a pattern's first word may be any word of a statement and the later ones follow it
     in order (PowerShell puts the program after a parameter); for Start-Process they may come in any order. A pattern whose first
     word is a program that only runs what follows it (uv publish, wsl ./deploy.sh, start deploy.bat) also matches from that word,
     and the package runners (uv, poetry, pdm, pipenv, hatch, rye, pipx) are read loosely: after their `run` word the pattern's
     first word may be any word, whatever options the runner has."""
     del UNREADABLE[:]
+    del COMPLEX[:]
     pats = []
     for p in patterns:
         segs = flex_split(p)
@@ -1144,13 +1196,9 @@ def _scan(segs, seps, pats, depth, ps, seen, many=False):
         except ValueError:   # an encoded command that does not decode: nothing to look at, so the gate cannot clear it
             UNREADABLE.append(1)
             return True
-        if inner and depth < 2:
-            if ps:
-                inner = ps_text(inner).replace("\\", "/")   # a decoded command was never normalised
-            if inner not in seen:
-                seen.add(inner)
-                if _hit(inner, pats, depth + 1, ps, many):
-                    return True
+        if inner is not None:   # a string run by another shell (-c, eval, iex, cmd /c, -Command): the gate counts the command as a send, whatever the string says
+            COMPLEX.append("a nested shell string")
+            return True
         if depth < 2 and n and seps[n - 1] in ("|", "|&") and base_name(cmd[0]).lower() in IEX:
             # a string piped into iex is run as commands: the previous segment's words
             fed = piped_text(segs[n - 1])
@@ -1202,21 +1250,31 @@ def _hit(text, pats, depth, ps=False, many=False):
     return False
 
 
-def fresh_gate(data, text, raw=None, deadline=None, ps=False):
+SENT = " Nothing was sent."
+
+
+def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
     """None to allow the call, else the reason to deny it. `text` is the Bash command with data heredocs stripped (or a
     PowerShell command, normalised, with ps True), or None for a tool call (then the tool's name is matched against
     `publish_tools:`); `raw` is the same command before the stripping. `deadline` is the time.monotonic() value the whole check
-    must end by: main() starts it when the hook starts."""
+    must end by: main() starts it when the hook starts. `tag` (see complexity): the command is too complex to read, so with
+    `sources:` and `publish:` listed it counts as a publish without being scanned. A command that publish_hit gave up on
+    (COMPLEX) is reported the same way: the reason adds that the command is too complex to read."""
     if deadline is None:
         deadline = time.monotonic() + BUDGET_S
     del UNREADABLE[:]   # the flag belongs to this check: an earlier call in the same process must not leave it set
+    del COMPLEX[:]
     try:
         project = project_dir(data)
         adapter = adapter_text(project)
         sources = adapter_list(adapter, "sources")
         if not sources:
             return None
-        if text is not None:
+        if tag:
+            hit = bool(adapter_list(adapter, "publish"))   # a command that cannot be read is a send only where the owner lists what a send is
+            if hit:
+                COMPLEX.append(tag)
+        elif text is not None:
             hit = publish_hit(text, adapter_list(adapter, "publish"), 0, raw, ps)
         else:
             name = data.get("tool_name")
@@ -1228,9 +1286,13 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False):
     if UNREADABLE:
         return "fresh-source — the PowerShell command carries an encoded command the gate cannot read. Run it in plain text. Nothing was sent."
     try:
-        return fresh_verdict(data, project, sources, deadline)
+        why = fresh_verdict(data, project, sources, deadline)
     except Exception as e:
         return "fresh-source \u2014 could not verify which sources were opened (" + type(e).__name__ + "). Retry, or ask the owner. Nothing was sent."
+    if why and COMPLEX and "sources not opened" in why and why.endswith(SENT):
+        why = why[:-len(SENT)] + (" The command is also too complex for the source check to read (%s), so it counts as a send: "
+                                  "open each with Read, then retry, or simplify it." % COMPLEX[0]) + SENT
+    return why
 
 
 def deny(why):
@@ -1260,24 +1322,32 @@ def main():
         return
     cmd = (data.get("tool_input") or {}).get("command") or ""
     pre = strip_state_args(cmd)
-    if tool == "PowerShell":   # no heredocs in PowerShell: RULES and the gate read the normalised text (the gate with / for \, which is no escape there)
-        text = ps_text(pre)
-        for pat, why in RULES:
-            if re.search(pat, text, re.I | re.S):
-                deny(why)
-                return
-        why = fresh_gate(data, text.replace("\\", "/"), None, deadline, True)
+    ps = tool == "PowerShell"
+    def gate():   # the fresh-source block on this command's text: PowerShell is read normalised (with / for \, which is no escape there)
+        if ps:
+            return fresh_gate(data, ps_text(pre).replace("\\", "/"), None, deadline, True)
+        many = many_heredocs(pre)
+        return fresh_gate(data, pre if many else gate_strip(pre), None if many else pre, deadline)
+    # Order. A command the source check cannot read cleanly (see complexity) counts as a send while the sources are unopened, decided
+    # before any scan of it, RULES included; with the sources opened (or none listed) it goes on to RULES as any command does, but its
+    # text is not scanned for a publish. A long command (over RULES_FIRST_MAX characters) has the fresh-source block run before RULES
+    # too: the frozen RULES patterns cost time quadratic in the text on a dense run of command words, past the hook's timeout (a
+    # timed-out hook lets the call through), so a long text must not reach them while it is still unchecked. At or under the limit
+    # RULES come first, as always: a RULES match keeps its own reason.
+    tag = complexity(pre, ps)
+    early = bool(tag) or len(pre) > RULES_FIRST_MAX
+    if early:
+        why = fresh_gate(data, None, None, deadline, ps, tag) if tag else gate()
         if why:
             deny(why)
-        leave()
-        return
-    many = many_heredocs(pre)
-    text = pre if many else strip_heredocs(pre)
+            leave()
+            return
+    text = ps_text(pre) if ps else (pre if many_heredocs(pre) else strip_heredocs(pre))   # no heredocs in PowerShell
     for pat, why in RULES:
         if re.search(pat, text, re.I | re.S):
             deny(why)
             return
-    why = fresh_gate(data, pre if many else gate_strip(pre), None if many else pre, deadline)
+    why = None if early else gate()
     if why:
         deny(why)
     leave()

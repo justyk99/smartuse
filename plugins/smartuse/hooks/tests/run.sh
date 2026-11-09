@@ -297,10 +297,28 @@ for c in 'git push origin main' 'Git Push' '& git push' 'git.exe push' 'py -3 .\
          'Write-Host git push'; do   # the last one is the accepted over-deny: the publish words unquoted
   fcheck deny "$c" with PowerShell
 done
-for c in 'Write-Host "git push"' '"git push" | Out-File notes.txt' 'git log --oneline' 'python other.py' "pwsh -enc $ENCOK" 'git status' \
-         "'Get-Date' | iex" '$p = Start-Process -ArgumentList status -FilePath git -PassThru' 'Write-Host "a`""; git status; Write-Host "`"b"' \
-         $'git commit -m \'Fix `x`\'; git status  # it\'s done'; do
+for c in 'Write-Host "git push"' '"git push" | Out-File notes.txt' 'git log --oneline' 'python other.py' 'git status' \
+         "'Get-Date' | iex" '$p = Start-Process -ArgumentList status -FilePath git -PassThru' \
+         'Get-ChildItem -Recurse' "git commit -m 'it''s done'" 'Write-Host "$(Get-Date) $(1)"' 'Get-ChildItem -Path . -Filter *.md'; do
   fcheck allow "$c" with PowerShell
+done
+# --- round G: a command the source check cannot read cleanly counts as a send while the sources are unopened (here the event names no
+#     transcript, so the answer is the could-not-verify deny): an encoded command (a nested shell string), an escaped quote, typographic
+#     quotes or dashes, three or more $( ) substitutions, 17 heredoc openers (over the cap). Several were allowed when they held no
+#     publish word (the old allow cases of this loop); the same commands in a project with no sources are allowed (the `none` project).
+#     (An over-32 KB command is covered in fresh-gate-test.sh: an argument that long does not fit a Windows command line.)
+for c in "pwsh -enc $ENCOK" 'pwsh -c "echo hi"' 'cmd /c "echo hi"' 'iex "echo hi"' 'Write-Host "a`""; git status; Write-Host "`"b"' $'git commit -m \'Fix `x`\'; git status  # it\'s done' \
+         'Write-Host ‘hi’' 'Get-ChildItem –Recurse' 'Write-Host "$(1) $(2) $(3)"'; do
+  fcheck deny "$c" with PowerShell
+  fcheck allow "$c" none PowerShell
+done
+for c in 'bash -c "echo hi"' "sh -c 'echo hi'" 'eval "echo hi"' 'cmd /c "echo hi"' 'echo $(date) $(whoami) $(pwd)' 'echo `date` `whoami` `pwd`' "$(printf 'x <<a\n%.0s' $(seq 1 17))"; do
+  fcheck deny "$c" with
+  fcheck allow "$c" none
+done
+# everyday commands (no publish word, at most two substitutions) stay allowed with the sources unopened
+for c in 'git commit -m "fix the login"' $'git commit -m "$(cat <<\'EOF\'\nFix the user\'s login, don\'t retry\nEOF\n)"' "git commit -m 'it''s done'" 'echo "$(date) $(pwd)"' 'git log --oneline | head -5'; do
+  fcheck allow "$c" with
 done
 out=$(py - <<'PY' | env CLAUDE_PROJECT_DIR="$(fwp "$FP/with")" bash "$H/py.sh" "$G"
 import json; print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "sudo python send.py"}}))
