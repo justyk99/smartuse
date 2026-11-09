@@ -348,8 +348,13 @@ make("a_sixteen_heredocs_data", ex(ALLOW), cmd=HD(16, "python send.py"), tr=lamb
 # N3: 16 unterminated openers with 64-character delimiters in 128 KB of text. The opener scans cost about (openers x delimiter length x text
 # length), so this shape is read as code too, and is decided well inside the 10 s hook timeout (interpreter start included).
 LD16 = lambda first: first + "\necho " + " ".join(["<<" + "D" * 64] * 16) + "\n" + "x\n" * 64000
-make("d_n3_sixteen_long_delimiters_128kb", ex(DENY, has=["3 of 3 sources not opened"], max=10), cmd=LD16("git push"), tr=lambda P: base(P))
+make("d_n3_sixteen_long_delimiters_128kb", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=LD16("git push"), tr=lambda P: base(P))
 make("a_n3_sixteen_long_delimiters_128kb_no_publish", ex(ALLOW, max=10), cmd=LD16("git status"), tr=lambda P: base(P))
+# one heredoc budget per command: 16 $( ) bodies, each just under the budget on its own (16 openers with 64-character delimiters in about
+# 7,800 characters), 125 KB in all. The command is over the budget as a whole, so every body is read as code without scanning it for heredocs.
+NB16 = lambda last: "".join('echo "$(%s)"\n' % ("echo " + " ".join(["<<" + "D" * 64] * 16) + "\n" + ("x" * 63 + "\n") * 120) for _ in range(16)) + last
+make("d_nested_bodies_budget_once_publish", ex(DENY, has=["3 of 3 sources not opened"], max=6), cmd=NB16("git push"), tr=lambda P: base(P))
+make("a_nested_bodies_budget_once_no_publish", ex(ALLOW, max=6), cmd=NB16("git status"), tr=lambda P: base(P))
 # the PowerShell tool (hooks.json matcher Bash|PowerShell) is gated as well. Its text is normalised and the pattern's first word may be
 # any word of a statement, without regard to case (coarse and fail-closed); the text-side cases are in run.sh.
 PS = lambda cm: dict(tool="PowerShell", tinput={"command": cm})
@@ -763,7 +768,10 @@ make("a_m2b_herestring_apostrophes_no_publish", ex(ALLOW), tr=lambda P: base(P),
 make("d_m2b_two_herestrings_one_quote_each", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P),
      **PS('$a = @"\nsize 5"\n"@\ngit push\n$n = @"\n"quoted\n"@'))
 make("d_m2b_escaped_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS('Write-Host "a`""; git push; Write-Host "`"b"'))
-make("d_m2b_escaped_single_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
+# PowerShell reads this as one string (a backtick is literal inside single quotes, '' is a doubled quote), so the git push in it is text
+make("a_ps_single_quoted_string_holds_publish_text", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
+# a single quote that is never closed has nothing to pair with: it is dropped and the rest is read as it stands (the twin of the case above)
+make("d_ps_unclosed_single_quote_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host 'a; git push"))
 make("a_m2b_escaped_quotes_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a`""; git status; Write-Host "`"b"'))
 # N1: inside a PowerShell single-quoted string a backtick is a plain character, so a backtick before the closing quote does not escape it:
 # the string ends there and the statements after it run (dropping the pair re-paired the quotes and hid them). An escaped quote is dropped
@@ -970,13 +978,13 @@ elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-
     exec(compile(rd(sys.argv[2]).replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
     bad = []
 
-    def timed(label, f, want):
-        """True when f() gives `want` in under 1 s (function time: no interpreter start in the number); else a note is added."""
+    def timed(label, f, want, limit=1.0):
+        """True when f() gives `want` in under `limit` s (function time: no interpreter start in the number); else a note is added."""
         t0 = time.perf_counter()
         got = f()
         took = time.perf_counter() - t0
-        if got != want or took >= 1.0:
-            bad.append("%s: %r in %.1f s (needs %r in under 1 s)" % (label, got, took, want))
+        if got != want or took >= limit:
+            bad.append("%s: %r in %.2f s (needs %r in under %g s)" % (label, got, took, want, limit))
             return False
         return True
 
@@ -1011,6 +1019,19 @@ elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-
     for size, filler in (("96 KB", "x\n"), ("128 KB", "x\n"), ("128 KB, delimiter-like lines", "D" * 63 + "b\n")):
         cmd = "git push\necho " + " ".join(["<<" + DL] * 16) + "\n" + filler * ((131072 if size.startswith("128") else 98304) // len(filler))
         timed("16 unterminated openers with 64-character delimiters, %s" % size, lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), True)
+    # one heredoc budget per command: 16 $( ) bodies, each holding openers whose delimiter lengths times the body length stay just under
+    # HEREDOC_BUDGET (so no body is over the budget on its own) while the command as a whole is far over it. The command is decided as
+    # read-as-code once and every body inherits that, so the bodies are not each scanned for heredocs. 125 KB and 250 KB, no publish word
+    # (the whole command is read), then the same with a publish after the bodies.
+    def nested_bodies(each, openers, last):
+        head = "echo " + " ".join(["<<" + "D" * 64] * openers) + "\n"
+        body = head + ("x" * 63 + "\n") * ((each - len(head)) // 64)
+        return "".join('echo "$(%s)"\n' % body for _ in range(16)) + last
+    for size, each, openers in (("125 KB", 7800, 16), ("250 KB", 15600, 7)):
+        for last, want in (("git status", False), ("git push", True)):
+            cmd = nested_bodies(each, openers, last)
+            timed("16 nested $( ) bodies just under the heredoc budget each, %s, then %s" % (size, last),
+                  lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), want, 1.5)
     # ps_text: a left-to-right scan of single quotes, double quotes, backticks, here-strings and comments, 96 KB of them mixed
     mix = "git commit -m 'a `b`' ; Write-Host \"c `\"d`\" it's\" ; @'\nq's `x\n'@ # e'f\n<# g'h #> ''`'' \"\"\n"
     timed("ps_text: 96 KB of mixed quotes, backticks, here-strings and comments", lambda: bool(ns["ps_text"](mix * (98304 // len(mix)))), True)
@@ -1079,7 +1100,7 @@ cmp -s "$D/snap.before" "$D/snap.after" && ok "no file was created, changed or r
 r=$(py "$D/chk.py" imports "$G" </dev/null); [ "$r" = ok ] && ok "stdlib only (json os re sys time stat fnmatch datetime threading), no process call, Python 3.9 grammar" || ko "imports: $r"
 mkdir -p "$D/empty"; r=$(py "$D/chk.py" units "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "unit checks on the functions: a value echoed in a reason is cut at 200 characters, a whole reason at 2,000; only link-like reparse points are links" || ko "size caps: $r"
 r=$(py "$D/chk.py" bounded "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "bounded scan: three 8,000-opener shapes found in under 1 s each; a deadline in the past denies ('source expansion over 4 s')" || ko "bounded scan: $r"
-r=$(py "$D/chk.py" linear "$G" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "linear time: ten shapes of 6,000 and 24,000 words (PowerShell heads, Start-Process, iex, runner and wrapper chains, apostrophe lines), a 12,000-character heredoc delimiter and a state-write argument of 100,000 characters each decided in under 1 s" || ko "linear time: $r"
+r=$(py "$D/chk.py" linear "$G" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "linear time: ten shapes of 6,000 and 24,000 words (PowerShell heads, Start-Process, iex, runner and wrapper chains, apostrophe lines), a 12,000-character heredoc delimiter and a state-write argument of 100,000 characters each decided in under 1 s; 16 nested bodies just under the heredoc budget each (125 KB and 250 KB) in under 1.5 s" || ko "linear time: $r"
 r=$(py "$D/chk.py" execsilent "$G" </dev/null); [ "$r" = ok ] && ok "until-done.py's exec of this file without main() prints nothing and yields RULES" || ko "exec without main(): $r"
 r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash|PowerShell entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
 

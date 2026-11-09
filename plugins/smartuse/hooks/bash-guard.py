@@ -717,7 +717,8 @@ LONG_DELIM = re.compile(r"<<-?\s*[\\'\"]?\w{%d,}" % (HEREDOC_DELIM_MAX + 1))   #
 OPENER_WORD = re.compile(r"<<-?\s*[\\'\"]?(\w+)")   # the same opener, the delimiter captured
 # The two frozen heredoc scans cost about (the openers' delimiter lengths added up) x (the text length) x 3e-8 s on the slowest laptop
 # measured, so a budget of 8 million keeps one scan pair near 0.3 s at any size (16 openers x 64 characters stop at 8 KB, 16 x EOF
-# at 160 KB); the nested bodies of a command are each scanned on their own, a few levels deep.
+# at 160 KB). The budget is spent once per command: the decision is made on the whole command (nested openers included) and every
+# nested body inherits it, so a command made of many bodies that are each just under the budget is not scanned body by body.
 HEREDOC_BUDGET = 8000000
 
 
@@ -731,9 +732,10 @@ def many_heredocs(text):
     return sum(len(w) for w in OPENER_WORD.findall(text)) * len(text) > HEREDOC_BUDGET
 
 
-def cap_strip(text):
-    """gate_strip, except that a text with many heredoc openers is returned as it stands."""
-    return text if many_heredocs(text) else gate_strip(text)
+def cap_strip(text, many=False):
+    """gate_strip, except that a text with many heredoc openers is returned as it stands. With many True (the command this text
+    was cut from is already over the cap) it is returned as it stands without looking."""
+    return text if many or many_heredocs(text) else gate_strip(text)
 
 
 def _heredoc_end(t, i):
@@ -777,13 +779,13 @@ def _sub_end(t, i, depth=0, many=False):
     return n
 
 
-def subst_bodies(text, quoted=True):
+def subst_bodies(text, quoted=True, many=False):
     """The text inside each $( … ) and `…` of a shell text, also inside double quotes (not inside single quotes; an open single
     quote is read as a plain character, so more is checked, not less). Nested ones are found when a body is checked in turn.
     With quoted False the text is the body of an unquoted heredoc, where quote characters are plain text and only a backslash
-    keeps a $ or backtick from substituting."""
+    keeps a $ or backtick from substituting. With many True the text belongs to a command that is already over the heredoc cap."""
     out, n, i, dq = [], len(text), 0, False
-    many = many_heredocs(text)
+    many = many or many_heredocs(text)
     while i < n:
         c = text[i]
         if c == "\\":
@@ -876,10 +878,11 @@ PS_HERE_OPEN = re.compile(r"[ \t]*\r?\n")
 
 def ps_unescape(s):
     """s without its escaped quotes and backticks (a backtick and the quote or backtick after it), so that those can never open or
-    close a quoted word. One left-to-right pass that follows the quoting: in a single-quoted string a backtick is an ordinary
-    character (only a doubled '' is an escape), so a backtick before the closing quote leaves the quote in place; elsewhere the
-    pair is dropped. Here-strings and comments are read as data, their pairs dropped. A backtick followed by two quotes inside a
-    single-quoted string is ambiguous (an escaped quote, or a backtick and a doubled quote) and is read the over-denying way."""
+    close a quoted word. One left-to-right pass that follows PowerShell's own quoting: a single-quoted string is read strictly
+    (a backtick in it is an ordinary character and a doubled '' is one escaped quote; nothing else is special, so a backtick before
+    the closing quote leaves that quote in place) and is kept as it stands; in a double-quoted string, and outside any string, a
+    backtick and the quote or backtick after it are dropped. A single quote that is never closed has nothing to pair with, so it is
+    dropped and the rest read as it stands. Here-strings and comments are read as data, their pairs dropped."""
     out, i, n = [], 0, len(s)
     while i < n:
         c = s[i]
@@ -893,15 +896,11 @@ def ps_unescape(s):
             k = i + 1
             while True:
                 j = s.find("'", k)
-                if j < 0:
-                    out.append(s[i:])
+                if j < 0:   # never closed: PowerShell cannot parse this, so nothing runs; its quote is dropped (so it cannot pair with another) and the rest is read as it stands
+                    out.append(s[i + 1:])
                     i = n
                     break
-                if s[j + 1:j + 2] == "'":
-                    if j > k and s[j - 1] == "`":
-                        out.append(s[i:j - 1] + "'")   # the pair is dropped and the next quote closes the string
-                        i = j + 2
-                        break
+                if s[j + 1:j + 2] == "'":   # a doubled quote is one escaped quote; a backtick before it is a plain character
                     k = j + 2
                     continue
                 out.append(s[i:j + 1])
@@ -966,11 +965,11 @@ def gate_strip(text):
     return strip_heredocs(BACKSLASH_DELIM.sub(lambda m: "<<" + m.group(1) + "'" + m.group(2) + "'", text))
 
 
-def heredoc_substs(text):
+def heredoc_substs(text, many=False):
     """The $( … ) and backtick bodies inside the bodies of the unquoted heredocs of a shell text. strip_heredocs removes a data
     heredoc body whatever its quoting, but bash still runs the substitutions in an unquoted one; the plain lines stay data and a
     quoted or backslashed delimiter's body is not looked at."""
-    if "<<" not in text or many_heredocs(text):
+    if "<<" not in text or many or many_heredocs(text):
         return []
     out = []
     for m in HEREDOC_OPEN_PLAIN.finditer(text):
@@ -999,10 +998,11 @@ def publish_hit(text, patterns, depth=0, raw=None, ps=False):
             pats.append(segs[0])
     if not pats:
         return False
-    if _hit(text, pats, depth, ps):
+    many = many_heredocs(text if raw is None else raw)   # one heredoc budget per command: decided here on the whole command, inherited by every nested text
+    if _hit(text, pats, depth, ps, many):
         return True
     # `raw` is the command before strip_heredocs: the substitutions inside its unquoted heredocs run, whatever strip_heredocs did
-    return raw is not None and depth < 2 and any(_hit(cap_strip(b), pats, depth + 1) for b in heredoc_substs(raw))
+    return raw is not None and depth < 2 and any(_hit(cap_strip(b, many), pats, depth + 1, False, many) for b in heredoc_substs(raw, many))
 
 
 def _subseq(pw, words, begin):
@@ -1099,9 +1099,9 @@ def piped_text(prev):
     return " ".join(rest).replace("\\n", "\n")
 
 
-def _scan(segs, seps, pats, depth, ps, seen):
+def _scan(segs, seps, pats, depth, ps, seen, many=False):
     """_hit for one split of the text into commands. `seen`: the inner strings already checked (the same text found twice is
-    checked once)."""
+    checked once). `many`: the command is over the heredoc cap (see many_heredocs), passed on to the inner texts."""
     for n, seg in enumerate(segs):
         herestr = [w[1:] for w in seg if w[:1] == HERESTRING]
         if herestr:
@@ -1142,7 +1142,7 @@ def _scan(segs, seps, pats, depth, ps, seen):
                 inner = ps_text(inner).replace("\\", "/")   # a decoded command was never normalised
             if inner not in seen:
                 seen.add(inner)
-                if _hit(inner, pats, depth + 1, ps):
+                if _hit(inner, pats, depth + 1, ps, many):
                     return True
         if depth < 2 and n and seps[n - 1] in ("|", "|&") and base_name(cmd[0]).lower() in IEX:
             # a string piped into iex is run as commands: the previous segment's words
@@ -1151,36 +1151,37 @@ def _scan(segs, seps, pats, depth, ps, seen):
                 fed = " ".join(w for w in segs[n - 1] if w[:1] != HERESTRING)
             if fed and fed not in seen:
                 seen.add(fed)
-                if _hit(fed, pats, depth + 1, ps):
+                if _hit(fed, pats, depth + 1, ps, many):
                     return True
         if depth < 2 and base_name(cmd[0]).lower() in SHELLS and reads_stdin_as_code("sh", cmd[1:]):
             # a shell that runs its stdin as commands: a here-string word, and the text an echo / printf pipes into it
-            if any(_hit(h, pats, depth + 1, ps) for h in herestr):
+            if any(_hit(h, pats, depth + 1, ps, many) for h in herestr):
                 return True
             fed = piped_text(segs[n - 1]) if n and seps[n - 1] in ("|", "|&") else None
-            if fed and _hit(fed, pats, depth + 1, ps):
+            if fed and _hit(fed, pats, depth + 1, ps, many):
                 return True
     return False
 
 
-def _hit(text, pats, depth, ps=False):
+def _hit(text, pats, depth, ps=False, many=False):
+    many = many or many_heredocs(text)   # a text cut from a command that is over the cap is read as it stands too: one budget per command
     seen = set()
     seps = []
-    if _scan(command_segments(text, seps), seps, pats, depth, ps, seen):
+    if _scan(command_segments(text, seps), seps, pats, depth, ps, seen, many):
         return True
-    if "\n" in text and (ps or many_heredocs(text)):
+    if "\n" in text and (ps or many):
         # A quoted word that spans lines can hide the lines inside it in the whole-text split (a PowerShell here-string, a data
         # heredoc body read as code past the cap). So a PowerShell text, and a text read as it stands (many_heredocs), is also read one
         # line at a time, where a quote never reaches past its line (over-checking only: a line break inside a quoted word is read as
         # a line break). Not done for the other Bash texts, where it would deny quoted commit messages and PR bodies: known limit, see ROADMAP.
         seps = []
-        if _scan(line_segments(text.replace("\\\n", ""), seps, True), seps, pats, depth, ps, seen):
+        if _scan(line_segments(text.replace("\\\n", ""), seps, True), seps, pats, depth, ps, seen, many):
             return True
     if depth < 2:
-        for body in subst_bodies(text):
-            if _hit(cap_strip(body), pats, depth + 1, ps):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
+        for body in subst_bodies(text, True, many):
+            if _hit(cap_strip(body, many), pats, depth + 1, ps, many):   # a quoted-delimiter heredoc in a body is text (git commit -m "$(cat <<'EOF' …)")
                 return True
-            if any(_hit(cap_strip(b), pats, depth + 1, ps) for b in heredoc_substs(body)):   # but an unquoted one still substitutes
+            if any(_hit(cap_strip(b, many), pats, depth + 1, ps, many) for b in heredoc_substs(body, many)):   # but an unquoted one still substitutes
                 return True
     return False
 
