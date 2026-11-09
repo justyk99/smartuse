@@ -19,9 +19,10 @@
 # walked component by component without following links (a link or reparse point on the way refuses the pattern); every value
 # echoed in a reason is cut at 200 characters and a whole reason at 2,000. The deadline starts when the hook starts, before any
 # scan of the command; the heredoc scans rescan their text once per unclosed opener, so a command with more than HEREDOC_CAP
-# openers (or an opener with a delimiter over HEREDOC_DELIM_MAX characters) is read as it stands (its heredoc bodies count as
-# code: an over-deny, never a miss). A quoted word that spans lines can hide the lines inside it, so the gate reads every text
-# twice: whole, and one line at a time (a quote never reaches past its line there).
+# openers (or an opener with a delimiter over HEREDOC_DELIM_MAX characters, or delimiters times text length over
+# HEREDOC_BUDGET) is read as it stands (its heredoc bodies count as code: an over-deny, never a miss). A PowerShell text, and a
+# text read as it stands, is read twice: whole, and one line at a time (a quote never reaches past its line there). Any other
+# Bash text is read whole: a known limit, see ROADMAP.
 # Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
 import base64, datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
 
@@ -713,13 +714,21 @@ HEREDOC_OPEN = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1")
 
 
 LONG_DELIM = re.compile(r"<<-?\s*[\\'\"]?\w{%d,}" % (HEREDOC_DELIM_MAX + 1))   # an opener the way HEREDOC reads it, with a delimiter over the bound
+OPENER_WORD = re.compile(r"<<-?\s*[\\'\"]?(\w+)")   # the same opener, the delimiter captured
+# The two frozen heredoc scans cost about (the openers' delimiter lengths added up) x (the text length) x 3e-8 s on the slowest laptop
+# measured, so a budget of 8 million keeps one scan pair near 0.3 s at any size (16 openers x 64 characters stop at 8 KB, 16 x EOF
+# at 160 KB); the nested bodies of a command are each scanned on their own, a few levels deep.
+HEREDOC_BUDGET = 8000000
 
 
 def many_heredocs(text):
-    """More `<<` than HEREDOC_CAP, or an opener whose delimiter is longer than HEREDOC_DELIM_MAX: the heredoc scans (each rescans
-    the text once per unclosed opener, and tries the delimiter at every length) are skipped and every line of the text is read as
-    code. A command like that is an over-deny at worst: one turn."""
-    return text.count("<<") > HEREDOC_CAP or bool(LONG_DELIM.search(text))
+    """More `<<` than HEREDOC_CAP, an opener whose delimiter is longer than HEREDOC_DELIM_MAX, or openers whose delimiter lengths
+    times the text length pass HEREDOC_BUDGET: the heredoc scans (each rescans the text once per unclosed opener, and tries the
+    delimiter at every length) are skipped and every line of the text is read as code. A command like that is an over-deny at worst:
+    one turn."""
+    if text.count("<<") > HEREDOC_CAP or LONG_DELIM.search(text):
+        return True
+    return sum(len(w) for w in OPENER_WORD.findall(text)) * len(text) > HEREDOC_BUDGET
 
 
 def cap_strip(text):
@@ -861,13 +870,85 @@ def shell_string(cmd):
 UNREADABLE = []   # set when an encoded PowerShell command could not be decoded: the gate then denies with its own reason (emptied at the start of each check)
 
 
+PS_PAIR = re.compile(r"``|`[\"']")
+PS_HERE_OPEN = re.compile(r"[ \t]*\r?\n")
+
+
+def ps_unescape(s):
+    """s without its escaped quotes and backticks (a backtick and the quote or backtick after it), so that those can never open or
+    close a quoted word. One left-to-right pass that follows the quoting: in a single-quoted string a backtick is an ordinary
+    character (only a doubled '' is an escape), so a backtick before the closing quote leaves the quote in place; elsewhere the
+    pair is dropped. Here-strings and comments are read as data, their pairs dropped. A backtick followed by two quotes inside a
+    single-quoted string is ambiguous (an escaped quote, or a backtick and a doubled quote) and is read the over-denying way."""
+    out, i, n = [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "`":
+            if s[i + 1:i + 2] in ("`", '"', "'"):
+                i += 2
+            else:
+                out.append(c)
+                i += 1
+        elif c == "'":
+            k = i + 1
+            while True:
+                j = s.find("'", k)
+                if j < 0:
+                    out.append(s[i:])
+                    i = n
+                    break
+                if s[j + 1:j + 2] == "'":
+                    if j > k and s[j - 1] == "`":
+                        out.append(s[i:j - 1] + "'")   # the pair is dropped and the next quote closes the string
+                        i = j + 2
+                        break
+                    k = j + 2
+                    continue
+                out.append(s[i:j + 1])
+                i = j + 1
+                break
+        elif c == '"':
+            out.append(c)
+            i += 1
+            while i < n:
+                d = s[i]
+                if d == "`" and s[i + 1:i + 2] in ("`", '"', "'"):
+                    i += 2
+                elif d == '"':
+                    if s[i + 1:i + 2] == '"':
+                        out.append('""')
+                        i += 2
+                    else:
+                        out.append(d)
+                        i += 1
+                        break
+                else:
+                    out.append(d)
+                    i += 1
+        elif c == "@" and s[i + 1:i + 2] in ('"', "'") and PS_HERE_OPEN.match(s, i + 2):
+            nl = PS_HERE_OPEN.match(s, i + 2).end() - 1   # a here-string: data up to its closing fence at a line start
+            t = s.find("\n" + s[i + 1] + "@", nl)
+            end = n if t < 0 else t
+            out.append(s[i:nl] + PS_PAIR.sub("", s[nl:end]) + s[end:end + 3])
+            i = min(n, end + 3)
+        elif (c == "#" and (i == 0 or s[i - 1] in " \t\r\n;")) or (c == "<" and s[i + 1:i + 2] == "#"):
+            e = s.find("\n" if c == "#" else "#>", i + 2 if c == "<" else i)
+            e = n if e < 0 else (e if c == "#" else e + 2)
+            out.append(PS_PAIR.sub("", s[i:e]))   # a comment: data, no quote in it counts
+            i = e
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def ps_text(s):
     """A PowerShell command as shell-like text the segment splitter reads: a backtick-newline joins lines, an escaped quote or
-    backtick (a backtick and the character after it) is dropped whole so that it can never open or close a quoted word, any other
-    backtick (PowerShell's escape character) is dropped, here-string fences (@" "@ @' '@) become line breaks, { and } (script
+    backtick is dropped whole outside single-quoted strings (see ps_unescape) so that it can never open or close a quoted word, any
+    other backtick (PowerShell's escape character) is dropped, here-string fences (@" "@ @' '@) become line breaks, { and } (script
     blocks) become ;, and commas (array literals) become blanks. Nothing else."""
     s = re.sub(r"`\r?\n", "", s)
-    s = re.sub(r"``|`[\"']", "", s)
+    s = ps_unescape(s)
     s = re.sub(r"@[\"']|[\"']@", "\n", s)
     return s.replace("`", "").replace("{", ";").replace("}", ";").replace(",", " ")
 
@@ -1088,12 +1169,10 @@ def _hit(text, pats, depth, ps=False):
     if _scan(command_segments(text, seps), seps, pats, depth, ps, seen):
         return True
     if "\n" in text and (ps or many_heredocs(text)):
-        # A quoted word that spans lines hides the lines inside it: an apostrophe in a here-string or in a data heredoc body (read as
-        # code past the cap) pairs with the next one, and the whole-text split then reads the lines between them as one quoted word.
-        # So a PowerShell text, and a text read as it stands (many_heredocs), is also read one line at a time, where a quote never
-        # reaches past its line (over-checking only: a line break inside a quoted word is read as a line break). Not done for the
-        # other Bash texts: a quoted commit message or PR body with a line that is a publish command would be denied, so a quoted
-        # word that spans lines is still read whole there (a known limit).
+        # A quoted word that spans lines can hide the lines inside it in the whole-text split (a PowerShell here-string, a data
+        # heredoc body read as code past the cap). So a PowerShell text, and a text read as it stands (many_heredocs), is also read one
+        # line at a time, where a quote never reaches past its line (over-checking only: a line break inside a quoted word is read as
+        # a line break). Not done for the other Bash texts, where it would deny quoted commit messages and PR bodies: known limit, see ROADMAP.
         seps = []
         if _scan(line_segments(text.replace("\\\n", ""), seps, True), seps, pats, depth, ps, seen):
             return True

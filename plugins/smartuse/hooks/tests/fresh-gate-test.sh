@@ -345,6 +345,11 @@ HD = lambda n, body: "".join("cat > f%d.txt <<'EOF'\n%s\nEOF\n" % (i, body if i 
 make("d_many_heredocs_publish", ex(DENY, has=["3 of 3 sources not opened"], max=9), cmd="x <<a\n" * 8000 + "git push", tr=lambda P: base(P))
 make("d_cap_overdeny_pinned", ex(DENY, has=["3 of 3 sources not opened"]), cmd=HD(17, "python send.py"), tr=lambda P: base(P))
 make("a_sixteen_heredocs_data", ex(ALLOW), cmd=HD(16, "python send.py"), tr=lambda P: base(P))
+# N3: 16 unterminated openers with 64-character delimiters in 128 KB of text. The opener scans cost about (openers x delimiter length x text
+# length), so this shape is read as code too, and is decided well inside the 10 s hook timeout (interpreter start included).
+LD16 = lambda first: first + "\necho " + " ".join(["<<" + "D" * 64] * 16) + "\n" + "x\n" * 64000
+make("d_n3_sixteen_long_delimiters_128kb", ex(DENY, has=["3 of 3 sources not opened"], max=10), cmd=LD16("git push"), tr=lambda P: base(P))
+make("a_n3_sixteen_long_delimiters_128kb_no_publish", ex(ALLOW, max=10), cmd=LD16("git status"), tr=lambda P: base(P))
 # the PowerShell tool (hooks.json matcher Bash|PowerShell) is gated as well. Its text is normalised and the pattern's first word may be
 # any word of a statement, without regard to case (coarse and fail-closed); the text-side cases are in run.sh.
 PS = lambda cm: dict(tool="PowerShell", tinput={"command": cm})
@@ -747,7 +752,7 @@ make("d_m3_ps_start_process_many_heads", ex(DENY, has=["3 of 3 sources not opene
      **PS("Start-Process git -ArgumentList " + "git " * 6000 + " push"))
 # M2: a quoted word that spans lines must not hide the lines inside it. (a) the cap: 17 heredocs read as code, an apostrophe in one body
 # and another in a later one used to pair up and hide the publish line between them; (b) PowerShell: an apostrophe in a here-string
-# and one in a comment, two here-strings that each hold one quote, an escaped quote; (c) Bash comments with an apostrophe (a known limit)
+# and one in a comment, two here-strings that each hold one quote, an escaped quote; (c) a Bash quote that spans lines (a known limit)
 CAP17 = "cat > a.md <<EOF\nit's data\nEOF\ngit push\ncat > b.md <<EOF\ndon't\nEOF\n" + "".join("cat > f%d.md <<EOF\nnote %d\nEOF\n" % (i, i) for i in range(15))
 make("d_m2a_cap_apostrophes", ex(DENY, has=["3 of 3 sources not opened"]), cmd=CAP17, tr=lambda P: base(P))
 make("a_m2a_cap_apostrophes_no_publish", ex(ALLOW), cmd=CAP17.replace("git push", "git status"), tr=lambda P: base(P))
@@ -760,10 +765,20 @@ make("d_m2b_two_herestrings_one_quote_each", ex(DENY, has=["3 of 3 sources not o
 make("d_m2b_escaped_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS('Write-Host "a`""; git push; Write-Host "`"b"'))
 make("d_m2b_escaped_single_quotes", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("Write-Host 'a`''; git push; Write-Host '`'b'"))
 make("a_m2b_escaped_quotes_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "a`""; git status; Write-Host "`"b"'))
-# (c) KNOWN LIMIT, pinned: on Bash a quoted word that spans lines is read whole (reading every Bash text line by line as well turned seven
-# existing allows, quoted commit messages and PR bodies with a line that is a publish command, into denies), so an apostrophe in one comment
-# pairs with one in a later comment and hides the line between them. Allowed today; the day this is fixed the case flips (ROADMAP).
-make("a_m2c_known_limit_bash_comment_apostrophes_pinned", ex(ALLOW), cmd="# it's ready\ngit push origin main\n# check the PR's status", tr=lambda P: base(P))
+# N1: inside a PowerShell single-quoted string a backtick is a plain character, so a backtick before the closing quote does not escape it:
+# the string ends there and the statements after it run (dropping the pair re-paired the quotes and hid them). An escaped quote is dropped
+# only outside single-quoted strings.
+N1A = "git commit -m 'Fix `x`'; git push  # it's done"
+N1B = "git commit -m 'Use `a`'; git push; git tag -m 'Tag `b`' v1"
+make("d_n1_single_quoted_backtick_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(N1A))
+make("d_n1_two_single_quoted_backticks_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(N1B))
+make("d_n1_encoded", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS("pwsh -enc " + __import__("base64").b64encode(N1A.encode("utf-16-le")).decode()))
+make("a_n1_single_quoted_backtick_no_publish", ex(ALLOW), tr=lambda P: base(P), **PS(N1A.replace("git push", "git status")))
+make("a_n1_double_quoted_escaped_quote_is_data", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "say `"git push`" now"; git status'))
+make("a_n1_single_quoted_publish_text_is_data", ex(ALLOW), tr=lambda P: base(P), **PS("git commit -m 'run `git push` later'"))
+# (c) known limit, pinned: on Bash at or under the heredoc cap a quoted word that spans lines is read whole (see ROADMAP). Allowed today; the
+# day the limit is lifted the case flips.
+make("a_m2c_known_limit_bash_multiline_quote_pinned", ex(ALLOW), cmd="# it's ready\ngit push origin main\n# check the PR's status", tr=lambda P: base(P))
 make("a_m2c_bash_comment_apostrophes_no_publish", ex(ALLOW), cmd="# it's ready\ngit status\n# check the PR's status", tr=lambda P: base(P))
 # M4 (a): one heredoc opener with a 12,000-character delimiter and 6,000 body lines before a publish (the opener scan backtracked once per
 # delimiter character); (b) a state write whose plain argument cannot be split in a hurry
@@ -991,6 +1006,16 @@ elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-
     for body in (6000, 24000):
         cmd = "cat <<" + "a" * 12000 + "\n" + "x\n" * body + "git push"
         timed("one heredoc opener with a 12,000-character delimiter, %d lines" % body, lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), True)
+    # 16 unterminated openers with 64-character delimiters (the worst shape of the pre-check): read as code, found at 96 and 128 KB
+    DL = "D" * 64
+    for size, filler in (("96 KB", "x\n"), ("128 KB", "x\n"), ("128 KB, delimiter-like lines", "D" * 63 + "b\n")):
+        cmd = "git push\necho " + " ".join(["<<" + DL] * 16) + "\n" + filler * ((131072 if size.startswith("128") else 98304) // len(filler))
+        timed("16 unterminated openers with 64-character delimiters, %s" % size, lambda: ns["publish_hit"](ns["cap_strip"](cmd), ["git push"], 0, cmd), True)
+    # ps_text: a left-to-right scan of single quotes, double quotes, backticks, here-strings and comments, 96 KB of them mixed
+    mix = "git commit -m 'a `b`' ; Write-Host \"c `\"d`\" it's\" ; @'\nq's `x\n'@ # e'f\n<# g'h #> ''`'' \"\"\n"
+    timed("ps_text: 96 KB of mixed quotes, backticks, here-strings and comments", lambda: bool(ns["ps_text"](mix * (98304 // len(mix)))), True)
+    timed("ps_text: 96 KB of single quotes with backticks", lambda: bool(ns["ps_text"]("'a`'" * 24576)), True)
+    timed("ps_text: 24,000 unterminated here-string openers", lambda: bool(ns["ps_text"]("@'\n" * 24000)), True)
     # the state-write strip: a plain argument that cannot be split in a hurry, at a length that took over 10 s before; the shape stays data
     st = 'bash "/p/hooks/py.sh" "/p/hooks/ledger.py" --unit 3 status=done note='
     for plain in (12, 4000, 100000):
