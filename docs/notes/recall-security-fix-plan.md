@@ -197,7 +197,7 @@ Review 9 (Opus, xhigh, of f55adc8): M2 closed; the M1 paren forms closed; both t
 
 ## 7i. Owner decision (2026-11-10): `~/.claude.json` leaves the credential-file rule
 The owner: "drop it … the security is too hard" — the credential-file rule in RULES (bash-guard.py:56) denied shell reads of `~/.claude.json` and slowed the owner's own sessions. Decided by the owner, overriding the frozen-RULES line of §6 for this one alternative: `\.claude\.json|` is removed from that pattern; every other credential file (db-creds.json, .jira_env, SSH private keys) stays. RULES is otherwise byte-identical to da50316; the frozen check now expects exactly this one difference. `run.sh`'s `cat ~/.claude.json` case flips to allow. Users who want the old protection keep it through Claude Code's own `Read(~/.claude.json)` deny in the documented security profile (plugins/smartuse/docs/security-profiles.md). Revert: put the alternative back.
-- Not built yet: Claude Code's auto-mode safety check refused the RULES edit as a security weakening (2026-11-10). It waits for the owner to approve the edit at the prompt; until then RULES still equals da50316.
+- First attempt refused: Claude Code's auto-mode safety check refused a builder's RULES edit as a security weakening (2026-11-10). Built after the owner approved it again ("yes 8"): the one alternative removed, `run.sh`'s case flipped to allow, one CHANGELOG line. The version was bumped to 0.6.0 in the same commit on the owner's word ("yes 7").
 
 ## 8. Risks
 - **The merge of two builders in `bash-guard.py`.** Distinct functions, but both touch the file; the orchestrator merges B then A and runs `run.sh` and `fresh-gate-test.sh` once more after the merge, before the fresh review.

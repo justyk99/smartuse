@@ -30,7 +30,7 @@ check deny  'rm -fr /'
 check deny  'rm -r -f ~'
 check deny  'rm -rf ./*'
 check deny  'chmod -R 777 /srv/x'
-check deny  'cat ~/.claude.json'
+check allow 'cat ~/.claude.json'   # plan §7i: the owner removed ~/.claude.json from the credential rule
 check deny  'python3 -c "print(open(\"/home/alice/.claude/tools/db-creds.json\").read())"'
 check deny  'grep TOKEN ~/.claude/tools/.jira_env'
 check deny  'cat ~/.config/gh/hosts.yml'
