@@ -1,6 +1,6 @@
 # 0.6.1 — lighter, faster, switchable: plan (dev-flow phase 2, 2026-11-10)
 
-Status: **plan written 2026-11-10; waits for the owner's yes and the three answers in §11.** Nothing built. Planner: flow-planner on claude-fable-5-2. Brief, research and the build-or-reuse note: `docs/notes/light-fast-brief.md`. Every existing name and line below was grepped on the dev branch at 0.6.0 (`bash-guard.py` 1,372 lines, `heartbeat.py` 551, `hooks.json` 174); new names are marked *new*. This note is the contract the builders work from, one builder brief per feature.
+Status: **approved by the owner 2026-11-10: the whole plan, both cuts ("big"); see §13.** Build started 2026-11-10. Planner: flow-planner on claude-fable-5-2. Brief, research and the build-or-reuse note: `docs/notes/light-fast-brief.md`. Every existing name and line below was grepped on the dev branch at 0.6.0 (`bash-guard.py` 1,372 lines, `heartbeat.py` 551, `hooks.json` 174); new names are marked *new*. This note is the contract the builders work from, one builder brief per feature.
 
 ## 0. What this release is, and the number it is judged by
 Three changes for the person at the keyboard: the heartbeat stops making Claude wait, the guards stop denying honest commands, and the owner gets a switch that only the owner can flip.
@@ -276,3 +276,9 @@ Not in this: paid-call guard · more shell parsing · removing the launcher · R
 Alt: ship speed and the false-deny fixes first (about 3 days), build the switch after the reach check (§10)
 Tap: 1 yes · 2 send a reference · 3 no
 ```
+
+## 13. Approval and decisions (2026-11-10)
+- The owner approved the whole plan, F0 to F8, both cuts, the same day it was written. F9 stays out: nobody asked for it.
+- §11's three questions were not answered one by one, so the recommended answers stand as defaults and the owner may veto any: the light set as listed; the switch at the laptop only; a hung guard lets the call through in 0.6.1.
+- Decided by the orchestrator (owner may veto): in F4 the `~/.claude.json` alternative that the security plan §7i removed comes back as its own named rule, `claude-json`, placed after `credential-file` with the same reason, and it is in `LIGHT_OFF`. Light, the default, behaves as 0.6.0 does today (the read runs); strict denies it, as 0.5.1 did. This follows §2 decision 15 (narrow by a named rule, never by deleting an alternative) and answers the automated security review of the 0.6.0 push, which asked for an opt-in instead of a removal. `run.sh`'s `cat ~/.claude.json` case is a deny under strict and an allow in the light block.
+- The build runs the two tracks side by side only while the laptop keeps up; F0's "before" numbers are taken first, with no suite running.
