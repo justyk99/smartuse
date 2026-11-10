@@ -194,6 +194,9 @@ Review 9 (Opus, xhigh, of f55adc8): M2 closed; the M1 paren forms closed; both t
 - R3 — the docs state the over-deny surface (any standalone start / saps / Start-Process word).
 - R4 — no change: a command under the Bash tool name is run by Bash, not PowerShell; a PowerShell started from Bash is a nested shell string (tagged by `_scan`).
 
+## 7i. Owner decision (2026-11-10): `~/.claude.json` leaves the credential-file rule
+The owner: "drop it … the security is too hard" — the credential-file rule in RULES (bash-guard.py:56) denied shell reads of `~/.claude.json` and slowed the owner's own sessions. Decided by the owner, overriding the frozen-RULES line of §6 for this one alternative: `\.claude\.json|` is removed from that pattern; every other credential file (db-creds.json, .jira_env, SSH private keys) stays. RULES is otherwise byte-identical to da50316; the frozen check now expects exactly this one difference. `run.sh`'s `cat ~/.claude.json` case flips to allow. Users who want the old protection keep it through Claude Code's own `Read(~/.claude.json)` deny in the documented security profile (plugins/smartuse/docs/security-profiles.md). Revert: put the alternative back.
+
 ## 8. Risks
 - **The merge of two builders in `bash-guard.py`.** Distinct functions, but both touch the file; the orchestrator merges B then A and runs `run.sh` and `fresh-gate-test.sh` once more after the merge, before the fresh review.
 - **False denies in the maintainer's primary shell.** F1's coarse rule over-denies `Write-Host git push` (unquoted), a publish word in an array or a data here-string, and `Get-Help`/`Select-String` lines that quote a pattern. Each costs one turn and the reason names the fix; the `a_` and `allow` cases are the regression bar, and phase 6 runs the maintainer's own everyday PowerShell commands against the guard before the demo.
