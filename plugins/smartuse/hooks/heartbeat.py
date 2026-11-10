@@ -3,7 +3,7 @@
 Deterministic, 0 model tokens, no network, stdlib only.
 
 Hook (stdin = the event JSON; prints nothing; exit 0 always): SessionStart · UserPromptSubmit · PreToolUse · PostToolUse ·
-SubagentStart · SubagentStop · Notification (idle_prompt | permission_prompt) · Stop · SessionEnd. Every event updates
+PostToolUseFailure (treated as PostToolUse) · SubagentStart · SubagentStop · Notification (idle_prompt | permission_prompt) · Stop · SessionEnd. Every event updates
 ~/.claude/smartuse/projects/<key>/status.json (same state dir as ledger.py and until-done.py; atomic tmp + os.replace — on
 Windows the replace is retried 5 x 20 ms while another reader holds the file, then the tmp file is dropped, never an error).
 <key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
@@ -16,7 +16,9 @@ name>/, is shared by every repo of that name and is never used, even while the k
   turn_ended (Stop sets it; UserPromptSubmit / PreToolUse / PostToolUse clear it) ·
   waiting_since (when the wait on the human began: Stop, idle_prompt or permission_prompt; cleared when work resumes) ·
   tool_calls (this turn, reset on UserPromptSubmit) · tool_running {name, tool_use_id, since} (PreToolUse sets, any
-  PostToolUse clears) · last_tool {name, at} · agents {agent_id: {type, since}} (SubagentStart adds, SubagentStop removes;
+  PostToolUse / PostToolUseFailure clears) · done (the last 32 tool_use_ids a PostToolUse / PostToolUseFailure saw; UserPromptSubmit
+  empties it: the tool-event handlers run in the background, so a PreToolUse whose id is in `done` landed after its own "after"
+  and is counted but does not set tool_running) · last_tool {name, at} · agents {agent_id: {type, since}} (SubagentStart adds, SubagentStop removes;
   entries older than 3 h are ignored when rendering) · agents_done · notification (idle_prompt | permission_prompt | null;
   Notification sets, UserPromptSubmit / PreToolUse / PostToolUse / Stop clear) · ended + end_reason (SessionEnd).
 SessionStart resets the file for the new session (counters at 0) — except source "compact" of the same session, which
@@ -58,9 +60,10 @@ Never blocks a turn. Any error -> exit 0 silently (a heartbeat must never stop t
 import json, os, sys, re, time, datetime, pathlib
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
-EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop",
+EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop",
           "Notification", "Stop", "SessionEnd"}
 WAITS = ("idle_prompt", "permission_prompt")
+DONE_KEEP = 32   # finished tool_use_ids kept in status.json (`done`)
 STALE_AGENT_S = 3 * 3600
 PREFIX = "smartuse · "
 
@@ -201,13 +204,30 @@ def write_json(path, obj):
 
 
 def lock(sdir):
-    """Best-effort exclusive lock so two hooks firing at once (parallel tool calls) do not lose each other's update.
-    Released when the fd closes; no fcntl (Windows) -> unlocked, last writer wins."""
+    """Best-effort exclusive lock so two hooks firing at once (parallel tool calls; the tool-event handlers run in the background)
+    do not lose each other's update. POSIX: fcntl.flock. Windows (no fcntl): one byte of status.lock through msvcrt.locking,
+    tried every 10 ms for at most 1 s, then the hook goes on unlocked (last writer wins), as it did before the lock existed.
+    Released when the fd closes."""
     try:
-        import fcntl
         fd = os.open(str(sdir / "status.lock"), os.O_CREAT | os.O_RDWR, 0o644)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        return fd
+        try:
+            import fcntl
+        except ImportError:
+            fcntl = None
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return fd
+        import msvcrt
+        end = time.monotonic() + 1.0
+        while True:
+            try:
+                os.lseek(fd, 0, 0)   # msvcrt.locking locks from the current position
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return fd
+            except OSError:
+                if time.monotonic() >= end:
+                    return fd   # waited long enough: go on unlocked
+                time.sleep(0.01)
     except Exception:
         return None
 
@@ -215,6 +235,12 @@ def lock(sdir):
 def unlock(fd):
     try:
         if fd is not None:
+            try:
+                import msvcrt
+                os.lseek(fd, 0, 0)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)   # a no-op error when this hook went on unlocked
+            except Exception:
+                pass
             os.close(fd)
     except Exception:
         pass
@@ -225,7 +251,7 @@ def unlock(fd):
 def fresh(sid, now):
     return {"session_id": sid, "started": iso(now), "updated": iso(now), "source": None, "turn": 0, "prompt_at": None, "turn_ended": False,
             "waiting_since": None, "tool_calls": 0, "tool_running": None, "last_tool": None, "agents": {},
-            "agents_done": 0, "notification": None, "ended": False, "end_reason": None}
+            "agents_done": 0, "notification": None, "ended": False, "end_reason": None, "done": []}
 
 
 def live_agents(st, now):
@@ -263,6 +289,13 @@ def gate_will_block(sdir):
     return any((u.get("status") or "pending") in ("pending", "running", "fail") for u in units)
 
 
+def done_ids(st):
+    """The tool_use_ids a PostToolUse / PostToolUseFailure saw, oldest first, at most DONE_KEEP (a state file without the key, or with a
+    bad one, has none)."""
+    d = st.get("done")
+    return [x for x in d if isinstance(x, str)] if isinstance(d, list) else []
+
+
 def resume(st):
     st["turn_ended"] = False
     st["waiting_since"] = None
@@ -289,15 +322,22 @@ def apply(st, ev, data, now, sdir):
         st["prompt_at"] = iso(now)
         st["tool_calls"] = 0
         st["tool_running"] = None
+        st["done"] = []
         resume(st)
     elif ev == "PreToolUse":
         st["tool_calls"] = to_int(st.get("tool_calls")) + 1
-        st["tool_running"] = {"name": data.get("tool_name") or "tool", "tool_use_id": data.get("tool_use_id"), "since": iso(now)}
-        resume(st)
-    elif ev == "PostToolUse":
+        tid = data.get("tool_use_id")
+        if tid and tid in done_ids(st):
+            pass   # the tool-event handlers run in the background: this "before" landed after its own "after"; it is counted, but must not undo it
+        else:
+            st["tool_running"] = {"name": data.get("tool_name") or "tool", "tool_use_id": tid, "since": iso(now)}
+            resume(st)
+    elif ev in ("PostToolUse", "PostToolUseFailure"):   # a failed call ends in PostToolUseFailure (fields: tool_name, tool_use_id, error, is_interrupt), not PostToolUse
         name = data.get("tool_name") or (st.get("tool_running") or {}).get("name") or "tool"
         st["last_tool"] = {"name": name, "at": iso(now)}
         st["tool_running"] = None
+        if data.get("tool_use_id"):
+            st["done"] = (done_ids(st) + [data["tool_use_id"]])[-DONE_KEEP:]
         resume(st)
     elif ev == "SubagentStart":
         agents = live_agents(st, now)

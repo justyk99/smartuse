@@ -368,4 +368,98 @@ esac
 mkdir -p "$D/WINDOWSAPPS"; cp "$D/stub/python3" "$D/WINDOWSAPPS/python3"; chmod +x "$D/WINDOWSAPPS/python3"; rm -f "$CF"; printf 'python3\n' > "$CF"
 OUT=$(PATH="$D/WINDOWSAPPS:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
 [ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias under WINDOWSAPPS (upper case) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WINDOWSAPPS alias: out '$OUT', cached '$P5'"; fail=1; }
+# --- 0.6.1 F1: the heartbeat's three tool-event handlers run in the background ("async": true), so a "before" can land after its
+# "after", a failed call has its own event (PostToolUseFailure: tool_name, tool_use_id, error, is_interrupt; the field names are the
+# docs' sample, no recorded event holds one), and two hooks can write at once. status.json keeps `done`, the last 32 tool_use_ids a
+# PostToolUse / PostToolUseFailure saw: a PreToolUse whose id is in it counts the call but never sets tool_running.
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"f1\",\"source\":\"startup\",$C}"
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f1\",$C}"
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1a\",$C}"
+expect "F1 a Bash call is running" "working · Bash running"
+ev "{\"hook_event_name\":\"PostToolUseFailure\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1a\",\"error\":\"Exit code 1\",\"is_interrupt\":false,\"duration_ms\":12,$C}"
+expect "F1 PostToolUseFailure clears 'running': the line moves on to last Bash" "working · last Bash"
+js "d['tool_running'] is None and d['last_tool']['name']=='Bash' and d['tool_calls']==1" && echo "PASS F1 --json: a failed call leaves no tool_running, last_tool Bash, one call" || { echo "FAIL F1 --json after PostToolUseFailure"; fail=1; }
+# PostToolUse, then a "before" of the same id that lands late: the line stays on last Bash, one call counted
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f1\",$C}"
+ev "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1b\",$C}"
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1b\",$C}"
+expect_not "F1 a late PreToolUse of a finished id does not set 'running'" "Bash running"
+expect "F1 the line stays on last Bash" "working · last Bash"
+expect "F1 the late PreToolUse still counts the call" "1 call this turn"
+# a PreToolUse with a new id after that: running
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Read\",\"tool_use_id\":\"f1c\",$C}"
+expect "F1 a PreToolUse with a new id is running" "working · Read running"
+js "d['tool_calls']==2" && echo "PASS F1 --json: two calls counted" || { echo "FAIL F1 two calls counted"; fail=1; }
+# a failure after a late-landing "before": same rule
+ev "{\"hook_event_name\":\"PostToolUseFailure\",\"session_id\":\"f1\",\"tool_name\":\"Read\",\"tool_use_id\":\"f1c\",\"error\":\"nope\",$C}"
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Read\",\"tool_use_id\":\"f1c\",$C}"
+expect "F1 a late PreToolUse after a failure does not set 'running' either" "working · last Read"
+# done: the last 32 ids, newest last; a prompt empties it. Seeded with 31 ids, then three finished calls.
+py - "$S" <<'PY'
+import json,sys; p=sys.argv[1]; s=json.load(open(p)); s["done"]=["seed%d" % i for i in range(31)]; json.dump(s,open(p,"w"))
+PY
+for i in 1 2 3; do ev "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"fd$i\",$C}"; done
+js "len(d['done'])==32 and d['done'][-3:]==['fd1','fd2','fd3'] and 'seed0' not in d['done'] and 'seed1' not in d['done'] and d['done'][0]=='seed2'" && echo "PASS F1 done holds 32 at most: the oldest ids drop, the newest stay last" || { echo "FAIL F1 done cap: $(py -c "import json,sys; print(json.load(open(sys.argv[1])).get('done'))" "$S")"; fail=1; }
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f1\",$C}"
+js "d['done']==[]" && echo "PASS F1 a prompt empties done" || { echo "FAIL F1 done after a prompt"; fail=1; }
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"f2\",\"source\":\"startup\",$C}"
+js "d['done']==[]" && echo "PASS F1 a fresh session starts with done empty" || { echo "FAIL F1 done in a fresh state"; fail=1; }
+# twenty events fired at once, different ids: status.json parses and counts 20 (POSIX flock; Windows msvcrt.locking)
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f2\",$C}"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  ( printf '%s' "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f2\",\"tool_name\":\"Bash\",\"tool_use_id\":\"par$i\",$C}" | CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py" >/dev/null 2>&1 ) &
+done
+wait
+js "d['tool_calls']==20" && echo "PASS F1 twenty events at once: status.json parses and counts 20" || { echo "FAIL F1 twenty at once: $(py -c "import json,sys; print(json.load(open(sys.argv[1])).get('tool_calls'))" "$S" 2>&1)"; fail=1; }
+# hooks.json: the three heartbeat tool handlers are async; no guard, ledger, until-done, wait-gate or recall handler is; the
+# blocking smartuse handlers a tool call waits on (PreToolUse + PostToolUse entries whose matcher fits) are
+# Bash 1, Read 0, Write 1 now and 3, 2, 3 when "async" is ignored (0.6.0: nothing was async).
+HC=$(py - "$H/hooks.json" <<'PY'
+import json, re, sys
+h = json.load(open(sys.argv[1]))["hooks"]
+bad = []
+def handlers(ev):
+    for ent in h.get(ev, []):
+        for hd in ent.get("hooks", []):
+            yield ent.get("matcher"), hd
+def script(hd):
+    m = re.search(r"hooks/([a-z-]+)\.py", hd.get("command", ""))
+    return m.group(1) if m else None
+for ev in h:
+    for _, hd in handlers(ev):
+        s = script(hd)
+        if s is None or not hd.get("command", "").startswith('bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh"'):
+            bad.append("not a smartuse launcher command: %s %s" % (ev, hd.get("command")))
+        tool_hb = s == "heartbeat" and ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure")
+        if tool_hb:
+            if hd.get("async") is not True or hd.get("timeout") != 5:
+                bad.append("heartbeat tool handler under %s must be async with timeout 5: %s" % (ev, hd))
+        elif hd.get("async"):
+            bad.append("%s handler under %s must stay blocking" % (s, ev))
+        elif hd.get("timeout") is None:
+            bad.append("%s under %s lost its timeout" % (s, ev))
+for ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+    if not any(m == "*" and script(hd) == "heartbeat" for m, hd in handlers(ev)):
+        bad.append("no heartbeat handler on matcher * under " + ev)
+def waited(tool, ignore_async):
+    n = 0
+    for ev in ("PreToolUse", "PostToolUse"):   # a call that succeeds; a failed one ends in PostToolUseFailure instead of PostToolUse, with the same async heartbeat
+        for m, hd in handlers(ev):
+            if (m is None or m == "*" or re.fullmatch(m, tool)) and (ignore_async or not hd.get("async")):
+                n += 1
+    return n
+now = {t: waited(t, False) for t in ("Bash", "Read", "Write")}
+was = {t: waited(t, True) for t in ("Bash", "Read", "Write")}
+was_ok = was == {"Bash": 3, "Read": 2, "Write": 3}
+if now != {"Bash": 1, "Read": 0, "Write": 1}:
+    bad.append("blocking per call now: %s" % now)
+if not was_ok:
+    bad.append("per call with async ignored: %s" % was)
+print("blocking per call: " + " ".join("%s %d" % kv for kv in now.items()) + " (async ignored: " + " ".join("%s %d" % kv for kv in was.items()) + ")")
+print("BAD" if bad else "OK")
+for b in bad:
+    print(b)
+PY
+)
+case "$HC" in *$'\n'OK*) echo "PASS F1 hooks.json: $(printf '%s\n' "$HC" | head -1)";; *) echo "FAIL F1 hooks.json: $HC"; fail=1;; esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
