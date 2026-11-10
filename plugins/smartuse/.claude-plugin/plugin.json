@@ -22,6 +22,26 @@
     "heartbeat"
   ],
   "hooks": "./hooks/hooks.json",
+  "userConfig": {
+    "strict": {
+      "type": "boolean",
+      "title": "Strict guards",
+      "description": "Off: the light set. On: every rule, the wait gate, and guards that fail closed.",
+      "default": false
+    },
+    "rules_off": {
+      "type": "string",
+      "title": "Rules off",
+      "description": "Rule names to switch off, separated by commas. Each deny message prints its rule name. Ignored when Strict is on.",
+      "default": ""
+    },
+    "wait_gate": {
+      "type": "boolean",
+      "title": "Wait gate",
+      "description": "Block a hand-off once when nothing is armed to wake the session. Always on in Strict.",
+      "default": false
+    }
+  },
   "homepage": "https://github.com/justyk99/smartuse",
   "repository": "https://github.com/justyk99/smartuse"
 }

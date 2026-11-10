@@ -40,6 +40,10 @@ MAX_REASON = 2000    # characters of a whole reason
 HEREDOC_CAP = 16     # `<<` openers a command may hold before its bodies are read as code: the opener scan rescans the text once per unclosed opener
 HEREDOC_DELIM_MAX = 64   # longest heredoc delimiter the opener scan is run on: it backtracks once per delimiter character, so a longer one is read as code too
 
+# the heads of the rules that were split out of a parent rule in 0.6.1 (the parent's own pattern is unchanged but for the moved alternative)
+_READER = (r"\b(cat|less|more|head|tail|sed|awk|grep|strings|base64|xxd|cp|scp|rsync|curl|python3?|node|tee|jq|find|type)\b[^;&|]*")
+_GIT_PUSH = r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*"
+
 RULES = [
     (r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|zsh|dash|python3?|node|perl)\b",
      "pipe-to-shell (download then execute) — save the file, read it, then run it on purpose"),
@@ -54,15 +58,23 @@ RULES = [
     # key and credential files by NAME (any directory, either slash): a reader/copier command word, then the file in the same segment
     (r"\b(cat|less|more|head|tail|sed|awk|grep|strings|base64|xxd|cp|scp|rsync|curl|python3?|node|tee|jq|find|type)\b[^;&|]*"
      r"(db-creds\.json|\.jira_env|\bid_(rsa|ed25519|ecdsa|dsa|\*)(?!\.pub)|\.ssh[\\/]id_[a-z0-9_]+(\s|[\"']|$)"
-     r"|\.ssh[\\/]?(\*|\s|[\"']|$)|\.ssh[\\/]config|gh[\\/]hosts\.yml|\.git-credentials|\.netrc|recovery-codes|[\\/]secrets[\\/]"
+     r"|\.ssh[\\/]?(\*|\s|[\"']|$)|\.ssh[\\/]config|gh[\\/]hosts\.yml|\.git-credentials|\.netrc|recovery-codes"
      r"|\.claude[\\/]\.credentials\.json|\.aws[\\/]credentials|\.npmrc(?![\w.-])|\.pypirc(?![\w.-])|\.kube[\\/]config|\.docker[\\/]config\.json)",
+     "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
+    # two alternatives of the rule above in rules of their own (0.6.1), so that light can switch them off by name; the strict result is the same
+    (_READER + r"[\\/]secrets[\\/]",
+     "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
+    (_READER + r"\.claude\.json",
      "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
     # anchored with ^: rules are searched with re.I | re.S, so `.` crosses newlines and one try at position 0 sees the whole text.
     # Unanchored, every position rescanned the rest: quadratic in the command's length.
     (r"^(?=.*\b(sqlcmd|osql|tsql|sqlq|spapply|mssql)\b)(?=.*\b(DROP\s+(TABLE|DATABASE|PROC|PROCEDURE|LOGIN|USER)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b)",
      "destructive SQL through the shell — SQL in chat, a human runs it"),
     # git [options] push … --force / -f (also bundled: -fu) / --force-with-lease / --mirror / +ref
-    (r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*(\s--force\b|\s-[a-z]*f[a-z]*\b|--force-with-lease|--mirror|\s[\"']?\+\S)",
+    (r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*(\s--force(?![\w-])|\s-[a-z]*f[a-z]*\b|--mirror|\s[\"']?\+\S)",
+     "force push"),
+    # --force-with-lease (and any other --force-<word> option) in a rule of its own (0.6.1): `--force` above no longer reads it as `--force`
+    (_GIT_PUSH + r"(--force-with-lease|\s--force-)",
      "force push"),
     (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json|\.claude[. ]*[/\\]smartuse[. ]*[/\\]interpreter(?![\w-]|\.\w))",   # Windows drops a trailing dot or space of every part and reads x::$DATA as x: all are the file, interpreter.md is not
      "human-only file (it decides what the until-done gate may run, or which Python runs the hooks) — ask the user to edit it"),
@@ -72,7 +84,27 @@ RULES = [
      "pinning a check script is a human-only action — the user runs it in their own terminal"),
     (r"\bsvn\s+(revert|resolve\s+--accept\s+theirs-full)\b",
      "svn revert / theirs-full — colleagues' uncommitted work would be lost"),
+    # config-switch (0.6.1): the shell routes that would change smartuse's switches, by text. (1) the plugin command's configure / enable /
+    # disable / uninstall naming this plugin (any @marketplace), or `disable --all`, and an install of it that sets options; (2) a write to
+    # a Claude Code settings file, in a command that also names one of the keys that hold the switches. It reads text only: a write hidden
+    # inside another program or built at run time is not seen. Linear: every repetition is bounded or cannot start inside its own run.
+    (r"(?<![\w.-])claude(?:\.exe)?(?:\s+-[^\s;&|]+)*\s+plugins?\s+(?:"
+     r"(?:configure|config|enable|disable|uninstall|remove|rm)(?:\s+[^\s;&|]+){0,8}?\s+(?:[\"']?smartuse(?![\w-])|--all(?![\w-]))"
+     r"|install(?:\s+[^\s;&|]+){0,8}?\s+[\"']?smartuse(?![\w-])[^\s;&|]*(?:\s+[^\s;&|]+){0,16}?\s+(?:--[\w-]*(?:config|option|set)[\w-]*|(?:strict|rules_off|wait_gate)\b))"
+     r"|^(?=.*(?:pluginConfigs|enabledPlugins|disableAllHooks))(?:"
+     r"(?=.*(?:>\s*[^\s;&|>]*(?<![\w.-])settings(?:\.local)?\.json(?![\w-])"
+     r"|\b(?:tee|cp|mv|sponge|install|sed\s+-i)\b(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*(?<![\w.-])settings(?:\.local)?\.json(?![\w-])))"
+     r"|(?=.*(?<![\w.-])settings(?:\.local)?\.json(?![\w-]))(?=.*\b(?:python3?|py\.sh|node|perl|ruby|set-content|add-content|out-file|tee-object)\b)"
+     r"(?=.*(?:write|dump|[\"'][wa][b+]?[\"']|content|out-file)))",
+     "switching smartuse's guards is the owner's action: /plugin configure or /config"),
 ]
+# One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
+RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
+              "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
+# The guard level (0.6.1). Strict: every rule. Light (the default): the rules in LIGHT_OFF are off, and so is any rule named in the
+# plugin option rules_off, except the FLOOR, which protects the switches themselves and is always on.
+LIGHT_OFF = frozenset(("force-with-lease", "claude-json"))
+FLOOR = frozenset(("human-only", "trust-pin", "config-switch"))
 
 # <<EOF … EOF  /  <<'EOF' … EOF  /  <<-EOF … EOF   (body = group 3)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
@@ -1303,8 +1335,201 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
     return why
 
 
-def deny(why):
+# ---- waivers (0.6.1): honest commands that two RULES entries match by mistake ----------------------------------------------------
+# A match of a rule named in WAIVABLE can be waived, and only when EVERY match of that rule in the text is such a case. Anything the
+# waiver cannot read cleanly stays denied: a text complexity() tags, a text words() or flex_split cannot split, a line continuation.
+#   pipe-to-shell: a download piped into Python run as `-m <module>` for a module on the allow list PY_DATA_MODULES (json.tool: it
+#                  reads JSON as data and prints it), with only plain flags before -m. Everything else stays denied: a shell, a bare
+#                  interpreter, a program text, a script file, Node, Perl, any other module, an interpreter behind sudo or other
+#                  wrapper. An allow list, because a deny list of risky programs is never complete.
+#   sudo:          the word carried as text, in an argument of a command that only carries text (the message of git commit / tag /
+#                  notes, echo, printf, grep, rg, the title and body of gh pr / issue / release). Not waived when the text holds a
+#                  command substitution or process substitution anywhere, when any segment has sudo or doas before its command, or
+#                  when a pipe feeds anything but a plain filter.
+WAIVABLE = frozenset(("pipe-to-shell", "sudo"))
+PIPE_OK = frozenset(("head", "tail", "wc", "sort", "uniq", "cat", "cut", "tr", "less", "more", "grep", "rg", "nl", "column", "jq"))   # read what is piped in, run nothing
+PY_DATA_MODULES = frozenset(("json.tool",))   # modules `python -m` may run on a download: they read it as data
+PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))   # plain flags: none takes a value or runs code
+
+
+def _shell_tokens(t):
+    """[(kind, value, start, end)] for a shell text read as flex_split reads it (redirections and their targets leave no word), or
+    None when it does not split cleanly."""
+    out, pos = [], 0
+    while pos < len(t):
+        m = FLEX.match(t, pos)
+        if not m:
+            return None
+        s, pos = pos, m.end()
+        if m.group("word"):
+            out.append(("word", UNQUOTE.sub(lambda q: next(g for g in q.groups() if g is not None), m.group("word")), s, pos))
+        elif m.group("sep"):
+            out.append(("sep", m.group("sep"), s, pos))
+    return out
+
+
+def _option_values(v, start, letters, flags, longs):
+    """Indices of the words of v (from `start`) that are the VALUE of an option: -m VALUE, -mVALUE, -am VALUE (a bundle of `flags`
+    letters ending in an option letter of `letters`), --message VALUE, --message=VALUE. Nothing after a bare --."""
+    out, take = set(), False
+    for j in range(start, len(v)):
+        a = v[j]
+        if take:
+            out.add(j)
+            take = False
+        elif a == "--":
+            break
+        elif a in longs:
+            take = True
+        elif a.startswith("--"):
+            k = a.find("=")
+            if k > 0 and a[:k] in longs:
+                out.add(j)
+        elif a.startswith("-") and len(a) > 1:
+            n = 1
+            while n < len(a) and a[n] in flags:
+                n += 1
+            if n < len(a) and a[n] in letters:
+                if n + 1 < len(a):
+                    out.add(j)
+                else:
+                    take = True
+    return out
+
+
+def _text_words(v, i):
+    """The words of the command v[i:] that are text and nothing else (True: every argument), or None when the command is not one
+    that only carries text: git commit / tag / notes (the message options), echo, printf, grep, rg (not its --pre program), gh pr /
+    issue / release (the title, body and notes options)."""
+    cmd = base_name(v[i]).lower()
+    if cmd in ("echo", "printf", "grep"):
+        return True
+    if cmd == "rg":
+        return None if any(a == "--pre" or a.startswith("--pre=") for a in v[i + 1:]) else True
+    if cmd == "git":
+        k = i + 1
+        while k < len(v) and v[k].startswith("-"):
+            k += 2 if v[k] in ("-C", "-c", "--git-dir", "--work-tree", "--namespace") else 1
+        if k < len(v) and v[k] in ("commit", "tag", "notes"):
+            return _option_values(v, k + 1, "m", "aensvq", ("--message",))
+        return None
+    if cmd == "gh" and i + 1 < len(v) and v[i + 1] in ("pr", "issue", "release"):
+        return _option_values(v, i + 2, "tbn", "", ("--title", "--body", "--notes"))
+    return None
+
+
+def _python_data_module(a):
+    """Is this Python, given the words `a` after its name, run as `-m <module>` for a module of PY_DATA_MODULES, with only plain
+    flags (PY_FLAGS) before the -m? The words after the module are its own arguments."""
+    i = 0
+    while i < len(a) and a[i] in PY_FLAGS:
+        i += 1
+    return i + 1 < len(a) and a[i] == "-m" and a[i + 1] in PY_DATA_MODULES
+
+
+WAIVER_ERRORS = []   # what a waiver raised, if anything (a test reads it); a waiver that raises waives nothing
+
+
+def waived(name, text, ps):
+    """True when `name` is a waivable rule and every match of it in `text` (the text main() runs RULES on; `ps` for the PowerShell
+    tool) is an honest command of its class (see above). An error is a no."""
+    try:
+        return _waived(name, text, ps)
+    except Exception as e:
+        WAIVER_ERRORS.append(repr(e))
+        return False
+
+
+def _waived(name, text, ps):
+    """The work of waived. Linear in the text: the matches and the words are walked once, side by side."""
+    if name not in WAIVABLE or complexity(text, ps):
+        return False
+    t = text.replace("\\", "/") if ps else text   # PowerShell has no backslash escape: read as a bash text it would hide a command inside a quote
+    if "\\\n" in t or words(t) is None:
+        return False
+    toks = _shell_tokens(t)
+    if toks is None:
+        return False
+    segs, ends = [[]], []
+    for kind, val, s, e in toks:
+        if kind == "word":
+            segs[-1].append((val, s, e))
+        else:
+            ends.append(val)
+            segs.append([])
+    ends.append("")
+    vals = [[w[0] for w in seg] for seg in segs]
+    first = [command_start(v) for v in vals]
+    hits = list(re.finditer(RULES[RULE_NAMES.index(name)][0], t, re.I | re.S))
+    if not hits:
+        return False
+    flat = [(w[1], w[2], si, wi) for si, seg in enumerate(segs) for wi, w in enumerate(seg)]
+    ptr = [0]
+    def token_at(pos):   # (segment, word) of the word that holds position pos, or None; positions come in ascending order
+        p = ptr[0]
+        while p < len(flat) and flat[p][1] <= pos:
+            p += 1
+        ptr[0] = p
+        return (flat[p][2], flat[p][3]) if p < len(flat) and flat[p][0] <= pos else None
+    if name == "sudo":
+        if "$(" in t or "`" in t or "<(" in t or ">(" in t:
+            return False
+        for si, v in enumerate(vals):
+            if any(base_name(w).lower() in ("sudo", "doas") for w in v[:first[si]]):
+                return False
+            if si and ends[si - 1] in ("|", "|&") and (first[si] >= len(v) or base_name(v[first[si]]).lower() not in PIPE_OK):
+                return False
+    memo = {}
+    for m in hits:
+        if name == "sudo":
+            tk = token_at(m.start())
+            if tk is None:
+                return False
+            si, wi = tk
+            i = first[si]
+            if wi <= i or i >= len(vals[si]):
+                return False
+            if si not in memo:
+                memo[si] = _text_words(vals[si], i)
+            if memo[si] is None or (memo[si] is not True and wi not in memo[si]):
+                return False
+        else:
+            if m.group(2):   # (sudo\s+)? of the pattern
+                return False
+            tk = token_at(m.end() - 1)
+            if tk is None or tk[1] != 0 or tk[0] == 0 or ends[tk[0] - 1] != "|":
+                return False
+            si, pj = tk[0], tk[0] - 1
+            v = vals[si]
+            if not PYFAM.fullmatch(base_name(v[0]).lower()) or not _python_data_module(v[1:]):
+                return False
+            pv = vals[pj]
+            if first[pj] >= len(pv) or base_name(pv[first[pj]]).lower() not in ("curl", "wget") \
+                    or not (segs[pj][0][1] <= m.start() < segs[pj][-1][2]):
+                return False
+            k = si   # what the interpreter prints must not be piped on into a shell: the download would reach it
+            while ends[k] in ("|", "|&"):
+                k += 1
+                if first[k] >= len(vals[k]) or base_name(vals[k][first[k]]).lower() not in PIPE_OK:
+                    return False
+    return True
+
+
+def options():
+    """(strict, off) from the plugin options Claude Code exports to the hook (CLAUDE_PLUGIN_OPTION_<KEY>, key upper-cased); the hook
+    reads its own environment and nothing else, so nothing a command does can change it. STRICT not set, empty, or off / false / no / 0
+    (any case) is light; any other value is strict, so a value the hook cannot read fails closed. `off` is the set of rule names in
+    RULES_OFF (commas or blanks between, any case); strict ignores it."""
+    strict = os.environ.get("CLAUDE_PLUGIN_OPTION_STRICT", "").strip().lower() not in ("", "off", "false", "no", "0")
+    if strict:
+        return True, frozenset()
+    return False, frozenset(w for w in re.split(r"[\s,]+", os.environ.get("CLAUDE_PLUGIN_OPTION_RULES_OFF", "").lower()) if w)
+
+
+def deny(why, name=None):
     msg = f"bash-guard: {why}"
+    if name:
+        msg += " [rule %s%s]" % (name, ", always on" if name in FLOOR else "")
     if len(msg) > MAX_REASON:
         msg = msg[:MAX_REASON - 1] + "…"   # a whole reason, ellipsis included, is at most MAX_REASON characters
     print(json.dumps({"hookSpecificOutput": {
@@ -1314,6 +1539,16 @@ def deny(why):
 
 
 def main():
+    strict = options()[0]
+    try:
+        _main()
+    except Exception:
+        if not strict:
+            raise   # light: as before, the hook fails and the call goes through
+        deny("internal error; strict guards fail closed")
+
+
+def _main():
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
@@ -1351,9 +1586,13 @@ def main():
             leave()
             return
     text = ps_text(pre) if ps else (pre if many_heredocs(pre) else strip_heredocs(pre))   # no heredocs in PowerShell
-    for pat, why in RULES:
-        if re.search(pat, text, re.I | re.S):
-            deny(why)
+    strict, off = options()
+    for (pat, why), name in zip(RULES, RULE_NAMES):
+        if not strict and name not in FLOOR and (name in LIGHT_OFF or name in off):
+            continue
+        # config-switch reads the command as typed: a heredoc written to a settings file carries the key in its body (stripped from `text`)
+        if re.search(pat, pre if name == "config-switch" and not ps else text, re.I | re.S) and not (name in WAIVABLE and not tag and waived(name, text, ps)):
+            deny(why, name)
             return
     why = None if early else gate()
     if why:
