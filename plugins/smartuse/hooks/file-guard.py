@@ -44,10 +44,12 @@ def resolved(path, wait=3.0):   # os.path.realpath in a worker thread: "" when i
 # --- 0.6.1 F5b: the guards' switch is the owner's. A Claude Code settings file (settings.json / settings.local.json in a .claude folder, or in
 # the folder CLAUDE_CONFIG_DIR names) may not be edited so that one of three values changes: this plugin's pluginConfigs entry (its
 # options), its enabledPlugins entry, or disableAllHooks (key names: code.claude.com/docs/en/settings-reference). The plugin is the plugin
-# id's name part, `smartuse@<marketplace>`, whatever the marketplace is called. Other edits of the file pass.
+# id's name part, `smartuse@<marketplace>`, whatever the marketplace is called. Also compared: every `env` entry whose name starts with
+# CLAUDE_PLUGIN_OPTION_ (any case). Other edits of the file pass.
 SETTINGS_FILE = re.compile(r"(^|/)\.claude/settings(\.local)?\.json$", re.I)
 SETTINGS_NAME = re.compile(r"^settings(\.local)?\.json$", re.I)
-SWITCH_NAMES = re.compile(r"pluginConfigs|enabledPlugins|disableAllHooks|\\u", re.I)   # \u: a JSON escape can spell a key without the word
+SWITCH_NAMES = re.compile(r"pluginConfigs|enabledPlugins|disableAllHooks|CLAUDE_PLUGIN_OPTION_|\\u", re.I)   # \u: a JSON escape can spell a key without the word
+OPTION_ENV = "CLAUDE_PLUGIN_OPTION_"   # the `env` block of a settings file sets the variables the guards read as the plugin's options: every such entry is compared too
 MAX_SETTINGS = 1 << 20
 SWITCH_WHY = "file-guard: this edit would change smartuse's switches. That is the owner's action: /plugin configure or /config."
 
@@ -95,7 +97,9 @@ def switch_values(text):   # the three values as one comparable string; None whe
         if isinstance(v, dict):
             return {k: x for k, x in v.items() if str(k).split("@")[0].strip().lower() == "smartuse"} or None
         return v
-    return json.dumps([pick(o.get("pluginConfigs")), pick(o.get("enabledPlugins")), o.get("disableAllHooks") or None], sort_keys=True, default=str)
+    env = o.get("env")
+    opts = {k: x for k, x in env.items() if str(k).upper().startswith(OPTION_ENV)} if isinstance(env, dict) else None
+    return json.dumps([pick(o.get("pluginConfigs")), pick(o.get("enabledPlugins")), o.get("disableAllHooks") or None, opts or None], sort_keys=True, default=str)
 
 EMPTY = switch_values("{}")
 

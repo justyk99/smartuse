@@ -448,7 +448,7 @@ check allow 'cat ~/.claude/settings.json'
 check allow 'cat ~/.claude/settings.json | jq .enabledPlugins'
 check allow 'jq .enabledPlugins ~/.claude/settings.json > /tmp/plugins.json'
 check allow 'grep -n enabledPlugins ~/.claude/settings.json'
-check allow $'echo \'{"theme":"dark"}\' > ~/.claude/settings.json'
+check deny  $'echo \'{"theme":"dark"}\' > ~/.claude/settings.json'   # review 11 (M1): a redirect onto a settings file is denied whatever the text names; an honest settings edit goes through the Edit tool
 check allow $'cat > notes.md <<\'EOF\'\nenabledPlugins lives in settings.json\nEOF'
 pcheck allow 'Get-Content $HOME\.claude\settings.json'
 pcheck allow 'claude plugin list'
@@ -472,6 +472,64 @@ print(("ok %.2f" % dt) if "[rule config-switch, always on]" in out.getvalue() an
 PY
 )
   case "$r" in ok*) echo "PASS deny  config-switch timing: $shape then the real switch, ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL config-switch timing: $shape -> '${r:0:120}'"; fail=1;; esac
+done
+# --- 0.6.1 review 11 (M1, M2b): config-switch also denies a delete, move, copy-over, truncate or redirect whose target is a Claude Code
+#     settings file (settings.json / settings.local.json in a .claude folder, either slash, any case) whatever else the text names, the
+#     plugin command's marketplace-level remove for smartuse's marketplace, and a settings write that names a CLAUDE_PLUGIN_OPTION_* variable.
+#     Reading such a file, a copy of it, another file named settings.json outside a .claude folder, and another marketplace are fine.
+for v in true -; do ocheck deny:'[rule config-switch, always on]' "$v" 'config-switch' 'rm ~/.claude/settings.json'; done
+check deny  'rm -f .claude/settings.local.json'
+check deny  'git rm .claude/settings.json'
+check deny  'mv ~/.claude/settings.json /tmp/old.json'
+check deny  'mv /tmp/new.json ~/.claude/settings.json'
+check deny  'cp /tmp/new.json ~/.claude/settings.json'
+check deny  ': > ~/.claude/settings.json'
+check deny  'truncate -s 0 .claude/settings.json'
+check deny  $'echo \'{}\' > C:\\Users\\u\\.claude\\settings.json'
+check deny  'cat /tmp/new.json >> ~/.CLAUDE/Settings.JSON'
+check deny  'cat /tmp/new.json | tee .claude/settings.local.json'
+check deny  'claude plugin marketplace remove smartuse'
+check deny  'claude plugin marketplace rm smartuse'
+check deny  'claude --debug plugin marketplaces remove "smartuse"'
+check deny  $'jq \'.env.CLAUDE_PLUGIN_OPTION_STRICT="false"\' s.json > /tmp/t && mv /tmp/t settings.json'
+check deny  $'jq \'.env.claude_plugin_option_rules_off="sudo"\' s.json > /tmp/t && cp /tmp/t settings.local.json'
+pcheck deny 'Remove-Item $HOME\.claude\settings.json'
+pcheck deny 'Move-Item .claude\settings.json C:\tmp\old.json'
+pcheck deny 'Copy-Item new.json -Destination .claude\settings.local.json'
+pcheck deny 'Clear-Content .claude\settings.local.json'
+pcheck deny $'"{}" | Out-File -FilePath .claude\\settings.json'
+pcheck deny 'claude plugin marketplace remove smartuse'
+check allow 'cat ~/.claude/settings.json'
+check allow 'jq . ~/.claude/settings.json'
+check allow 'grep -n model .claude/settings.local.json'
+check allow 'cp ~/.claude/settings.json /tmp/backup.json'
+check allow 'cp ~/.claude/settings.json ~/.claude/settings.json.bak'
+check allow 'rm ~/.claude/settings.json.bak'
+check allow 'rm -f proj/settings.json'
+check allow $'echo \'{}\' > editor/settings.json'
+check allow 'mv /tmp/a.json /tmp/b.json'
+check allow 'claude plugin marketplace remove other-market'
+check allow 'claude plugin marketplace list'
+check allow $'jq \'.env.MY_VAR="1"\' s.json > /tmp/t && mv /tmp/t settings.json'
+pcheck allow 'Get-Content $HOME\.claude\settings.json'
+pcheck allow 'Copy-Item .claude\settings.json C:\tmp\backup.json'
+# decided within a second inside the process: 3,600 `mv` commands then a delete of the file, and the same text without the delete
+for shape in dense-mv dense-mv-clean; do
+  r=$(py - "$G" "$shape" <<'PY'
+import contextlib, io, json, sys, time, types
+src = open(sys.argv[1], encoding="utf-8").read()
+cmd = "mv a b; " * 3600 + ("rm ~/.claude/settings.json" if sys.argv[2] == "dense-mv" else "ls")
+sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
+out = io.StringIO()
+t0 = time.monotonic()
+with contextlib.redirect_stdout(out):
+    exec(compile(src, "bash-guard", "exec"), {"__name__": "timing"})
+dt = time.monotonic() - t0
+hit = "[rule config-switch, always on]" in out.getvalue()
+print(("ok %.2f" % dt) if hit == (sys.argv[2] == "dense-mv") and dt < 1.0 else "bad %.2f %s" % (dt, out.getvalue()[-90:]))
+PY
+)
+  case "$r" in ok*) echo "PASS $shape: 29 KB of mv commands decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL settings-file timing: $shape -> '${r:0:120}'"; fail=1;; esac
 done
 # --- a long command of ordinary text is decided well within the hook's timeout (10 s in hooks.json): no rule may rescan the text
 #     from every position. 16 KB took 12 s on the author's laptop before the SQL rule was anchored; 64 KB is 4x the length, so ~16x the time.
