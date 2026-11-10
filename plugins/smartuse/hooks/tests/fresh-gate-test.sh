@@ -21,6 +21,7 @@
 # every allow case is built by the same code as its deny twin and re-read as JSON, so an empty answer is an allow of parsed input.
 set -u
 H="$(cd "$(dirname "$0")/.." && pwd)"; G="$H/bash-guard.py"
+export CLAUDE_PLUGIN_OPTION_STRICT=true   # the strict level (every rule on) is the bar these cases were written against
 D=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-fresh.XXXXXX") && [ -d "$D" ] || { echo "FAIL could not create a temp dir under ${TMPDIR:-/tmp}"; exit 1; }
 trap 'case "$D" in */smartuse-fresh.*) rm -rf "$D" 2>/dev/null;; esac' EXIT   # removes this run's own dir and nothing else
 export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/c" "$D/r"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call

@@ -40,6 +40,10 @@ MAX_REASON = 2000    # characters of a whole reason
 HEREDOC_CAP = 16     # `<<` openers a command may hold before its bodies are read as code: the opener scan rescans the text once per unclosed opener
 HEREDOC_DELIM_MAX = 64   # longest heredoc delimiter the opener scan is run on: it backtracks once per delimiter character, so a longer one is read as code too
 
+# the heads of the rules that were split out of a parent rule in 0.6.1 (the parent's own pattern is unchanged but for the moved alternative)
+_READER = (r"\b(cat|less|more|head|tail|sed|awk|grep|strings|base64|xxd|cp|scp|rsync|curl|python3?|node|tee|jq|find|type)\b[^;&|]*")
+_GIT_PUSH = r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*"
+
 RULES = [
     (r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|zsh|dash|python3?|node|perl)\b",
      "pipe-to-shell (download then execute) — save the file, read it, then run it on purpose"),
@@ -54,15 +58,23 @@ RULES = [
     # key and credential files by NAME (any directory, either slash): a reader/copier command word, then the file in the same segment
     (r"\b(cat|less|more|head|tail|sed|awk|grep|strings|base64|xxd|cp|scp|rsync|curl|python3?|node|tee|jq|find|type)\b[^;&|]*"
      r"(db-creds\.json|\.jira_env|\bid_(rsa|ed25519|ecdsa|dsa|\*)(?!\.pub)|\.ssh[\\/]id_[a-z0-9_]+(\s|[\"']|$)"
-     r"|\.ssh[\\/]?(\*|\s|[\"']|$)|\.ssh[\\/]config|gh[\\/]hosts\.yml|\.git-credentials|\.netrc|recovery-codes|[\\/]secrets[\\/]"
+     r"|\.ssh[\\/]?(\*|\s|[\"']|$)|\.ssh[\\/]config|gh[\\/]hosts\.yml|\.git-credentials|\.netrc|recovery-codes"
      r"|\.claude[\\/]\.credentials\.json|\.aws[\\/]credentials|\.npmrc(?![\w.-])|\.pypirc(?![\w.-])|\.kube[\\/]config|\.docker[\\/]config\.json)",
+     "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
+    # two alternatives of the rule above in rules of their own (0.6.1), so that light can switch them off by name; the strict result is the same
+    (_READER + r"[\\/]secrets[\\/]",
+     "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
+    (_READER + r"\.claude\.json",
      "credential file — its contents would land in the transcript on disk; use `claude mcp list` or env vars instead"),
     # anchored with ^: rules are searched with re.I | re.S, so `.` crosses newlines and one try at position 0 sees the whole text.
     # Unanchored, every position rescanned the rest: quadratic in the command's length.
     (r"^(?=.*\b(sqlcmd|osql|tsql|sqlq|spapply|mssql)\b)(?=.*\b(DROP\s+(TABLE|DATABASE|PROC|PROCEDURE|LOGIN|USER)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b)",
      "destructive SQL through the shell — SQL in chat, a human runs it"),
     # git [options] push … --force / -f (also bundled: -fu) / --force-with-lease / --mirror / +ref
-    (r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*(\s--force\b|\s-[a-z]*f[a-z]*\b|--force-with-lease|--mirror|\s[\"']?\+\S)",
+    (r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*(\s--force(?![\w-])|\s-[a-z]*f[a-z]*\b|--mirror|\s[\"']?\+\S)",
+     "force push"),
+    # --force-with-lease (and any other --force-<word> option) in a rule of its own (0.6.1): `--force` above no longer reads it as `--force`
+    (_GIT_PUSH + r"(--force-with-lease|\s--force-)",
      "force push"),
     (r"(>|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bpython3?\b|\bpy\.sh\b)[^;&|]*(smartuse\.local\.md|trusted-checks\.json|\.claude[. ]*[/\\]smartuse[. ]*[/\\]interpreter(?![\w-]|\.\w))",   # Windows drops a trailing dot or space of every part and reads x::$DATA as x: all are the file, interpreter.md is not
      "human-only file (it decides what the until-done gate may run, or which Python runs the hooks) — ask the user to edit it"),
@@ -74,8 +86,12 @@ RULES = [
      "svn revert / theirs-full — colleagues' uncommitted work would be lost"),
 ]
 # One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
-RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "sql-destructive", "force-push",
-              "human-only", "fake-tty", "trust-pin", "svn-revert")
+RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
+              "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert")
+# The guard level (0.6.1). Strict: every rule. Light (the default): the rules in LIGHT_OFF are off, and so is any rule named in the
+# plugin option rules_off, except the FLOOR, which protects the switches themselves and is always on.
+LIGHT_OFF = frozenset(("force-with-lease", "secrets-dir", "claude-json"))
+FLOOR = frozenset(("human-only", "trust-pin"))
 
 # <<EOF … EOF  /  <<'EOF' … EOF  /  <<-EOF … EOF   (body = group 3)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
@@ -1309,22 +1325,18 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
 # ---- waivers (0.6.1): honest commands that two RULES entries match by mistake ----------------------------------------------------
 # A match of a rule named in WAIVABLE can be waived, and only when EVERY match of that rule in the text is such a case. Anything the
 # waiver cannot read cleanly stays denied: a text complexity() tags, a text words() or flex_split cannot split, a line continuation.
-#   pipe-to-shell: a download piped into Python, Node or Perl that was given its own program (a module, a program text or a script
-#                  file, never standard input), so the download is that program's data. A shell, a bare interpreter, an interpreter
-#                  behind sudo or other wrapper, or a program that evaluates its own input is not waived.
+#   pipe-to-shell: a download piped into Python run as `-m <module>` for a module on the allow list PY_DATA_MODULES (json.tool: it
+#                  reads JSON as data and prints it), with only plain flags before -m. Everything else stays denied: a shell, a bare
+#                  interpreter, a program text, a script file, Node, Perl, any other module, an interpreter behind sudo or other
+#                  wrapper. An allow list, because a deny list of risky programs is never complete.
 #   sudo:          the word carried as text, in an argument of a command that only carries text (the message of git commit / tag /
 #                  notes, echo, printf, grep, rg, the title and body of gh pr / issue / release). Not waived when the text holds a
 #                  command substitution or process substitution anywhere, when any segment has sudo or doas before its command, or
 #                  when a pipe feeds anything but a plain filter.
 WAIVABLE = frozenset(("pipe-to-shell", "sudo"))
 PIPE_OK = frozenset(("head", "tail", "wc", "sort", "uniq", "cat", "cut", "tr", "less", "more", "grep", "rg", "nl", "column", "jq"))   # read what is piped in, run nothing
-STDIN_MODULES = frozenset(("code", "codeop", "pdb", "runpy", "cprofile", "profile", "trace", "timeit", "idlelib", "pydoc", "doctest", "pickle"))   # standard modules that run or load what they read from stdin
-PROGRAM_CODE = re.compile(r"\b(?:eval|exec|compile|system|popen|spawn|Function|__import__|runpy|import_module)|\$\(|`|\bqx\b")   # a program text that evaluates input, or a substitution
-PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))
-NODE_FLAG = re.compile(r"--(?:no-warnings|no-deprecation|trace-warnings|enable-source-maps|use-strict|harmony|max-old-space-size=\d+|input-type=\w+)")
-NODE_VALUED = frozenset(("-r", "--require", "--import", "--loader", "--experimental-loader", "--input-type"))
-PERL_PROGRAM = re.compile(r"-[lanpwWtTuU0-9]*[eE]")   # -e -ne -lane -pe -0777ne: the program text is the next word
-PERL_FLAGS = re.compile(r"-[lanpwWtTuU0-9]+|-[MmIF]\S+")
+PY_DATA_MODULES = frozenset(("json.tool",))   # modules `python -m` may run on a download: they read it as data
+PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))   # plain flags: none takes a value or runs code
 
 
 def _shell_tokens(t):
@@ -1393,54 +1405,13 @@ def _text_words(v, i):
     return None
 
 
-def _own_program(kind, a):
-    """Does this interpreter, given the words `a` after its name, run a module, a program text or a script file of its own, and
-    never standard input as the program? Any option it does not know counts as no."""
-    def text_ok(s):
-        return bool(s) and not PROGRAM_CODE.search(s)
-    def script_ok(w):
-        name = re.split(r"[\\/]", w)[-1]
-        return not (STDIN_FILE.match(w) or name in ("", "stdin", "0") or re.search(r"[$`]", name))
-    i, n = 0, len(a)
-    while i < n:
-        w = a[i]
-        if kind == "python":
-            if w in ("-m", "-c") or (len(w) > 2 and w[:2] in ("-m", "-c")):
-                v = (a[i + 1] if i + 1 < n else "") if len(w) == 2 else w[2:]
-                if w[:2] == "-c":
-                    return text_ok(v)
-                return bool(re.fullmatch(r"[A-Za-z_][\w.]*", v)) and v.split(".")[0].lower() not in STDIN_MODULES
-            if w in PY_FLAGS:
-                i += 1
-            elif w in ("-X", "-W"):
-                i += 2
-            elif w.startswith("-"):
-                return False
-            else:
-                return script_ok(w)
-        elif kind == "node":
-            if w in ("-e", "--eval", "-p", "--print"):
-                return i + 1 < n and text_ok(a[i + 1])
-            if w.startswith(("--eval=", "--print=")):
-                return text_ok(w.split("=", 1)[1])
-            if w in NODE_VALUED:
-                i += 2
-            elif NODE_FLAG.fullmatch(w):
-                i += 1
-            elif w.startswith("-"):
-                return False
-            else:
-                return script_ok(w)
-        else:   # perl
-            if PERL_PROGRAM.fullmatch(w):
-                return i + 1 < n and text_ok(a[i + 1])
-            if PERL_FLAGS.fullmatch(w):
-                i += 1
-            elif w.startswith("-"):
-                return False
-            else:
-                return script_ok(w)
-    return False
+def _python_data_module(a):
+    """Is this Python, given the words `a` after its name, run as `-m <module>` for a module of PY_DATA_MODULES, with only plain
+    flags (PY_FLAGS) before the -m? The words after the module are its own arguments."""
+    i = 0
+    while i < len(a) and a[i] in PY_FLAGS:
+        i += 1
+    return i + 1 < len(a) and a[i] == "-m" and a[i + 1] in PY_DATA_MODULES
 
 
 WAIVER_ERRORS = []   # what a waiver raised, if anything (a test reads it); a waiver that raises waives nothing
@@ -1517,9 +1488,7 @@ def _waived(name, text, ps):
                 return False
             si, pj = tk[0], tk[0] - 1
             v = vals[si]
-            n = base_name(v[0]).lower()
-            kind = "python" if PYFAM.fullmatch(n) else (n if n in ("node", "perl") else "")
-            if not kind or not _own_program(kind, v[1:]):
+            if not PYFAM.fullmatch(base_name(v[0]).lower()) or not _python_data_module(v[1:]):
                 return False
             pv = vals[pj]
             if first[pj] >= len(pv) or base_name(pv[first[pj]]).lower() not in ("curl", "wget") \
@@ -1533,8 +1502,21 @@ def _waived(name, text, ps):
     return True
 
 
-def deny(why):
+def options():
+    """(strict, off) from the plugin options Claude Code exports to the hook (CLAUDE_PLUGIN_OPTION_<KEY>, key upper-cased); the hook
+    reads its own environment and nothing else, so nothing a command does can change it. STRICT not set, empty, or off / false / no / 0
+    (any case) is light; any other value is strict, so a value the hook cannot read fails closed. `off` is the set of rule names in
+    RULES_OFF (commas or blanks between, any case); strict ignores it."""
+    strict = os.environ.get("CLAUDE_PLUGIN_OPTION_STRICT", "").strip().lower() not in ("", "off", "false", "no", "0")
+    if strict:
+        return True, frozenset()
+    return False, frozenset(w for w in re.split(r"[\s,]+", os.environ.get("CLAUDE_PLUGIN_OPTION_RULES_OFF", "").lower()) if w)
+
+
+def deny(why, name=None):
     msg = f"bash-guard: {why}"
+    if name:
+        msg += " [rule %s%s]" % (name, ", always on" if name in FLOOR else "")
     if len(msg) > MAX_REASON:
         msg = msg[:MAX_REASON - 1] + "…"   # a whole reason, ellipsis included, is at most MAX_REASON characters
     print(json.dumps({"hookSpecificOutput": {
@@ -1544,6 +1526,16 @@ def deny(why):
 
 
 def main():
+    strict = options()[0]
+    try:
+        _main()
+    except Exception:
+        if not strict:
+            raise   # light: as before, the hook fails and the call goes through
+        deny("internal error; strict guards fail closed")
+
+
+def _main():
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
@@ -1581,9 +1573,12 @@ def main():
             leave()
             return
     text = ps_text(pre) if ps else (pre if many_heredocs(pre) else strip_heredocs(pre))   # no heredocs in PowerShell
+    strict, off = options()
     for (pat, why), name in zip(RULES, RULE_NAMES):
+        if not strict and name not in FLOOR and (name in LIGHT_OFF or name in off):
+            continue
         if re.search(pat, text, re.I | re.S) and not (name in WAIVABLE and not tag and waived(name, text, ps)):
-            deny(why)
+            deny(why, name)
             return
     why = None if early else gate()
     if why:
