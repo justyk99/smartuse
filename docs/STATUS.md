@@ -1,12 +1,12 @@
 STATUS: smartuse · updated 2026-11-10
 FINISH LINE: smartuse 1.0, driven by the plan in docs/ROADMAP.md (the old STATUS: "drive smartuse to 1.0")
 Done when (assumed from the old Next list): 1 0.6.0 recall released 2 0.7.0 paid-call guard released 3 the 1.0 items on docs/ROADMAP.md closed
-Now: maintainer said "go ship" · review 8 (of b248f59) found 2 new PowerShell majors → round J merged (f55adc8, plan §7g: block-comment and Start-Process tags; builder's T1 fresh 711 · run 269; full T2 NOT run on J) · review 9 (of f55adc8) → plan §7h: widen the Start-Process tag (round K) · owner decision plan §7i (996b19c): drop `~/.claude.json` from the credential rule · round K + §7i code: STOPPED half-done by the maintainer, UNCOMMITTED in the worktree .claude/worktrees/sec-j (branch sec-j at 3075083; 9 files modified, docs half done) · nothing pushed
-Next: Claude: finish round K + §7i in sec-j (plan §7h, §7i), cherry-pick onto the dev branch, T2 one suite at a time, review 10; then push on the maintainer's word | maintainer: .smartuse-terms.local, then "push"; demo Thu 12 Nov
-NEEDS YOU (1): at ship: write .smartuse-terms.local on this machine (one private term per line), then say "push" (CI on main red until then)
+Now: maintainer said "go ship" · rounds J (f55adc8, §7g) and K (1b6ebab, §7h) closed review 8's and 9's PowerShell majors as §7e tags · review 10 (of 1b6ebab): no new major; one 0.6.1-class limit documented · T2 green at 1b6ebab, each suite alone: run 272 · ledger 46 · until-done 40 · file-guard 26 · heartbeat 121 · ab 36 · watch 63 · wait 187 · fresh 722 · recall 210 · term-scan 6 · owner decision §7i (drop `~/.claude.json` from the credential rule) NOT built: the auto-mode safety check refused the edit · nothing pushed
+Next: maintainer: approve or skip §7i; .smartuse-terms.local; "push" → Claude: term-scan --history, push | demo Thu 12 Nov
+NEEDS YOU (2): 1 §7i: approve the one-line RULES edit at the prompt, or skip it to 0.6.1 2 at ship: write .smartuse-terms.local (one private term per line), then say "push" (CI on main red until then)
 ## Last 3 cards
+- 2026-11-10 review 10 of round K: no new major; ship-ready pending the maintainer's push
 - 2026-11-10 round H reverted after review 7 found three regressions it introduced (a quadratic regex past the hook timeout, an option walk and a quote reading that turned denies into allows); code back to round G
-- 2026-11-10 direction change §7e after five review rounds kept finding crafted-input classes (planner on claude-fable-5-1 agreed; owner may veto)
 - 2026-11-10 phase 6 at d47d901: all scripted scenarios PASS, live PowerShell and Monitor denies confirmed on Claude Code 2.1.321
 ## Unknowns
 - open, pre-existing, documented: some ways of handing a command to another shell are not yet recognised (review rounds 6–7) → 0.6.1 or round I
