@@ -55,6 +55,10 @@ Windows: Git Bash converts POSIX paths in arguments and environment variables fo
 stdin, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"); stdin is read as bytes and decoded
 as UTF-8 (Windows Python would decode a pipe in the ANSI code page and raise on the first non-ASCII byte, losing the event);
 the renderers print UTF-8 ("·") whatever the console code page (stdout is reconfigured in main()).
+The owner's switches (0.6.1 F5b): SessionStart stores `config` {strict, rules_off, wait_gate} in status.json, the CLAUDE_PLUGIN_OPTION_*
+texts as this hook sees them (None = not set). While valid rule names are off and strict is not on (a strict text that is not off /
+false / no / 0 counts as strict), --line ends " · N rule(s) off" and SessionStart prints one {"systemMessage": "smartuse: rules off: a, b"}
+(not for source "compact"). Unknown names and the floor rules do not count. This is the one thing a hook run prints.
 Never blocks a turn. Any error -> exit 0 silently (a heartbeat must never stop the work).
 """
 import json, os, sys, re, time, datetime, pathlib
@@ -64,6 +68,11 @@ EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Post
           "Notification", "Stop", "SessionEnd"}
 WAITS = ("idle_prompt", "permission_prompt")
 DONE_KEEP = 32   # finished tool_use_ids kept in status.json (`done`)
+# The rule names bash-guard.py knows (its RULE_NAMES), copied here because hooks never import each other. This copy MUST match
+# bash-guard.py's RULE_NAMES; heartbeat-test.sh reads both files as text and compares them. FLOOR_RULES are on whatever the owner types.
+KNOWN_RULES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "claude-json", "secrets-dir",
+               "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
+FLOOR_RULES = ("human-only", "trust-pin", "config-switch")
 STALE_AGENT_S = 3 * 3600
 PREFIX = "smartuse · "
 
@@ -246,6 +255,35 @@ def unlock(fd):
         pass
 
 
+# ---------------------------------------------------------------- the owner's switches (plugin options, read from the hook's own environment)
+
+def config_now():
+    """The three plugin options as this hook process sees them: the CLAUDE_PLUGIN_OPTION_<KEY> texts (None = not set)."""
+    out = {}
+    for key in ("strict", "rules_off", "wait_gate"):
+        v = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
+        out[key] = v[:500] if isinstance(v, str) else None
+    return out
+
+
+def strict_on(v):
+    """Strict is off for off / false / no / 0 and for nothing; any other text (on, true, yes, 1 or one that cannot be read) counts as strict."""
+    t = str(v if v is not None else "").strip().lower()
+    return t not in ("", "off", "false", "no", "0")
+
+
+def rules_off(cfg):
+    """The valid rule names the owner has switched off, in the order typed: none while strict is on. Names are separated by commas or blanks;
+    a name this file does not know and the floor rules (always on) do not count."""
+    if not isinstance(cfg, dict) or strict_on(cfg.get("strict")):
+        return []
+    out = []
+    for n in re.split(r"[,\s]+", str(cfg.get("rules_off") or "").lower()):
+        if n in KNOWN_RULES and n not in FLOOR_RULES and n not in out:
+            out.append(n)
+    return out
+
+
 # ---------------------------------------------------------------- state machine
 
 def fresh(sid, now):
@@ -312,6 +350,7 @@ def apply(st, ev, data, now, sdir):
             st["compactions"] = to_int(st.get("compactions")) + 1
             st["compact_at"] = iso(now)
         st["source"] = data.get("source")
+        st["config"] = config_now()
     elif st is None or st.get("session_id") != sid:
         if ev == "SessionEnd" and st is not None:
             return None   # a dying session never overwrites the live one
@@ -378,12 +417,18 @@ def on_event():
         sdir = state_dir(project_dir(data), create=True)
         path = sdir / "status.json"
         fd = lock(sdir)
+        msg = ""
         try:
             st = apply(read_dict(path), ev, data, now, sdir)
             if st is not None:
                 write_json(path, st)
+                if ev == "SessionStart" and data.get("source") != "compact":   # the one line a hook run may print: which rules the owner has switched off
+                    off = rules_off(st.get("config"))
+                    msg = ("smartuse: rules off: " + ", ".join(off)) if off else ""
         finally:
             unlock(fd)
+        if msg:
+            print(json.dumps({"systemMessage": msg}))
     except Exception:
         pass
 
@@ -486,6 +531,9 @@ def render(sdir, now=None, name=None):
                 state = "working"
                 body = "working · " + (f"last {lt.get('name')} {since(lt.get('at'), now)}" if lt and calls else f"thinking {fmt_dur(quiet)}") + f" · {n_calls}"
     body += routing_suffix(r)
+    n_off = len(rules_off(st.get("config"))) if st else 0
+    if n_off:
+        body += f" · {n_off} rule{'' if n_off == 1 else 's'} off"
     if st and to_int(st.get("compactions")) > 0:
         body += f" · squeezed {to_int(st.get('compactions'))}×" + (f" (last {hhmm(st.get('compact_at'))})" if hhmm(st.get("compact_at")) else "")
     return {"state": state, "line": flag + PREFIX + body, "short": flag + body, "status": st}

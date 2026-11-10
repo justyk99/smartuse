@@ -503,4 +503,57 @@ for b in bad:
 PY
 )
 case "$HC" in *$'\n'OK*) echo "PASS F1 hooks.json: $(printf '%s\n' "$HC" | head -1)";; *) echo "FAIL F1 hooks.json: $HC"; fail=1;; esac
+# --- 0.6.1 F5b: the switch is visible. SessionStart stores `config` (strict, rules_off, wait_gate: the CLAUDE_PLUGIN_OPTION_* texts as the
+# hook sees them; None when unset) in status.json. While valid rule names are off and strict is not on, --line ends ` · N rule(s) off` and
+# SessionStart prints ONE systemMessage naming them (E5 decides whether the user sees it; the fallback is stderr + exit 2). A name the
+# hook does not know, and the three on the floor (human-only, trust-pin, config-switch), do not count. Strict on, or a strict value the
+# hook cannot read as on or off (counts as strict), shows nothing. Every other run still prints nothing.
+evo() { OUTO=$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py"; echo "rc=$?"); }   # the event in $1, the hook's output + rc in $OUTO; the caller sets the option variables
+SS() { printf '%s' "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"$1\",\"source\":\"${2:-startup}\",$C}"; }
+CLAUDE_PLUGIN_OPTION_RULES_OFF="force-push" evo "$(SS g1)"
+case "$OUTO" in '{"systemMessage": "smartuse: rules off: force-push"}'*"rc=0") echo "PASS F5b SessionStart with one rule off prints one systemMessage naming it, exit 0";; *) echo "FAIL F5b SessionStart message: $OUTO"; fail=1;; esac
+js "d['config']=={'strict':None,'rules_off':'force-push','wait_gate':None}" && echo "PASS F5b --json: config stored as the hook saw it (unset options are None)" || { echo "FAIL F5b config: $(py -c "import json,sys; print(json.load(open(sys.argv[1])).get('config'))" "$S")"; fail=1; }
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"g1\",$C}"
+expect "F5b the line ends with the suffix for one rule" " · 1 rule off"
+expect_not "F5b one rule is singular" "1 rules off"
+CLAUDE_PLUGIN_OPTION_RULES_OFF="Force-Push, sudo  nonsense,human-only,trust-pin,config-switch" evo "$(SS g2)"
+case "$OUTO" in '{"systemMessage": "smartuse: rules off: force-push, sudo"}'*"rc=0") echo "PASS F5b the message names the valid rules only (case, commas and blanks separate; unknown and floor names dropped)";; *) echo "FAIL F5b message names: $OUTO"; fail=1;; esac
+expect "F5b two valid rules: plural" " · 2 rules off"
+CLAUDE_PLUGIN_OPTION_STRICT="true" CLAUDE_PLUGIN_OPTION_RULES_OFF="force-push" evo "$(SS g3)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b strict on: Rules off is ignored, nothing printed" || { echo "FAIL F5b strict on printed: $OUTO"; fail=1; }
+expect_not "F5b strict on: no suffix" "rule"
+CLAUDE_PLUGIN_OPTION_STRICT="maybe" CLAUDE_PLUGIN_OPTION_RULES_OFF="force-push" evo "$(SS g4)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b a strict value that is neither on nor off counts as strict: nothing printed" || { echo "FAIL F5b unreadable strict printed: $OUTO"; fail=1; }
+expect_not "F5b unreadable strict: no suffix" " off"
+CLAUDE_PLUGIN_OPTION_STRICT="false" CLAUDE_PLUGIN_OPTION_WAIT_GATE="on" CLAUDE_PLUGIN_OPTION_RULES_OFF="nonsense,human-only" evo "$(SS g5)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b only unknown and floor names: nothing printed" || { echo "FAIL F5b unknown names printed: $OUTO"; fail=1; }
+js "d['config']=={'strict':'false','rules_off':'nonsense,human-only','wait_gate':'on'}" && echo "PASS F5b --json: the three options stored as texts" || { echo "FAIL F5b config texts"; fail=1; }
+expect_not "F5b unknown and floor names: no suffix" "rule"
+evo "$(SS g6)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b SessionStart with no option set prints nothing" || { echo "FAIL F5b no options printed: $OUTO"; fail=1; }
+js "d['config']=={'strict':None,'rules_off':None,'wait_gate':None}" && echo "PASS F5b --json: nothing set -> config of three None" || { echo "FAIL F5b empty config"; fail=1; }
+CLAUDE_PLUGIN_OPTION_RULES_OFF="sudo" evo "$(SS g7)"; ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"g7\",$C}"
+CLAUDE_PLUGIN_OPTION_RULES_OFF="sudo" evo "$(SS g7 compact)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b a compact of the same session does not repeat the message" || { echo "FAIL F5b compact message: $OUTO"; fail=1; }
+expect "F5b ... and the suffix stays on the line" " · 1 rule off"
+# the literal copy of bash-guard.py's RULE_NAMES in heartbeat.py (no import between hooks) must match it; skipped while bash-guard.py has no RULE_NAMES
+CMP=$(py - "$H/heartbeat.py" "$H/bash-guard.py" <<'PY'
+import ast, sys
+def tup(path, name):
+    for n in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+            return list(ast.literal_eval(n.value))
+    return None
+mine, theirs = tup(sys.argv[1], "KNOWN_RULES"), tup(sys.argv[2], "RULE_NAMES")
+if mine is None:
+    print("BAD heartbeat.py has no KNOWN_RULES")
+elif theirs is None:
+    print("SKIP bash-guard.py has no RULE_NAMES yet (the tracks are not merged)")
+elif sorted(mine) == sorted(theirs) and len(set(mine)) == len(mine):
+    print("OK %d names" % len(mine))
+else:
+    print("BAD only in heartbeat.py: %s; only in bash-guard.py: %s" % (sorted(set(mine) - set(theirs)), sorted(set(theirs) - set(mine))))
+PY
+)
+case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; SKIP*) echo "PASS (skipped) F5b KNOWN_RULES vs RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

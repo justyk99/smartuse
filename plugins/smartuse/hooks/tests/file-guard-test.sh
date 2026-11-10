@@ -40,4 +40,68 @@ t0=$(date +%s); out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path
 t0=$(date +%s); out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"//192.0.2.7/share/proj/notes.md","content":"x"}}' | bash "$H/py.sh" "$H/file-guard.py"); t1=$(date +%s)
 case "$out" in ""|*"could not be resolved"*) ok=1;; *) ok=0;; esac   # allowed (resolved, or refused at once) or not checkable; never human-only
 [ $ok = 1 ] && [ $((t1 - t0)) -lt 10 ] && echo "PASS an ordinary file on a network share that does not answer is decided in $((t1 - t0)) s: $([ -z "$out" ] && echo allowed || echo 'denied as not checkable')" || { echo "FAIL network share, ordinary file: $((t1 - t0)) s, output '${out:0:60}'"; fail=1; }
+# --- 0.6.1 F5b: the switch is human-only. An edit of a Claude Code settings file (settings.json / settings.local.json in a .claude folder, or
+# in the folder CLAUDE_CONFIG_DIR names) is compared before and after on three values: this plugin's pluginConfigs entry (its options), its
+# enabledPlugins entry, and disableAllHooks. Any difference is denied; other edits pass. A result that cannot be parsed (or a file over 1 MB)
+# is denied when the edit names one of the three, allowed when it names none. Key names: code.claude.com/docs/en/settings-reference.
+wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it (JSON strings are not converted by Git Bash)
+swj() { # $1 tool, $2 file_path, then Write: content · Edit: old new · MultiEdit: old1 new1 old2 new2 ... -> the PreToolUse event JSON
+  py -c "
+import json,sys
+a=sys.argv[1:]; t,p=a[0],a[1]; r=a[2:]
+if t=='Write': ti={'file_path':p,'content':r[0]}
+elif t=='Edit': ti={'file_path':p,'old_string':r[0],'new_string':r[1]}
+else: ti={'file_path':p,'edits':[{'old_string':r[i],'new_string':r[i+1]} for i in range(0,len(r),2)]}
+sys.stdout.write(json.dumps({'tool_name':t,'tool_input':ti}))" "$@"
+}
+chke() { # like chk, with one environment variable: $1 VAR=value, $2 deny|allow, $3 event JSON, $4 label
+  out=$(printf '%s' "$3" | env "$1" bash "$H/py.sh" "$H/file-guard.py"); if [ "$2" = deny ]; then [ -n "$out" ] && echo "PASS deny $4" || { echo "FAIL expected deny $4"; fail=1; }; else [ -z "$out" ] && echo "PASS allow $4" || { echo "FAIL expected allow $4"; fail=1; }; fi; }
+T5=$(mktemp -d); mkdir -p "$T5/proj/.claude" "$T5/cfg" "$T5/docs"
+BASE='{"permissions":{"allow":["Bash(ls)"]},"enabledPlugins":{"smartuse@smartuse":true,"other@m":true},"pluginConfigs":{"smartuse@smartuse":{"options":{"strict":true,"rules_off":"force-push"}}}}'
+printf '%s' "$BASE" > "$T5/proj/.claude/settings.json"; printf '%s' "$BASE" > "$T5/cfg/settings.json"; printf '%s' "$BASE" > "$T5/docs/settings.json"
+SP=$(wp "$T5/proj/.claude/settings.json"); SL=$(wp "$T5/proj/.claude/settings.local.json"); CP=$(wp "$T5/cfg/settings.json"); DP=$(wp "$T5/docs/settings.json"); CD=$(wp "$T5/cfg")
+chk deny  "$(swj Write "$SP" '{"permissions":{"allow":["Bash(ls)"]},"enabledPlugins":{"smartuse@smartuse":true,"other@m":true},"pluginConfigs":{"smartuse@smartuse":{"options":{"strict":true,"rules_off":""}}}}')" "F5b Write: Rules off emptied"
+chk deny  "$(swj Write "$SP" '{"permissions":{"allow":["Bash(ls)"]},"enabledPlugins":{"smartuse@smartuse":true,"other@m":true},"pluginConfigs":{"smartuse@smartuse":{"options":{"strict":false,"rules_off":"force-push"}}}}')" "F5b Write: Strict switched off"
+chk deny  "$(swj Write "$SP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: the plugin's on/off entry set to false"
+chk deny  "$(swj Write "$SP" '{"permissions":{"allow":["Bash(ls)"]},"enabledPlugins":{"other@m":true},"pluginConfigs":{"smartuse@smartuse":{"options":{"strict":true,"rules_off":"force-push"}}}}')" "F5b Write: the plugin's on/off entry removed (absent = default)"
+chk deny  "$(swj Write "$SP" '{"disableAllHooks":true}')" "F5b Write: disableAllHooks"
+chk deny  "$(swj Edit "$SP" '"strict":true' '"strict":false')" "F5b Edit: Strict true -> false"
+chk deny  "$(swj Edit "$SP" '"smartuse@smartuse":true' '"smartuse@smartuse":false')" "F5b Edit: the on/off entry true -> false"
+chk deny  "$(swj Edit "$SP" '"permissions"' '"disableAllHooks":true,"permissions"')" "F5b Edit: adds disableAllHooks"
+chk deny  "$(swj Edit "$SP" '"rules_off":"force-push"' '"rules_off":"force-push,sudo"')" "F5b Edit: Rules off gains a name"
+chk deny  "$(swj MultiEdit "$SP" '"other@m":true' '"other@m":false' '"strict":true' '"strict":false')" "F5b MultiEdit: the second edit switches Strict off"
+chk deny  "$(swj Write "$SL" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: a settings.local.json that turns the plugin off (first write of the file)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\proj\\.claude\\settings.json","content":"{\"enabledPlugins\":{\"smartuse@smartuse\":false}}"}}' "F5b Write: backslash spelling of a settings file"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/repo/.CLAUDE/Settings.JSON","content":"{\"disableAllHooks\":true}"}}' "F5b Write: mixed case spelling"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude./settings.json ","content":"{\"disableAllHooks\":true}"}}' "F5b Write: trailing dot and space as Windows drops them"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude\\settings.json::$DATA","content":"{\"disableAllHooks\":true}"}}' "F5b Write: settings.json::\$DATA"
+chk deny  "$(swj Write "$SP" '{"enabledPlugins":{"smartuse@smartuse":false},}')" "F5b Write: a result that does not parse and names enabledPlugins"
+chk deny  "$(swj Write "$SP" '{"\u0065nabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: a key spelled with a JSON escape (parsed, compared)"
+chk deny  "$(swj Write "$SP" '{"\u0065nabledPlugins": ,}')" "F5b Write: an unparsable result with a JSON escape (fail closed)"
+chk deny  "$(swj Edit "$SP" '"nothing-like-this"' '"disableAllHooks":true')" "F5b Edit: old_string not found but new_string names a switch (fail closed)"
+chk allow "$(swj Write "$SP" '{"permissions":{"allow":["Bash(ls)"]},"enabledPlugins":{"smartuse@smartuse":true,"other@m":true},"pluginConfigs":{"smartuse@smartuse":{"options":{"strict":true,"rules_off":"force-push"}}},"statusLine":{"type":"command","command":"x"}}')" "F5b Write: a status line added, the three values unchanged"
+chk allow "$(swj Write "$SP" "$BASE")" "F5b Write: a rewrite that changes nothing"
+chk allow "$(swj Edit "$SP" '"permissions"' '"statusLine":{"type":"command","command":"x"},"permissions"')" "F5b Edit: adds a status line"
+chk allow "$(swj Edit "$SP" '"other@m":true' '"other@m":false')" "F5b Edit: another plugin switched off"
+chk allow "$(swj MultiEdit "$SP" '"other@m":true' '"other@m":false' '"Bash(ls)"' '"Bash(ls)","Bash(pwd)"')" "F5b MultiEdit: edits that touch none of the three"
+chk allow "$(swj Write "$SL" '{"model":"x"}')" "F5b Write: a first settings.local.json without the plugin"
+chk allow "$(swj Write "$SL" '{ this is not json }')" "F5b Write: an unparsable result that names none of the three, over a file that holds none"
+chk deny  "$(swj Write "$SP" '{ this is not json }')" "F5b Write: an unparsable result over a file that holds the switches (they would be lost)"
+chk allow "$(swj Edit "$SP" '"nothing-like-this"' '"model":"x"')" "F5b Edit: old_string not found and nothing named"
+chk allow "$(swj Write "$DP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: a settings.json outside any .claude folder"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/settings.json.bak","content":"{\"disableAllHooks\":true}"}}' "F5b Write: settings.json.bak is not a settings file"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/notes/settings.json","content":"{\"disableAllHooks\":true}"}}' "F5b Write: .claude/notes/settings.json is not a settings file"
+chke "CLAUDE_CONFIG_DIR=$CD" deny "$(swj Write "$CP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: settings.json in the folder CLAUDE_CONFIG_DIR names"
+chke "CLAUDE_CONFIG_DIR=$CD" allow "$(swj Edit "$CP" '"other@m":true' '"other@m":false')" "F5b Edit: that file, another plugin switched off"
+chke "SMARTUSE_NO_SUCH=1" allow "$(swj Write "$CP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: the same file with CLAUDE_CONFIG_DIR not set is just another settings.json"
+# a file over 1 MB cannot be compared: denied when the edit names a switch, allowed when it names none
+BIG="$T5/big/.claude"; mkdir -p "$BIG"; { printf '{}'; head -c 1100000 /dev/zero | tr '\0' ' '; } > "$BIG/settings.json"; BP=$(wp "$BIG/settings.json")
+chk deny  "$(swj Edit "$BP" '{}' '{"disableAllHooks":true}')" "F5b Edit: a settings file over 1 MB and the edit names a switch"
+chk allow "$(swj Edit "$BP" '{}' '{"model":"x"}')" "F5b Edit: a settings file over 1 MB and the edit names none"
+case "$OSTYPE" in   # a link to the folder: the resolved path is the settings file
+  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  *) ln -s "$T5/proj/.claude" "$T5/lnk"; chk deny "$(swj Write "$T5/lnk/settings.json" '{"disableAllHooks":true}')" "F5b Write: settings.json through a symlinked .claude folder"
+     ln -s "$T5/proj/.claude/settings.json" "$T5/docs/linked.json"; chk deny "$(swj Write "$T5/docs/linked.json" '{"disableAllHooks":true}')" "F5b Write: a link whose target is a settings file";;
+esac
+rm -rf "$T5"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
