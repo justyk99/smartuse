@@ -90,12 +90,19 @@ RULES = [
     # inside another program or built at run time is not seen. Linear: every repetition is bounded or cannot start inside its own run.
     (r"(?<![\w.-])claude(?:\.exe)?(?:\s+-[^\s;&|]+)*\s+plugins?\s+(?:"
      r"(?:configure|config|enable|disable|uninstall|remove|rm)(?:\s+[^\s;&|]+){0,8}?\s+(?:[\"']?smartuse(?![\w-])|--all(?![\w-]))"
+     r"|marketplaces?\s+(?:remove|rm|delete)(?:\s+[^\s;&|]+){0,8}?\s+[\"']?smartuse(?![\w-])"
      r"|install(?:\s+[^\s;&|]+){0,8}?\s+[\"']?smartuse(?![\w-])[^\s;&|]*(?:\s+[^\s;&|]+){0,16}?\s+(?:--[\w-]*(?:config|option|set)[\w-]*|(?:strict|rules_off|wait_gate)\b))"
-     r"|^(?=.*(?:pluginConfigs|enabledPlugins|disableAllHooks))(?:"
+     r"|^(?=.*(?:pluginConfigs|enabledPlugins|disableAllHooks|CLAUDE_PLUGIN_OPTION_))(?:"
      r"(?=.*(?:>\s*[^\s;&|>]*(?<![\w.-])settings(?:\.local)?\.json(?![\w-])"
      r"|\b(?:tee|cp|mv|sponge|install|sed\s+-i)\b(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*(?<![\w.-])settings(?:\.local)?\.json(?![\w-])))"
      r"|(?=.*(?<![\w.-])settings(?:\.local)?\.json(?![\w-]))(?=.*\b(?:python3?|py\.sh|node|perl|ruby|set-content|add-content|out-file|tee-object)\b)"
-     r"(?=.*(?:write|dump|[\"'][wa][b+]?[\"']|content|out-file)))",
+     r"(?=.*(?:write|dump|[\"'][wa][b+]?[\"']|content|out-file)))"
+     # (3) whatever else the text names: a redirect, delete, move, truncate or replace whose target is a settings file (settings.json /
+     # settings.local.json inside a .claude folder, either slash); copying FROM it is a read, so cp / copy-item count only with it last
+     r"|>\|?\s*[^\s;&|>]*\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])"
+     r"|(?<![\w.-])(?:rm|unlink|shred|mv|ln|truncate|tee|sponge|install|sed\s+-i|remove-item|move-item|set-content|add-content|out-file|clear-content)(?![\w-])"
+     r"(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])"
+     r"|(?<![\w.-])(?:cp|copy|copy-item|xcopy|robocopy)(?![\w-])(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])[\"']?(?=\s*(?:$|[;&|)\n]))",
      "switching smartuse's guards is the owner's action: /plugin configure or /config"),
 ]
 # One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.

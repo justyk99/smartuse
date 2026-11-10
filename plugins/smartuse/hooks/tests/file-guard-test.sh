@@ -107,6 +107,35 @@ chke "SMARTUSE_NO_SUCH=1" allow "$(swj Write "$CP" '{"enabledPlugins":{"smartuse
 BIG="$T5/big/.claude"; mkdir -p "$BIG"; { printf '{}'; head -c 1100000 /dev/zero | tr '\0' ' '; } > "$BIG/settings.json"; BP=$(wp "$BIG/settings.json")
 chk deny  "$(swj Edit "$BP" '{}' '{"disableAllHooks":true}')" "F5b Edit: a settings file over 1 MB and the edit names a switch"
 chk allow "$(swj Edit "$BP" '{}' '{"model":"x"}')" "F5b Edit: a settings file over 1 MB and the edit names none"
+# --- review 11 (M2a): the `env` block of a settings file can set CLAUDE_PLUGIN_OPTION_* (the variables the guards read as the plugin's options),
+#     so every env entry with that prefix (any case) is compared too: adding, changing or removing one is the owner's action. Other entries pass.
+mkdir -p "$T5/p3/.claude"; ENVB='{"model":"x","env":{"CLAUDE_PLUGIN_OPTION_STRICT":"true","FOO":"1"}}'; printf '%s' "$ENVB" > "$T5/p3/.claude/settings.json"; P3=$(wp "$T5/p3/.claude/settings.json")
+chk deny  "$(swj Write "$P2" '{"model":"x","env":{"CLAUDE_PLUGIN_OPTION_STRICT":"false"}}')" "M2a Write: adds a CLAUDE_PLUGIN_OPTION_ env entry to a file that holds none"
+chk deny  "$(swj Edit "$P2" '"model":"x"' '"env":{"claude_plugin_option_rules_off":"sudo"}')" "M2a Edit: adds one spelled in lower case"
+chk deny  "$(swj Edit "$P3" '"CLAUDE_PLUGIN_OPTION_STRICT":"true"' '"CLAUDE_PLUGIN_OPTION_STRICT":"false"')" "M2a Edit: changes the value of an existing entry"
+chk deny  "$(swj Write "$P3" '{"model":"x","env":{"FOO":"1"}}')" "M2a Write: removes the entry"
+chk deny  "$(swj Write "$P2" '{ not json, CLAUDE_PLUGIN_OPTION_STRICT }')" "M2a Write: an unparsable result that names a CLAUDE_PLUGIN_OPTION_ variable"
+chk allow "$(swj Write "$P2" '{"model":"x","env":{"FOO":"2"}}')" "M2a Write: adds an env entry with another name"
+chk allow "$(swj Edit "$P3" '"FOO":"1"' '"FOO":"2"')" "M2a Edit: changes another env entry, the CLAUDE_PLUGIN_OPTION_ one stays"
+chk allow "$(swj Write "$P3" "$ENVB")" "M2a Write: a rewrite that changes nothing"
+chk allow "$(swj Write "$P2" '{"model":"x","env":{"MY_CLAUDE_PLUGIN_OPTION_X":"1"}}')" "M2a Write: a name that only contains the prefix"
+# decided within a second inside the process: a 30 KB settings file of 1,500 env entries, one of them a CLAUDE_PLUGIN_OPTION_ variable
+r=$(py - "$H/file-guard.py" "$P2" <<'PY'
+import contextlib, io, json, sys, time, types
+src = open(sys.argv[1], encoding="utf-8").read()
+env = {"VAR_%d" % i: "value-%d" % i for i in range(1500)}
+env["CLAUDE_PLUGIN_OPTION_RULES_OFF"] = "sudo"
+ev = {"tool_name": "Write", "tool_input": {"file_path": sys.argv[2], "content": json.dumps({"model": "x", "env": env})}}
+sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps(ev).encode()))
+out = io.StringIO()
+t0 = time.monotonic()
+with contextlib.redirect_stdout(out):
+    exec(compile(src, "file-guard", "exec"), {"__name__": "timing"})
+dt = time.monotonic() - t0
+print(("ok %.2f" % dt) if "smartuse's switches" in out.getvalue() and dt < 1.0 and len(ev["tool_input"]["content"]) > 30000 else "bad %.2f %s" % (dt, out.getvalue()[-90:]))
+PY
+)
+case "$r" in ok*) echo "PASS deny a 30 KB settings file of 1,500 env entries is judged in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL env timing -> '${r:0:120}'"; fail=1;; esac
 # CLAUDE_CONFIG_DIR on a case-insensitive file system (Windows, macOS): the same folder in another case is the same folder. On Linux it is not.
 CDU=$(py -c "import sys; print(sys.argv[1].upper())" "$CD"); CPU=$(py -c "import sys; print(sys.argv[1].upper())" "$CP")
 case "$OSTYPE" in
