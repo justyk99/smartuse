@@ -1,6 +1,6 @@
 # Security profiles — pick one, paste it (2026-10-15)
 
-Full reasoning: `guides/security-and-permissions-2026.md`. Deny rules and hooks fire in every mode, `ask` rules only in `default` / `auto`.
+These profiles are permission presets for your `settings.json`. They are not the plugin's guard level (light or Strict): that is set in `/plugin configure smartuse@smartuse` (see "Switches" in the README). Deny rules and hooks fire in every mode, `ask` rules only in `default` / `auto`.
 
 ## Deny block (every profile)
 
@@ -19,11 +19,18 @@ Full reasoning: `guides/security-and-permissions-2026.md`. Deny rules and hooks 
 
 ## Guard hook (every profile)
 
+The plugin registers it itself (`plugins/smartuse/hooks/hooks.json`), so there is nothing to paste:
 ```json
-"hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [
-  { "type": "command", "command": "python3 \"$HOME/.claude/hooks/bash-guard.py\"", "timeout": 10 } ] } ] }
+"hooks": { "PreToolUse": [ { "matcher": "Bash|PowerShell", "hooks": [
+  { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" --guard \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"", "timeout": 10 } ] } ] }
 ```
-Script: `library/hooks/global/bash-guard.py` (pipe-to-shell · sudo · rm -rf of / ~ . * · chmod 777 · credential-file reads · destructive SQL via shell · force push · svn revert; heredoc bodies are data). Test: `bash ~/.claude/hooks/tests/run.sh` → `ALL PASS` (32 cases).
+`py.sh` is the launcher: it runs the hook with `python3`, else `python`, else `py -3` (a stock Windows install has only the Store stub as `python3`).
+
+Script: `plugins/smartuse/hooks/bash-guard.py` (pipe-to-shell · sudo · rm -rf of / ~ . * · chmod 777 · credential-file reads · destructive SQL via shell · force push · svn revert · the human-only files · the switches; heredoc bodies are data).
+
+Test: `bash plugins/smartuse/hooks/tests/run.sh` → `ALL PASS` (539 cases).
+
+In the light level the guard does not deny a shell read of `~/.claude.json` (the `claude-json` rule is off). The `Read(~/.claude.json)` deny above covers the Read tool, and Strict guards denies the shell read.
 
 ## Profiles
 
@@ -53,4 +60,4 @@ ALTER ROLE db_datareader ADD MEMBER claude_ro; GRANT VIEW DEFINITION TO claude_r
 
 ## Check it worked
 
-`/permissions` lists the denies · `bash ~/.claude/hooks/tests/run.sh` → ALL PASS · `SELECT 1; SELECT 2` through each MCP → refused · `/context` shows only what you expect.
+`/permissions` lists the denies · `bash plugins/smartuse/hooks/tests/run.sh` → ALL PASS · `/smartuse:doctor` → five PASS lines · `SELECT 1; SELECT 2` through each MCP → refused · `/context` shows only what you expect.

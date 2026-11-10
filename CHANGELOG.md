@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.6.1 — unreleased, "lighter, faster, switchable"
+Claude now waits on fewer hooks, two classes of honest command run, a missing Python is said aloud, and the owner has a switch that Claude cannot flip. Plan and decisions: `docs/notes/light-fast-plan.md`.
+- **Changed defaults.** Light is the default level, also when no option is set; Strict is one switch (`/plugin configure smartuse@smartuse`).
+  - The wait gate is off unless Strict guards or the Wait gate option is on. The adapter's `wait_gate: off` still wins per repo.
+  - A read of `~/.claude.json` is denied only in Strict (the `claude-json` rule, off in light; light behaves as 0.6.0 did).
+  - `git push --force-with-lease` is allowed in light (the `force-with-lease` rule). `git push --force` is still denied.
+  - A download piped into Python is allowed only for `python -m json.tool`. Program texts, script files, Node and Perl are denied as before.
+  - `secrets-dir` stays on in light.
+- **The heartbeat leaves the waiting path** (F1). Its three tool-event handlers are `async`, so Claude does not wait for them.
+  - Hooks Claude waits on per call: Bash 3 → 1, Read 2 → 0, Edit 3 → 1 (counted from `hooks.json`).
+  - A new `PostToolUseFailure` handler clears `running` when a call fails.
+  - The last 32 finished call ids (`done`) keep a late "before" from undoing its "after".
+  - On Windows the state file is now locked with `msvcrt`.
+- **Two false denies fixed** (F2). A download piped into `python -m json.tool` runs. The word `sudo` inside a commit, tag or note message, `echo`, `printf`, `grep`, `rg`, or a `gh` title or body runs. A waiver is never given to a command the guard cannot read cleanly.
+- **A missing Python is said aloud** (F3). `py.sh --say-missing` prints one sentence at session start and exits 2 (the session goes on).
+  - The sentence: `smartuse: Python 3 was not found (tried python3, python, py -3). Its guards, gates and status line are OFF. Install Python 3.9 or newer and restart Claude Code.`
+  - With Python, nothing changes.
+  - An empty `check:` line in the adapter no longer takes the next line as its value (until-done).
+- **A guard level and a switch per rule** (F4). Three plugin options: Strict guards, Rules off, Wait gate. Every deny ends `[rule <name>]`. Rules off takes names from the list in the README; unknown names change nothing. Strict ignores Rules off, and an unexpected error in a guard denies the call.
+- **The switch is human-only** (F5). `human-only`, `trust-pin` and the new `config-switch` cannot be switched off (`[rule <name>, always on]`).
+  - `file-guard` denies an edit of a Claude Code settings file that changes the plugin's options, its on/off entry, the switch that turns all hooks off, or a `CLAUDE_PLUGIN_OPTION_…` entry of `env`.
+  - `config-switch` denies the plugin command's configure, enable, disable, uninstall and marketplace-remove verbs for smartuse, and an install that sets options.
+  - It also denies a shell write, delete, move or overwrite of a settings file.
+  - Rules that are off show at session start and as `· N rules off` on the status line.
+- **Strict means on** (F6). `py.sh --guard`: with no Python and Strict on, a guarded call is refused with a sentence; in light it passes as before. In Strict `file-guard` denies on an unexpected error.
+- **`/smartuse:doctor`** (F7). Five PASS or FAIL lines (Python, hooks registered, heartbeat live, bash-guard live, file-guard live) with the fix, and the level with the rules off. Two canaries prove the guards: `: smartuse-doctor-canary` and a write to `~/.claude/smartuse/doctor-canary` are denied. Each compares one exact string, so nothing else is denied.
+- **Docs and measure** (F8, F0). README "Switches" and a before/after table of what Claude waits for (method M, Claude Code 2.1.322: 0.83 s Bash, 0.76 s Read, 0.98 s Edit, 0.54 s Stop before; the "after" column is filled in by the live pass). SECURITY lists what light turns off and the limits of the switch. ROADMAP: 0.6.2 parked follow-ups, "every rule linear" moved up.
+- **Review 11 and one fix round.** Two majors, both fixed:
+  - A command that deleted, moved or replaced a whole settings file passed `config-switch`, and the marketplace-remove verb was missing.
+  - The `env` block of a settings file can set `CLAUDE_PLUGIN_OPTION_*` for the hooks.
+  - Limits kept, said by class: text-only reading of shell commands, slow dense texts on the rules split out in 0.6.1, the plugin's installed files not guarded, a hard link to a settings file, out-of-order background events.
+- **The rule for changing `RULES`** is written down (`docs/notes/light-fast-plan.md` §6): name the class, cases first, a differential over every command string, a timing case, a fresh review.
+- Tests: `run 539 · ledger 46 · until-done 50 · file-guard 91 · heartbeat 178 · ab 36 · watch 63 · wait 196 · fresh 722 · recall 210`, plus `term-scan-test` 6, each suite run alone, 2026-11-10 (before the live pass).
+
 ## 0.6.0 — 2026-11-10, "the summary is not a source"
 A long session gets compacted: Claude keeps a model-written summary and loses the exact words, and can then work from the summary while the job's real files sit unread on disk. Claude Code already reloads CLAUDE.md, memory and a few recent files after a compaction; it does not know which files are this job's sources, and nothing refuses a send made from the summary. recall adds the refusal and the pointer, not a store (design and contract: `docs/notes/recall-design.md`).
 - **The fresh-source gate** (in bash-guard). The adapter names the job's `sources:` and the commands (`publish:`) or upload tools (`publish_tools:`) that send its output. Such a call is denied until every source has a Read in this session after the last compaction; the reason names the unopened files. Files Claude Code re-attaches after a compaction are not Reads and do not count (checked on a real transcript). A send is found behind `timeout`, `env`, `nohup`, `sudo`, `winpty` and other wrappers, inside `$(…)` and backticks, in PowerShell (the hook matcher is `Bash|PowerShell`), and a `-c` / `eval` string handed to another shell counts as a send while the sources are unopened (see Security review), with the script given by any path (`python -u C:/repo/send.py` matches `publish: python send.py`; `python3` and `py` are `python`). Tools: one PreToolUse entry for `mcp__` tools whose name holds upload, send, publish, post, share or submit. Fail open on detection errors, fail closed once a send matched; one 4 s deadline. Source values must be plain local paths, and links are refused, never followed.
