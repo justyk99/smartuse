@@ -48,6 +48,10 @@ Render (no model tokens):
                          same session adds one: status.json compactions + compact_at).
   --json                 status.json + "project" (folder name), "project_path", "state_dir", the derived "state" (needs_human |
                          ended | waiting_on_you | waiting_on_agent | working | stopped | waiting_on_handoff | stalled | none) and "line".
+  --doctor               (0.6.1 F7, /smartuse:doctor) at most eight lines, read-only: the Python it runs on · the plugin version (plugin.json) · the
+                         events hooks.json registers · the age of this repo's last event ("no event: the hooks are not firing, restart Claude
+                         Code") · the level, the rules off and any unknown name (the stored `config`) · whether the state folder can be
+                         written. A failing line says FAIL and carries its fix. It never creates the state folder.
   --statusline           for ~/.claude/settings.json statusLine: reads Claude Code's status JSON on stdin and prints
                          "[<model>] ctx <used>% · $<cost> · <line without the smartuse prefix>".
   --subagent-statusline  for the plugin's subagentStatusLine: one JSON line per task {"id", "content"}.
@@ -543,6 +547,61 @@ def cli_sdir():
     return state_dir(project_dir())
 
 
+def can_write(d):
+    """(ok, why): can a file be created in the state folder d, or, while d does not exist yet, in the nearest folder above it that does (what the
+    hooks' mkdir -p needs)? A throwaway file is made there and removed at once; a folder that is really a file reads as "not a folder"."""
+    try:
+        p = str(d)
+        while not os.path.exists(p) and os.path.dirname(p) != p:
+            p = os.path.dirname(p)
+        if not os.path.isdir(p):
+            return False, f"{p} is not a folder"
+        probe = os.path.join(p, f".doctor-{os.getpid()}.tmp")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        os.remove(probe)
+        return True, ""
+    except Exception as e:
+        return False, getattr(e, "strerror", None) or type(e).__name__
+
+
+def doctor_lines(sdir, now=None):
+    """--doctor: at most eight lines, read-only (the one write is the throwaway file of can_write). A failing line says FAIL and carries its fix.
+    python · plugin (plugin.json beside this file's folder, no import) · hooks registered (hooks.json) · heartbeat (age of status.json's
+    `updated`) · level, rules off and unknown names (status.json's stored `config`) · state folder."""
+    now = now or utcnow()
+    out = []
+    v = sys.version_info
+    out.append(f"python: {v[0]}.{v[1]}.{v[2]} · {sys.executable}" if v >= (3, 9)
+               else f"python: FAIL · {v[0]}.{v[1]}.{v[2]} is older than 3.9: install Python 3.9 or newer and restart Claude Code")
+    here = pathlib.Path(__file__).resolve().parent
+    meta = read_dict(here.parent / ".claude-plugin" / "plugin.json")
+    out.append(f"plugin: {meta.get('name') or 'smartuse'} {meta['version']}" if meta and meta.get("version")
+               else "plugin: FAIL · plugin.json cannot be read: reinstall the plugin")
+    hooks = (read_dict(here / "hooks.json") or {}).get("hooks")
+    out.append("hooks registered: " + ", ".join(hooks) if isinstance(hooks, dict) and hooks
+               else "hooks registered: FAIL · hooks.json cannot be read: reinstall the plugin")
+    st = read_dict(sdir / "status.json")
+    if st is None or st.get("ended") or parse_ts(st.get("updated")) is None:
+        out.append("heartbeat: FAIL · no event: the hooks are not firing, restart Claude Code")
+    else:
+        a, limit = age_s(st.get("updated"), now), stall_min() * 60
+        out.append(f"heartbeat: FAIL · last event {fmt_dur(a)} ago, older than {limit / 60:g} min: the hooks may have stopped, restart Claude Code" if a > limit
+                   else f"heartbeat: live · last event {fmt_dur(a)} ago")
+    cfg = st.get("config") if st else None
+    if isinstance(cfg, dict):
+        typed = [n for n in re.split(r"[,\s]+", str(cfg.get("rules_off") or "").lower()) if n]
+        bad = [n for i, n in enumerate(typed) if n not in KNOWN_RULES and n not in typed[:i]]
+        line = "level: " + ("strict" if strict_on(cfg.get("strict")) else "light") + " · rules off: " + (", ".join(rules_off(cfg)) or "none")
+        out.append(line + (f" · unknown name{'' if len(bad) == 1 else 's'}: {', '.join(bad)}" if bad else ""))
+    else:
+        out.append("level: unknown · no options recorded for this session: restart Claude Code")
+    ok, why = can_write(sdir)
+    out.append("state folder: writable" if ok
+               else f"state folder: FAIL · cannot be written ({why}): the heartbeat cannot save its state; check that ~/.claude/smartuse is a folder you may write to")
+    return out
+
+
 def statusline():
     try:
         data = stdin_json()
@@ -617,6 +676,8 @@ def main():
     args = sys.argv[1:]
     if "--line" in args:
         print(render(cli_sdir(), name=project_dir().name)["line"])
+    elif "--doctor" in args:
+        print("\n".join(doctor_lines(cli_sdir())))
     elif "--json" in args:
         proj, sdir = project_dir(), cli_sdir()
         hb = render(sdir, name=proj.name)
@@ -635,5 +696,5 @@ try:
 except SystemExit:
     raise
 except Exception as e:
-    if sys.argv[1:] and sys.argv[1] in ("--line", "--json", "--statusline"):
+    if sys.argv[1:] and sys.argv[1] in ("--line", "--json", "--statusline", "--doctor"):
         print(PREFIX + f"heartbeat error: {type(e).__name__}")   # a renderer still answers; hook events stay silent

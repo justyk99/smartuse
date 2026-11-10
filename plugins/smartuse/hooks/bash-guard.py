@@ -105,6 +105,8 @@ RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open",
 # plugin option rules_off, except the FLOOR, which protects the switches themselves and is always on.
 LIGHT_OFF = frozenset(("force-with-lease", "claude-json"))
 FLOOR = frozenset(("human-only", "trust-pin", "config-switch"))
+# 0.6.1 F7: the doctor's canary, a no-op if the guard is down. _main() answers it before the fresh-source gate and RULES; it is compared whole.
+DOCTOR_CANARY = ": smartuse-doctor-canary"
 
 # <<EOF … EOF  /  <<'EOF' … EOF  /  <<-EOF … EOF   (body = group 3)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
@@ -1564,6 +1566,9 @@ def _main():
         leave()
         return
     cmd = (data.get("tool_input") or {}).get("command") or ""
+    if isinstance(cmd, str) and cmd.strip() == DOCTOR_CANARY:   # 0.6.1 F7: /smartuse:doctor tries this one command; the whole trimmed text, so no other command is touched
+        deny("doctor canary — the guard is live · level: " + ("strict" if options()[0] else "light"))
+        return
     pre = strip_state_args(cmd)
     ps = tool == "PowerShell"
     def gate():   # the fresh-source block on this command's text: PowerShell is read normalised (with / for \, which is no escape there)

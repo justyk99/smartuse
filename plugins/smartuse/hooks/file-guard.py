@@ -15,6 +15,8 @@ thread for at most 3 s: a network share that does not answer must not hold the h
 longer, or resolving failed) cannot be checked, so it is denied with its own reason (fail closed).
 F5b: an edit of a Claude Code settings file that would change this plugin's options, its on/off entry or disableAllHooks is denied
 (switch_change below); the guards' level and rule switches are the owner's, set in /plugin configure or /config.
+F7: a write to `~/.claude/smartuse/doctor-canary` (the path ends in `/.claude/smartuse/doctor-canary`, nothing else) is denied first, with a
+reason that says the guard is live and the level: /smartuse:doctor has Claude try it to prove this hook answers.
 """
 import json, os, re, sys, threading
 HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter[. ]*(:.*)?$)", re.I)
@@ -147,6 +149,8 @@ def switch_change(tool, ti, paths):   # True: the call would change one of the t
         return True
     return bool(SWITCH_NAMES.search(after))   # unparsable (or over 1 MB): denied when it names a switch
 
+CANARY_TAIL = "/.claude/smartuse/doctor-canary"   # F7: the doctor's canary file (~/.claude/smartuse/doctor-canary): a write to it is denied with a reason that says the guard is live
+
 def strict_level():   # Strict guards (plugin option): anything but empty / off / false / no / 0 counts as on, so a text that cannot be read is strict
     return str(os.environ.get("CLAUDE_PLUGIN_OPTION_STRICT") or "").strip().lower() not in ("", "off", "false", "no", "0")
 
@@ -169,6 +173,10 @@ def run():
     ti = data.get("tool_input") or {}
     path = ti.get("file_path") or ti.get("notebook_path") or ""
     path = path.replace("\\", "/")
+    if norm(path).endswith(CANARY_TAIL):   # F7: /smartuse:doctor writes here to see that this guard answers; one fixed name, so nothing else is caught
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+              "permissionDecisionReason": "file-guard: doctor canary — the guard is live · level: " + ("strict" if strict_level() else "light")}}))
+        return
     deny = human_only(path) or human_only("/".join(win_part(p) for p in path.split("/"))) \
         or (re.search("smartuse", path, re.I) and any(odd_part(p) for p in path.split("/")))   # as written, as Windows reads it, odd parts
     why = "file-guard: this file is human-only (it decides what the until-done gate may execute, or which Python runs the hooks). Ask the user to edit it."

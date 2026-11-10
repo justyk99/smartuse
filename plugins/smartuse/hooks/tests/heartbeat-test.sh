@@ -599,4 +599,26 @@ print("BAD " + "; ".join(bad) if bad else "OK")
 PY
 )
 [ "$HG" = OK ] && echo "PASS F6 hooks.json: exactly the three guard commands carry --guard (blocking, timeout 10); the Bash and mcp entries are identical" || { echo "FAIL F6 hooks.json: $HG"; fail=1; }
+# --- 0.6.1 F7: --doctor, the read-only renderer behind /smartuse:doctor. At most eight lines: the Python, the plugin version, the events hooks.json
+# registers, the age of the last heartbeat event, the level + rules off + any unknown name (from the stored `config`), whether the state folder
+# can be written. A failing line carries its fix. It never creates the state folder.
+doc() { CLAUDE_PROJECT_DIR="$1" py "$H/heartbeat.py" --doctor; }   # $1 = the project dir
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"d1\",\"source\":\"startup\",$C}"; ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"d1\",$C}"
+OUT=$(doc "$PW"); N=$(printf '%s\n' "$OUT" | wc -l)
+case "$OUT" in *"python: "*"plugin: smartuse "*"hooks registered: "*"SessionStart"*"heartbeat: live · last event "*"s ago"*"level: light · rules off: none"*"state folder: writable"*) [ "$N" -le 8 ] && echo "PASS F7 --doctor, a fresh event: python, plugin, hooks, heartbeat live, level light, state folder writable ($N lines)" || { echo "FAIL F7 --doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL F7 --doctor, a fresh event: $OUT"; fail=1;; esac
+py -c "import json,sys,datetime; p=sys.argv[1]; s=json.load(open(p)); s['updated']=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'); json.dump(s,open(p,'w'))" "$S"
+OUT=$(doc "$PW")
+case "$OUT" in *"heartbeat: live"*) echo "FAIL F7 --doctor, an event an hour old must not read live: $OUT"; fail=1;; *"heartbeat: FAIL · last event 1h0"*"ago"*"restart Claude Code"*) echo "PASS F7 --doctor, a stale event (1h): FAIL with its age and the fix";; *) echo "FAIL F7 --doctor, a stale event: $OUT"; fail=1;; esac
+NP="$D/proj-none"; NK=$(key "$(wp "$NP")")
+OUT=$(doc "$(wp "$NP")")
+case "$OUT" in *"heartbeat: FAIL · no event: the hooks are not firing, restart Claude Code"*"level: unknown"*"state folder: writable"*) [ ! -e "$HOME/.claude/smartuse/projects/$NK" ] && echo "PASS F7 --doctor with no state: no event, the fix, level unknown, and the state folder is not created (read-only)" || { echo "FAIL F7 --doctor created the state folder"; fail=1; };; *) echo "FAIL F7 --doctor with no state: $OUT"; fail=1;; esac
+CLAUDE_PLUGIN_OPTION_RULES_OFF="Force-Push nonsense,human-only" evo "$(SS d4)"
+OUT=$(doc "$PW")
+case "$OUT" in *"level: light · rules off: force-push · unknown name: nonsense"*) case "$OUT" in *human-only*) echo "FAIL F7 --doctor names a floor rule: $OUT"; fail=1;; *) echo "PASS F7 --doctor, an unknown rule name: listed once; a valid name is off; a floor name is not an unknown";; esac;; *) echo "FAIL F7 --doctor, an unknown rule name: $OUT"; fail=1;; esac
+UH="$D/homeU"; mkdir -p "$UH/.claude"; : > "$UH/.claude/smartuse"   # a regular file where the state folder's parent should be: nothing can be created under it
+OUT=$(HOME="$UH" doc "$PW")
+case "$OUT" in *"state folder: FAIL · cannot be written"*"check"*) echo "PASS F7 --doctor, an unwritable state folder: FAIL with the fix";; *) echo "FAIL F7 --doctor, an unwritable state folder: $OUT"; fail=1;; esac
+VER=$(py -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$H/../.claude-plugin/plugin.json"); VER=${VER%$'\r'}
+OUT=$(doc "$PW")
+case "$OUT" in *"plugin: smartuse $VER"*) [ -n "$VER" ] && echo "PASS F7 --doctor reads the plugin version from plugin.json ($VER)" || { echo "FAIL F7 empty version"; fail=1; };; *) echo "FAIL F7 --doctor version line (plugin.json says '$VER'): $OUT"; fail=1;; esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

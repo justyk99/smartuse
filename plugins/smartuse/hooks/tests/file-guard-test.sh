@@ -151,4 +151,9 @@ out=$(printf '%s' "$ERR" | env -u CLAUDE_PLUGIN_OPTION_STRICT bash "$H/py.sh" "$
 [ -z "$out" ] && echo "PASS F6 light (no option at all): the same error prints nothing" || { echo "FAIL F6 light error path (unset): '${out:0:200}'"; fail=1; }
 out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/x.md","content":"x"}}' | env CLAUDE_PLUGIN_OPTION_STRICT=true bash "$H/py.sh" "$H/file-guard.py" 2>/dev/null)
 [ -z "$out" ] && echo "PASS F6 strict: an ordinary write is still allowed, nothing printed" || { echo "FAIL F6 strict ordinary write: '${out:0:200}'"; fail=1; }
+# --- 0.6.1 F7: the doctor's canary. A write to ~/.claude/smartuse/doctor-canary is denied with a reason that says the guard is live and the level;
+# a sibling file is not (the same folder is otherwise open: only the adapter, the pins and the launcher's file are human-only).
+out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/doctor-canary","content":"canary"}}' | env -u CLAUDE_PLUGIN_OPTION_STRICT bash "$H/py.sh" "$H/file-guard.py")
+case "$out" in *'"permissionDecision": "deny"'*"file-guard: doctor canary"*"the guard is live"*"light"*) echo "PASS F7 the canary file is denied: doctor canary, the guard is live, the level (light)";; *) echo "FAIL F7 canary deny: '${out:0:200}'"; fail=1;; esac
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/doctor-canary2","content":"x"}}' "F7 a sibling of the canary file (doctor-canary2) is not the canary"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

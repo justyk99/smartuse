@@ -383,6 +383,16 @@ ocheck allow - 'secrets-dir' 'cat config/secrets/readme.md' PowerShell
 ocheck deny:'[rule force-with-lease]' true - 'git push --force-with-lease origin x' PowerShell
 ocheck allow - 'force-push' 'git push --force origin x' PowerShell
 ocheck deny:'[rule force-push]' - - 'git push --force origin x' PowerShell
+# --- 0.6.1 F7: the doctor's canary. The whole trimmed command `: smartuse-doctor-canary` (a no-op if the guard is down) is denied with a reason that says
+#     the guard is live and the level; it is decided before the fresh-source gate and RULES, at both levels, and nothing else is a canary.
+ocheck deny:'doctor canary' - - ': smartuse-doctor-canary'
+ocheck deny:'level: light' - - $'  : smartuse-doctor-canary \n'
+ocheck deny:'level: strict' true - ': smartuse-doctor-canary'
+ocheck deny:'doctor canary' - - ': smartuse-doctor-canary' PowerShell
+ocheck allow - - ': smartuse-doctor-canary2'
+ocheck allow - - 'echo : smartuse-doctor-canary'
+ocheck allow true - ': smartuse-doctor-canary-x'
+ocheck deny:'[rule sudo]' - - ': smartuse-doctor-canary; sudo ls'
 # an unexpected error inside the guard: strict fails closed, light lets the call through as before (a copy of the guard with a forced error)
 FE=$(mktemp)
 sed 's/^    ps = tool == "PowerShell"$/    ps = tool == "PowerShell"; raise RuntimeError("forced")/' "$G" > "$FE"
