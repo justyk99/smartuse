@@ -89,14 +89,16 @@ flowchart LR
 | The fresh-source gate's cost (0.6.0, the author's Windows laptop) | the transcript pass takes 84 ms on a 13 MB session and 1.65 s (median of 5) on the largest local transcript, 270 MB; a Python start ~350 ms. The check has one 4 s deadline that starts when the hook starts; past it a matched send is denied, never let through |
 | A command built to be slow (0.6.0, the author's Windows laptop) | 8,000 unclosed `<<` openers (48 KB) followed by `git push`: the security review measured 4.84 s + 5.39 s in the two heredoc scans, past the 10 s hook timeout, which lets a call through. Now the heredoc scan is capped, the deadline starts with the hook, and a command too big or too tangled to read counts as a send while the sources are unopened: the same command is denied in 0.31 s (median wall of 5 runs, interpreter start included; the maintainer's laptop, 2026-11-10) |
 
-**What Claude waits for, per call (0.6.1).** Hooks that Claude waits on are counted from `hooks.json`; seconds are method M (`docs/notes/light-fast-plan.md` §4, F0): the debug log's `Hooks:` lines, the longest blocking smartuse hook before a call plus the longest after it. "Before" is 0.6.0 on Claude Code 2.1.322, the author's laptop. "After" is filled in by the live pass.
+**What Claude waits for, per call (0.6.1).** Hooks that Claude waits on are counted from `hooks.json`; seconds are method M (`docs/notes/light-fast-plan.md` §4, F0): the debug log's `Hooks:` lines, the longest blocking smartuse hook before a call plus the longest after it. Both columns: Claude Code 2.1.322, the author's Windows laptop, 2026-11-10, the slower of two runs.
 
 | Per call | Hooks waited on, 0.6.0 → 0.6.1 | Seconds waited, 0.6.0 | Seconds waited, 0.6.1 |
 |---|---|---|---|
-| Bash | 3 → 1 | 0.83 | [[F8-AFTER]] |
-| Read | 2 → 0 | 0.76 | [[F8-AFTER]] |
-| Edit | 3 → 1 | 0.98 | [[F8-AFTER]] |
-| Stop (end of a turn) | 4 starts, side by side, both versions | 0.54 | [[F8-AFTER]] |
+| Bash | 3 → 1 | 0.83 | 0.41 |
+| Read | 2 → 0 | 0.76 | 0.00 |
+| Edit | 3 → 1 | 0.98 | 0.35 |
+| Stop (end of a turn) | 4 starts, side by side, both versions | 0.54 | 0.56 |
+
+The plan's target for Bash was 0.35 s or less; it is 0.41 s, because one guard start still costs about 0.4 s on this laptop (starting Python alone is 0.17 s). Stop is unchanged: its four hooks still run side by side.
 
 Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --scaffold --allow-tools Bash Skill Read Grep Glob Agent Write` (`--scaffold` runs the `scaffold.sh` of the two one-session cases, which stage a small repo and a task folder in the case's working directory; Linux needs `bubblewrap` + `socat` for the sandbox, and `TMPDIR` set to a directory outside `/tmp`: the eval sandbox denies writes to `/tmp`, where it would otherwise put its own temp dir, and every skill's `!` line then fails with "Read-only file system") and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks). The regression suites: `bash plugins/smartuse/hooks/tests/all.sh` — every hook suite plus the bench A/B dry run, one summary line, nothing spent.
 

@@ -48,9 +48,9 @@ A long session gets compacted and keeps a summary; Claude then works from the su
 - [ ] Open from the build: whether Claude Code adds a PreCompact hook's output to the owner's `/compact` text or replaces it (undocumented; the live pass settles it) · a `**`/`*` pattern that meets a link is refused (a `venv/`, a `jobs/latest` link): watch whether owners hit it
 - Not in 0.6.0 (said once): a memory store or vector search (Claude Code's compaction and auto memory stay the substrate); a click on a page's own Send button (uploads and named commands are gated); a typed `sources:` line from a phone (needs the owner-quote check from the paid guard)
 
-## 0.6.1 — lighter, faster, switchable (plan `docs/notes/light-fast-plan.md`; approved 2026-11-10; built and reviewed, waiting for the live pass and the push)
+## 0.6.1 — lighter, faster, switchable (plan `docs/notes/light-fast-plan.md`; approved 2026-11-10; built, reviewed and live-tested 2026-11-10)
 Claude waits on fewer hooks, honest commands stop being denied, and the owner gets a switch that only the owner can flip.
-- [x] F0 measure: method M, "before" on Claude Code 2.1.322 (Bash 0.83 s, Read 0.76 s, Edit 0.98 s, Stop 0.54 s waited per call) · [ ] "after" numbers in the live pass (README has `[[F8-AFTER]]` placeholders until then)
+- [x] F0 measure: method M, "before" on Claude Code 2.1.322 (Bash 0.83 s, Read 0.76 s, Edit 0.98 s, Stop 0.54 s waited per call) · [x] "after" in the live pass: Bash 0.41 s, Read 0.00 s, Edit 0.35 s, Stop 0.56 s (the Bash target of 0.35 s is missed by one guard start) · [ ] one process per hook event (a dispatcher) or a cheaper interpreter start, to reach the Bash target
 - [x] F1 the heartbeat leaves the waiting path (Bash 3 → 1 hooks waited on, Read 2 → 0, Edit 3 → 1; `PostToolUseFailure`; finished-call ids; a state-file lock on Windows)
 - [x] F2 two false denies fixed (a download into `python -m json.tool`; `sudo` carried as text) and the rule for changing `RULES` (plan §6)
 - [x] F3 a missing Python is said aloud at session start; the empty `check:` line bug

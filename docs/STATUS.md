@@ -1,9 +1,9 @@
 STATUS: smartuse · updated 2026-11-10
 FINISH LINE: smartuse 1.0, driven by the plan in docs/ROADMAP.md (the old STATUS: "drive smartuse to 1.0")
 Done when (assumed from the old Next list): 1 0.6.1 released 2 0.7.0 paid-call guard released 3 the 1.0 items on docs/ROADMAP.md closed
-Now: 0.6.0 released on main 2026-11-10 (e5713d3) · 0.6.1 "lighter, faster, switchable" built (F0–F8, plan docs/notes/light-fast-plan.md), reviewed (review 11 + one fix round), docs written · waiting for the live pass (experiments E1–E5, method M "after" numbers) and the push · the README's "after" cells say [[F8-AFTER]] until then
-Next: live pass on the laptop → fill the [[F8-AFTER]] cells → push the dev branch → merge to main on the maintainer's word | demo Thu 12 Nov
-NEEDS YOU: none until push
+Now: 0.6.0 released on main 2026-11-10 (e5713d3) · 0.6.1 "lighter, faster, switchable" built (F0–F8, plan docs/notes/light-fast-plan.md), reviewed (review 11 + one fix round), docs written · live pass PASS on Claude Code 2.1.322 (levels, F2, the switch, the launcher, doctor live, a deny that names its rule live); waited per call 0.6.0 → 0.6.1: Bash 0.83 → 0.41 s, Read 0.76 → 0.00 s, Edit 0.98 → 0.35 s, Stop 0.54 → 0.56 s (the Bash target 0.35 s missed) · T2 at c8dbf5d: run 539 · ledger 46 · until-done 50 · file-guard 91 · heartbeat 178 · ab 36 · watch 63 · wait 196 · fresh 722 · recall 210 · term-scan 6 · dev branch pushed, main not merged
+Next: maintainer: merge 0.6.1 to main (his word), then `/plugin update smartuse@smartuse` on the laptop | open: E3 (an option changed mid-session) and E4 (a permission prompt on the status line) not exercised live | demo Thu 12 Nov
+NEEDS YOU (1): say when 0.6.1 goes to main
 ## Last 3 cards
 - 2026-11-10 0.6.1 docs written (F8): README "Switches" and counts, SECURITY, CHANGELOG, ROADMAP (0.6.2 parked), version 0.6.1; waiting for the live pass
 - 2026-11-10 review 11 of 556b332: F1–F6 pass; two majors (a whole settings file deleted or replaced; the `env` option variables) fixed in one round, merged at 769f1c7
