@@ -782,6 +782,10 @@ for nm, cm in (("uv", "uv publish dist/*"), ("poetry", "poetry publish --build")
 for nm, cm in (("uv_run_other", "uv run python other.py"), ("uv_pip", "uv pip list"), ("poetry_run", "poetry run pytest"), ("pipx_run_other", "pipx run black ."),
                ("wsl_other", "wsl ls"), ("start_other", "start other.bat"), ("hatch_build", "hatch build"), ("env_other", "env A=1 python other.py")):
     make("a_m1_" + nm, ex(ALLOW), cmd=cm, adp=adapter(publish=WPUB), tr=lambda P: base(P))
+    if nm == "start_other":   # round K: a start word in PowerShell is tagged (its arguments are not read), so it counts as a send until the sources are opened
+        make("d_m1_ps_" + nm + "_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), adp=adapter(publish=WPUB), tr=lambda P: base(P), **PS(cm))
+        make("a_m1_ps_" + nm + "_opened", ex(ALLOW), adp=adapter(publish=WPUB), tr=lambda P: reads_all(base(P), P), **PS(cm))
+        continue
     make("a_m1_ps_" + nm, ex(ALLOW), adp=adapter(publish=WPUB), tr=lambda P: base(P), **PS(cm))
 # M3: one PowerShell statement of 6,000 words that all match the pattern's first word, then a real publish: decided inside the hook's
 # 10 s timeout (the time went quadratic: the words after every head match were scanned again)
@@ -875,7 +879,9 @@ for nm, cm in (("assign", "$p = Start-Process -ArgumentList push -FilePath git -
                ("assign_saps", "$p = saps -ArgumentList push -FilePath git"), ("in_pipeline", "Get-Date | Start-Process -ArgumentList push -FilePath git"),
                ("after_semicolon", "Write-Host x; Start-Process -ArgumentList push -FilePath git")):
     make("d_n3_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: base(P), **PS(cm))
-make("a_n3_start_process_other", ex(ALLOW), tr=lambda P: base(P), **PS("$p = Start-Process -ArgumentList status -FilePath git -PassThru"))
+# round K: a Start-Process word is tagged whatever follows it, so the no-publish twin is denied with sources unopened and allowed once they are opened
+make("d_n3_start_process_other_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), tr=lambda P: base(P), **PS("$p = Start-Process -ArgumentList status -FilePath git -PassThru"))
+make("a_n3_start_process_other_opened", ex(ALLOW), tr=lambda P: reads_all(base(P), P), **PS("$p = Start-Process -ArgumentList status -FilePath git -PassThru"))
 
 # --- round G: a command the source check cannot read cleanly counts as a send while the sources are unopened. Rather than reading shell and
 # PowerShell quoting ever deeper, complexity() tags the command (and _scan a string run by another shell) before RULES and before any scan;
@@ -883,6 +889,7 @@ make("a_n3_start_process_other", ex(ALLOW), tr=lambda P: base(P), **PS("$p = Sta
 # `publish:` or no adapter it is as before. The tags: over 32 KB, heredocs past the scan cap, 3 or more command substitutions (Bash: $( and
 # backtick pairs; PowerShell: $( only), PowerShell typographic quotes or dashes, a PowerShell escaped quote, a nested shell string.
 OPENED = lambda P: reads_all(base(P), P)
+STARTTAG = "Start-Process (its arguments are not read)"
 BIGCMD = lambda n: "echo " + "a" * (n - 5)          # a command of exactly n characters
 G_CASES = (
     ("size_32kb_plus_one", "over 32 KB", dict(cmd=BIGCMD(32769)), None),
@@ -907,13 +914,13 @@ G_CASES = (
     ("ps_block_comment_multiline", "a block comment", PS("<#\nnote\n#>\nGet-Date"), None),
     ("ps_block_comment_unclosed", "a block comment", PS("Get-Date <# open"), None),
     ("ps_block_comment_after_code", "a block comment", PS("Get-Date; <# a #> Get-Location <# b #>"), None),
-    ("ps_start_process_group", "Start-Process with grouped arguments", PS("Start-Process notepad -ArgumentList (Get-Item a.txt)"), None),
-    ("ps_start_process_array", "Start-Process with grouped arguments", PS("Start-Process notepad -ArgumentList @('a.txt')"), None),
-    ("ps_start_process_upper", "Start-Process with grouped arguments", PS("START-PROCESS notepad (1)"), None),
-    ("ps_saps_mixed_case", "Start-Process with grouped arguments", PS("Saps notepad @('a.txt')"), None),
-    ("ps_start_alias", "Start-Process with grouped arguments", PS("start (Get-Item a.txt)"), None),
-    ("ps_start_process_assigned", "Start-Process with grouped arguments", PS("$p=Start-Process notepad -ArgumentList (1)"), None),
-    ("ps_start_process_paren_first", "Start-Process with grouped arguments", PS("(Get-Item a.txt) | Start-Process"), None),
+    ("ps_start_process_group", "Start-Process (its arguments are not read)", PS("Start-Process notepad -ArgumentList (Get-Item a.txt)"), None),
+    ("ps_start_process_array", "Start-Process (its arguments are not read)", PS("Start-Process notepad -ArgumentList @('a.txt')"), None),
+    ("ps_start_process_upper", "Start-Process (its arguments are not read)", PS("START-PROCESS notepad (1)"), None),
+    ("ps_saps_mixed_case", "Start-Process (its arguments are not read)", PS("Saps notepad @('a.txt')"), None),
+    ("ps_start_alias", "Start-Process (its arguments are not read)", PS("start (Get-Item a.txt)"), None),
+    ("ps_start_process_assigned", "Start-Process (its arguments are not read)", PS("$p=Start-Process notepad -ArgumentList (1)"), None),
+    ("ps_start_process_paren_first", "Start-Process (its arguments are not read)", PS("(Get-Item a.txt) | Start-Process"), None),
     ("nested_bash_c", "a nested shell string", dict(cmd='bash -c "echo hi"'), None),
     ("nested_sh_c_single", "a nested shell string", dict(cmd="sh -c 'echo hi'"), None),
     ("nested_bash_lc", "a nested shell string", dict(cmd='bash -lc "echo hi"'), None),
@@ -943,21 +950,21 @@ make("a_g_ps_backticks_are_not_substitutions", ex(ALLOW), tr=lambda P: base(P), 
 make("a_g_ps_two_subexpressions", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "$(1) $(2)"'))
 make("a_g_bash_backtick_quote_is_not_a_ps_tag", ex(ALLOW), cmd="echo `date`'x' \"`pwd`\"", tr=lambda P: base(P))   # a backtick before a quote is ordinary in Bash (two pairs here)
 make("a_g_bash_typographic_is_not_a_tag", ex(ALLOW), cmd="echo ‘hi’ – “there”", tr=lambda P: base(P))
-# round J (section 7g): a PowerShell block comment (`<#` anywhere) and a Start-Process word with a `(` anywhere are tags too. A publish in either
-# shape is denied with the tag named; so is an honest command of the same shape (the accepted over-deny, one turn); with the sources opened
-# neither tag denies; Bash text with the same characters is not tagged
+# round J (section 7g) and K (7h): a PowerShell block comment (`<#` anywhere) and a Start-Process word (start, saps) anywhere, with or without a
+# `(`, are tags too. A publish in either shape is denied with the tag named; so is an honest command of the same shape (the accepted over-deny,
+# one turn); with the sources opened neither tag denies; Bash text with the same characters is not tagged
 make("d_j_block_comment_publish_complex", ex(DENY, has=cx("a block comment")), tr=lambda P: base(P), **PS("<# deploy #> git push origin main"))
 make("d_j_block_comment_two_on_a_line_publish_complex", ex(DENY, has=cx("a block comment")), tr=lambda P: base(P), **PS("<# it's #> git push <# don't #>"))
 make("d_j_block_comment_no_publish_complex", ex(DENY, has=cx("a block comment")), tr=lambda P: base(P), **PS("<# deploy #> git status"))
-make("d_j_start_process_group_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+make("d_j_start_process_group_publish_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), tr=lambda P: base(P),
      **PS("Start-Process git -ArgumentList @('push')"))
-make("d_j_start_process_paren_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+make("d_j_start_process_paren_publish_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), tr=lambda P: base(P),
      **PS("Start-Process -FilePath git -ArgumentList ('push', 'origin')"))
-make("d_j_saps_mixed_case_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+make("d_j_saps_mixed_case_publish_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), tr=lambda P: base(P),
      **PS("Saps git -ArgumentList (@('push'))"))
-make("d_j_start_process_group_no_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+make("d_j_start_process_group_no_publish_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), tr=lambda P: base(P),
      **PS("Start-Process notepad -ArgumentList (Get-Item a.txt)"))
-make("d_j_start_process_assigned_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+make("d_j_start_process_assigned_publish_complex", ex(DENY, has=cx("Start-Process (its arguments are not read)")), tr=lambda P: base(P),
      **PS("$p=Start-Process git -ArgumentList @('push') -PassThru"))
 for nm, cm in (("block_comment", "<# deploy #> git push origin main"), ("start_process_group", "Start-Process git -ArgumentList @('push')"),
                ("saps_group", "Saps git -ArgumentList (@('push'))")):
@@ -966,7 +973,17 @@ for nm, cm in (("block_comment", "<# deploy #> git push origin main"), ("start_p
     make("a_j_" + nm + "_no_publish_opened", ex(ALLOW), tr=OPENED, **PS(cm.replace("push", "status")))
 for nm, cm in (("bash_block_comment_opener_text", "echo 'a <# b'"), ("bash_start_word_paren", "echo start (hi)"), ("bash_start_process_paren", "echo Start-Process (x)")):
     make("a_j_" + nm + "_is_not_a_tag", ex(ALLOW), cmd=cm, tr=lambda P: base(P))
-make("a_j_ps_start_process_without_paren_is_not_tagged", ex(ALLOW), tr=lambda P: base(P), **PS("Start-Process notepad -ArgumentList a.txt"))
+# round K: no `(` needed; other groupings of the arguments (a quoted multi-word string, a here-string) hide a publish the same way
+make("d_k_start_process_without_paren_no_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS("Start-Process notepad -ArgumentList a.txt"))
+make("a_k_start_process_without_paren_no_publish_opened", ex(ALLOW), tr=OPENED, **PS("Start-Process notepad -ArgumentList a.txt"))
+make("d_k_start_process_quoted_multiword_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS("Start-Process git -ArgumentList 'push origin main'"))
+make("d_k_start_process_quoted_multiword_dq_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS('Start-Process -FilePath git -ArgumentList "push origin main"'))
+make("d_k_start_process_herestring_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS("Start-Process git -ArgumentList @'\npush origin main\n'@"))
+make("d_k_start_process_herestring_dq_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS('Start-Process git -ArgumentList @"\npush origin main\n"@'))
+make("d_k_saps_alias_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS("saps git 'push origin main'"))
+make("d_k_start_alias_publish_complex", ex(DENY, has=cx(STARTTAG)), tr=lambda P: base(P), **PS("START git 'push origin main'"))
+make("a_k_start_process_quoted_multiword_publish_opened", ex(ALLOW), tr=OPENED, **PS("Start-Process git -ArgumentList 'push origin main'"))
+make("a_k_start_process_herestring_publish_opened", ex(ALLOW), tr=OPENED, **PS("Start-Process git -ArgumentList @'\npush origin main\n'@"))
 make("a_j_ps_paren_without_start_word_is_not_tagged", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host (Get-Date)"))
 make("a_j_ps_hash_without_angle_is_not_a_block_comment", ex(ALLOW), tr=lambda P: base(P), **PS("Get-Date # note #"))
 make("a_j_ps_hash_then_angle_is_not_a_block_comment", ex(ALLOW), tr=lambda P: base(P), **PS("Get-Date # a #> b"))

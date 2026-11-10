@@ -745,7 +745,8 @@ COMPLEX_SUBST = 3                                   # command substitutions that
 RULES_FIRST_MAX = 4096                              # a command longer than this has the fresh-source block run before RULES (see main)
 PS_TYPOGRAPHIC = re.compile("[\u2013-\u2015\u2018-\u201e]")   # the dashes and quotes PowerShell reads as plain ones
 PS_ESCAPED_QUOTE = re.compile("`[`\"']")            # a backtick before a quote or another backtick
-# a START_PROCESS word as a whole word (no letter, digit, _ or - beside it), any case; plain alternation, linear
+# a START_PROCESS word as a whole word (no letter, digit, _ or - beside it), any case; plain alternation, linear. Its arguments can be
+# grouped in many ways (parentheses, arrays, a here-string, one quoted string), so the word alone makes the command unreadable
 PS_START_WORD = re.compile(r"(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(w) for w in sorted(START_PROCESS)) + r")(?![A-Za-z0-9_-])", re.I)
 
 
@@ -754,8 +755,8 @@ def complexity(pre, ps):
     when it can. In order: over COMPLEX_MAX characters; heredoc openers past the scan cap (many_heredocs); COMPLEX_SUBST or more
     command substitutions (a backtick pair counts as one in Bash; in PowerShell the backtick is the escape character, so only $( counts;
     the text of a data heredoc is not counted);
-    PowerShell only: typographic quotes or dashes, an escaped quote, a block comment (`<#` anywhere), Start-Process with grouped
-    arguments (a Start-Process word, start or saps as a whole word, together with a `(` anywhere). One pass of linear scans: no scan depends on the shape of the
+    PowerShell only: typographic quotes or dashes, an escaped quote, a block comment (`<#` anywhere), Start-Process (a Start-Process word,
+    start or saps, as a whole word anywhere: its arguments are not read). One pass of linear scans: no scan depends on the shape of the
     text."""
     if len(pre) > COMPLEX_MAX:
         return "over 32 KB"
@@ -776,8 +777,8 @@ def complexity(pre, ps):
             return "an escaped quote"
         if "<#" in pre:
             return "a block comment"
-        if "(" in pre and PS_START_WORD.search(pre):
-            return "Start-Process with grouped arguments"
+        if PS_START_WORD.search(pre):
+            return "Start-Process (its arguments are not read)"
     return ""
 
 

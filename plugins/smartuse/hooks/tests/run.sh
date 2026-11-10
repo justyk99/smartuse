@@ -298,7 +298,7 @@ for c in 'git push origin main' 'Git Push' '& git push' 'git.exe push' 'py -3 .\
   fcheck deny "$c" with PowerShell
 done
 for c in 'Write-Host "git push"' '"git push" | Out-File notes.txt' 'git log --oneline' 'python other.py' 'git status' \
-         "'Get-Date' | iex" '$p = Start-Process -ArgumentList status -FilePath git -PassThru' \
+         "'Get-Date' | iex" \
          'Get-ChildItem -Recurse' "git commit -m 'it''s done'" 'Write-Host "$(Get-Date) $(1)"' 'Get-ChildItem -Path . -Filter *.md'; do
   fcheck allow "$c" with PowerShell
 done
@@ -308,7 +308,7 @@ done
 #     publish word (the old allow cases of this loop); the same commands in a project with no sources are allowed (the `none` project).
 #     (An over-32 KB command is covered in fresh-gate-test.sh: an argument that long does not fit a Windows command line.)
 for c in "pwsh -enc $ENCOK" 'pwsh -c "echo hi"' 'cmd /c "echo hi"' 'iex "echo hi"' 'Write-Host "a`""; git status; Write-Host "`"b"' $'git commit -m \'Fix `x`\'; git status  # it\'s done' \
-         'Write-Host ‘hi’' 'Get-ChildItem –Recurse' 'Write-Host "$(1) $(2) $(3)"'; do
+         'Write-Host ‘hi’' 'Get-ChildItem –Recurse' 'Write-Host "$(1) $(2) $(3)"' '<# note #> Get-Date'          '$p = Start-Process -ArgumentList status -FilePath git -PassThru'; do   # round K: any Start-Process / saps / start word is a form the check does not read
   fcheck deny "$c" with PowerShell
   fcheck allow "$c" none PowerShell
 done
