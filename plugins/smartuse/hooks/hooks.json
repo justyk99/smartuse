@@ -151,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" --say-missing \"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\"",
             "timeout": 5
           },
           {

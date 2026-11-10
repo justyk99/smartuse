@@ -307,6 +307,47 @@ OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\
 mkdir -p "$D/home4"   # a HOME with no remembered interpreter: the probe is the only way to find one
 OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
 [ "$OUT" = "rc=0" ] && echo "PASS launcher with no usable interpreter: prints nothing, exit 0 (a hook never blocks)" || { echo "FAIL launcher without an interpreter: $OUT"; fail=1; }
+# --- 0.6.1 F3: --say-missing, one optional FIRST word (an exact comparison, dropped before the hook path). With an interpreter nothing
+# changes. Without one: a fixed sentence on stderr and exit 2 (the docs: a SessionStart hook that exits 2 "shows stderr to user only"
+# and the session goes on); stdout stays empty. Without the word the launcher stays silent with exit 0 (the case above).
+MISSING="smartuse: Python 3 was not found (tried python3, python, py -3). Its guards, gates and status line are OFF. Install Python 3.9 or newer and restart Claude Code."
+RC=0; OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --say-missing "$H/heartbeat.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && [ "$(cat "$D/missing.err")" = "$MISSING" ] && echo "PASS F3 --say-missing with no interpreter: the fixed sentence on stderr, exit 2, empty stdout" || { echo "FAIL F3 --say-missing without an interpreter: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+RC=0; OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 0 ] && [ ! -s "$D/missing.err" ] && echo "PASS F3 no word and no interpreter: still silent, exit 0" || { echo "FAIL F3 silent launcher: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+mkdir -p "$D/home6"; RC=0
+OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_use_id\":\"t\",\"session_id\":\"s\",$C}" | PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --say-missing "$H/heartbeat.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 0 ] && [ ! -s "$D/missing.err" ] && [ -f "$D/home6/.claude/smartuse/projects/$K/status.json" ] && echo "PASS F3 --say-missing with an interpreter: the word is dropped, the hook runs, nothing printed, exit 0" || { echo "FAIL F3 --say-missing with an interpreter: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --say-missing -c "print('ran')" 2>&1) || true
+[ "$OUT" = ran ] && echo "PASS F3 --say-missing is dropped before the interpreter's own arguments" || { echo "FAIL F3 word not dropped: '$OUT'"; fail=1; }
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" -c "import sys; print(' '.join(sys.argv[1:]))" --say-missing x --say-missing 2>&1) || true
+[ "$OUT" = "--say-missing x --say-missing" ] && echo "PASS F3 the word in any later position reaches Python untouched" || { echo "FAIL F3 later --say-missing: '$OUT'"; fail=1; }
+mkdir -p "$D/home7/.claude/smartuse" "$D/stub3"; printf 'python\n' > "$D/home7/.claude/smartuse/interpreter"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub3" > "$D/stub3/python3"; chmod +x "$D/stub3/python3"
+OUT=$(PATH="$D/stub3:$D/real" HOME="$D/home7" "$BASH" "$H/py.sh" --say-missing -c "print('ran')" 2>&1) || true
+[ "$OUT" = ran ] && [ ! -e "$D/stub3/called" ] && echo "PASS F3 the remembered-name path takes the word too: the cached python runs, the stub ahead of it is never started" || { echo "FAIL F3 remembered name with the word: '$OUT', stub called: $([ -e "$D/stub3/called" ] && echo yes || echo no)"; fail=1; }
+RC=0; OUT=$(PATH="$D/stub" HOME="$D/home7" "$BASH" "$H/py.sh" --say-missing -c "print('ran')" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && [ "$(cat "$D/missing.err")" = "$MISSING" ] && echo "PASS F3 a remembered name that PATH no longer has, no other interpreter: the sentence, exit 2" || { echo "FAIL F3 stale remembered name: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+# hooks.json: only the SessionStart heartbeat command carries the word (the guards, the other heartbeat events and recall do not)
+HW=$(py - "$H/hooks.json" <<'PY'
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]
+want = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" --say-missing "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py"'
+bad = []
+for ev, ents in h.items():
+    for ent in ents:
+        for hd in ent.get("hooks", []):
+            c = hd.get("command", "")
+            if ev == "SessionStart" and c.endswith("/heartbeat.py\""):
+                if c != want or hd.get("timeout") != 5 or hd.get("async"):
+                    bad.append("SessionStart heartbeat: %r" % hd)
+            elif "--say-missing" in c:
+                bad.append("%s carries the word: %s" % (ev, c))
+if not any(hd.get("command") == want for ent in h.get("SessionStart", []) for hd in ent.get("hooks", [])):
+    bad.append("SessionStart heartbeat command lacks --say-missing")
+print("BAD " + "; ".join(bad) if bad else "OK")
+PY
+)
+[ "$HW" = OK ] && echo "PASS F3 hooks.json: only the SessionStart heartbeat command has --say-missing (blocking, timeout 5)" || { echo "FAIL F3 hooks.json: $HW"; fail=1; }
 # --- the launcher remembers the NAME of the candidate it proved (python3, python or py -3, never a path) in
 # ~/.claude/smartuse/interpreter: one start per event instead of a probe + a start (+ the stub's own start on stock Windows, 2 s per
 # event on the author's laptop). The file is a hint about which probe step to skip, not a command: a writable state file must not

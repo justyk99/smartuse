@@ -102,7 +102,7 @@ def adapter_check(project):
         text = f.read_text(encoding="utf-8")
     except Exception:
         return ""
-    m = re.search(r"^check:\s*(.+?)\s*$", text, re.M)
+    m = re.search(r"^check:[ \t]*(.*?)[ \t\r]*$", text, re.M)   # [ \t] not \s: an empty value must not swallow the next line (as recall.py's adapter value pattern)
     return (m.group(1).strip().strip("'\"") if m else "")
 
 
