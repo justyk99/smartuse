@@ -14,8 +14,17 @@
 # read up to 16 characters and written only when ~/.claude/smartuse/ already exists (the hooks create it) and the file is a
 # regular file or a new one (never a symlink, a FIFO or another special file), so a first event costs no extra process.
 # PYTHONUTF8=1 puts every hook in UTF-8 mode: on Windows, stdin/stdout and open() would otherwise use the ANSI code page.
-# Usage: bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/<hook>.py" [args…]
+# One optional FIRST word, --say-missing (an exact comparison, dropped before the hook path; in any later position it reaches the
+# interpreter untouched): with no interpreter the launcher prints one fixed sentence on stderr and exits 2 instead of exiting 0 in
+# silence. Only the SessionStart heartbeat command carries it: the docs say a SessionStart hook that exits 2 "shows stderr to user
+# only" and the session goes on, so the user learns the guards are off. With an interpreter nothing changes.
+# Usage: bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" [--say-missing] "${CLAUDE_PLUGIN_ROOT}/hooks/<hook>.py" [args…]
 export PYTHONUTF8=1
+SAY=""; [ "${1:-}" = "--say-missing" ] && { SAY=1; shift; }
+# A second optional first word, --guard (the three guard commands carry it; not together with --say-missing): with no interpreter and Strict
+# guards on (the plugin option's text is anything but empty / off / false / no / 0), one fixed sentence on stderr and exit 2, which blocks
+# the call and shows Claude why. Light (the default, also with no option set) -> silent exit 0 as before.
+GUARD=""; [ -z "$SAY" ] && [ "${1:-}" = "--guard" ] && { GUARD=1; shift; }
 C="${HOME:+$HOME/.claude/smartuse/interpreter}"; P=""
 if [ -n "$C" ] && [ -f "$C" ] && { read -r -n 16 P || [ -n "$P" ]; } < "$C"; then   # a regular file, read capped at 16 characters: a name is at most 7
   P=${P%$'\r'}
@@ -37,4 +46,10 @@ for cand in "python3" "python" "py -3"; do
   fi
   exec $cand "$@"
 done
+[ -n "$SAY" ] && { echo "smartuse: Python 3 was not found (tried python3, python, py -3). Its guards, gates and status line are OFF. Install Python 3.9 or newer and restart Claude Code." >&2; exit 2; }
+if [ -n "$GUARD" ]; then
+  S=${CLAUDE_PLUGIN_OPTION_STRICT:-}; S=${S#"${S%%[![:space:]]*}"}; S=${S%"${S##*[![:space:]]}"}   # trimmed without a fork (bash 3.2 safe)
+  case "$S" in ""|[Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|0) ;;
+    *) echo "smartuse: Python 3 was not found (tried python3, python, py -3), so this call is blocked: Strict guards is on and its guard cannot run. Install Python 3.9 or newer and restart Claude Code, or switch Strict guards off in /plugin configure." >&2; exit 2;; esac
+fi
 exit 0

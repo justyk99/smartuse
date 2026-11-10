@@ -120,4 +120,19 @@ echo "$CMD" > "$R"; out=$(bg running); [ -z "$out" ] && [ "$(blocks)" = 0 ] && e
 echo "$CMD" > "$R"; out=$(bg completed); [ -n "$out" ] && echo "PASS block: a running command unit whose background task has ended (record its result)" || { echo "FAIL command + finished task should block"; fail=1; }
 echo "$CMD" > "$R"; expect block "a running command unit and no background task at all"
 echo '{"active":true,"until_done":true,"units":[{"id":1,"tier":"build","title":"code","status":"running"}]}' > "$R"; out=$(bg running); [ -n "$out" ] && echo "PASS block: a live background task does not excuse a running build unit" || { echo "FAIL build unit excused by a background task"; fail=1; }
+# --- 0.6.1 F3: the `check:` value ends at its own line end. An empty `check:` used to take the NEXT line as the check (`\s*` crossed the
+# newline): here the line under it is `false`, an allowed shape that fails, so the old gate blocked a run that has no check at all.
+mkdir -p "$D/proj/.claude"; ADP="$D/proj/.claude/smartuse.local.md"
+printf -- '---\ncheck:\nfalse\n---\n' > "$ADP"; fresh; expect allow "an empty check: line above an allowed shape: no check, the next line is not taken"
+printf -- '---\ncheck:   \t \nfalse\n---\n' > "$ADP"; fresh; expect allow "check: with only blanks above an allowed shape: no check"
+printf -- '---\ncheck:\n\n   \nfalse\n---\n' > "$ADP"; fresh; expect allow "check: with blank lines under it, then an allowed shape: no check"
+printf -- '---\r\ncheck:\r\nfalse\r\n---\r\n' > "$ADP"; fresh; expect allow "CRLF: an empty check: above an allowed shape: no check"
+printf -- '---\r\ncheck: false\r\n---\r\n' > "$ADP"; fresh; expect block "CRLF: a normal check: false still runs and blocks"
+printf -- '---\ncheck: false\n---\n' > "$ADP"; fresh; expect block "a normal check: false still blocks"
+printf -- '---\ncheck: true\n---\n' > "$ADP"; fresh; expect allow "a normal check: true still allows"
+printf -- "---\ncheck:   'false'  \n---\n" > "$ADP"; fresh; expect block "a quoted value with blanks around it is still the check"
+# states today's behaviour (no code change): the FIRST `check:` line is the one read, so an empty one above a second `check:` line means no
+# check at all; the second line is not borrowed
+printf -- '---\ncheck:\ncheck: false\n---\n' > "$ADP"; fresh; expect allow "an empty check: above a second check: line: the empty first one wins, the gate has no check"
+printf -- '---\ncheck: false\ncheck: true\n---\n' > "$ADP"; fresh; expect block "two check: lines: the first one is the check"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

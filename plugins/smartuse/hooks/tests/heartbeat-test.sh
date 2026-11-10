@@ -307,6 +307,47 @@ OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\
 mkdir -p "$D/home4"   # a HOME with no remembered interpreter: the probe is the only way to find one
 OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
 [ "$OUT" = "rc=0" ] && echo "PASS launcher with no usable interpreter: prints nothing, exit 0 (a hook never blocks)" || { echo "FAIL launcher without an interpreter: $OUT"; fail=1; }
+# --- 0.6.1 F3: --say-missing, one optional FIRST word (an exact comparison, dropped before the hook path). With an interpreter nothing
+# changes. Without one: a fixed sentence on stderr and exit 2 (the docs: a SessionStart hook that exits 2 "shows stderr to user only"
+# and the session goes on); stdout stays empty. Without the word the launcher stays silent with exit 0 (the case above).
+MISSING="smartuse: Python 3 was not found (tried python3, python, py -3). Its guards, gates and status line are OFF. Install Python 3.9 or newer and restart Claude Code."
+RC=0; OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --say-missing "$H/heartbeat.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && [ "$(cat "$D/missing.err")" = "$MISSING" ] && echo "PASS F3 --say-missing with no interpreter: the fixed sentence on stderr, exit 2, empty stdout" || { echo "FAIL F3 --say-missing without an interpreter: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+RC=0; OUT=$(printf '{}' | PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 0 ] && [ ! -s "$D/missing.err" ] && echo "PASS F3 no word and no interpreter: still silent, exit 0" || { echo "FAIL F3 silent launcher: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+mkdir -p "$D/home6"; RC=0
+OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_use_id\":\"t\",\"session_id\":\"s\",$C}" | PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --say-missing "$H/heartbeat.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 0 ] && [ ! -s "$D/missing.err" ] && [ -f "$D/home6/.claude/smartuse/projects/$K/status.json" ] && echo "PASS F3 --say-missing with an interpreter: the word is dropped, the hook runs, nothing printed, exit 0" || { echo "FAIL F3 --say-missing with an interpreter: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --say-missing -c "print('ran')" 2>&1) || true
+[ "$OUT" = ran ] && echo "PASS F3 --say-missing is dropped before the interpreter's own arguments" || { echo "FAIL F3 word not dropped: '$OUT'"; fail=1; }
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" -c "import sys; print(' '.join(sys.argv[1:]))" --say-missing x --say-missing 2>&1) || true
+[ "$OUT" = "--say-missing x --say-missing" ] && echo "PASS F3 the word in any later position reaches Python untouched" || { echo "FAIL F3 later --say-missing: '$OUT'"; fail=1; }
+mkdir -p "$D/home7/.claude/smartuse" "$D/stub3"; printf 'python\n' > "$D/home7/.claude/smartuse/interpreter"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub3" > "$D/stub3/python3"; chmod +x "$D/stub3/python3"
+OUT=$(PATH="$D/stub3:$D/real" HOME="$D/home7" "$BASH" "$H/py.sh" --say-missing -c "print('ran')" 2>&1) || true
+[ "$OUT" = ran ] && [ ! -e "$D/stub3/called" ] && echo "PASS F3 the remembered-name path takes the word too: the cached python runs, the stub ahead of it is never started" || { echo "FAIL F3 remembered name with the word: '$OUT', stub called: $([ -e "$D/stub3/called" ] && echo yes || echo no)"; fail=1; }
+RC=0; OUT=$(PATH="$D/stub" HOME="$D/home7" "$BASH" "$H/py.sh" --say-missing -c "print('ran')" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && [ "$(cat "$D/missing.err")" = "$MISSING" ] && echo "PASS F3 a remembered name that PATH no longer has, no other interpreter: the sentence, exit 2" || { echo "FAIL F3 stale remembered name: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+# hooks.json: only the SessionStart heartbeat command carries the word (the guards, the other heartbeat events and recall do not)
+HW=$(py - "$H/hooks.json" <<'PY'
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]
+want = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" --say-missing "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py"'
+bad = []
+for ev, ents in h.items():
+    for ent in ents:
+        for hd in ent.get("hooks", []):
+            c = hd.get("command", "")
+            if ev == "SessionStart" and c.endswith("/heartbeat.py\""):
+                if c != want or hd.get("timeout") != 5 or hd.get("async"):
+                    bad.append("SessionStart heartbeat: %r" % hd)
+            elif "--say-missing" in c:
+                bad.append("%s carries the word: %s" % (ev, c))
+if not any(hd.get("command") == want for ent in h.get("SessionStart", []) for hd in ent.get("hooks", [])):
+    bad.append("SessionStart heartbeat command lacks --say-missing")
+print("BAD " + "; ".join(bad) if bad else "OK")
+PY
+)
+[ "$HW" = OK ] && echo "PASS F3 hooks.json: only the SessionStart heartbeat command has --say-missing (blocking, timeout 5)" || { echo "FAIL F3 hooks.json: $HW"; fail=1; }
 # --- the launcher remembers the NAME of the candidate it proved (python3, python or py -3, never a path) in
 # ~/.claude/smartuse/interpreter: one start per event instead of a probe + a start (+ the stub's own start on stock Windows, 2 s per
 # event on the author's laptop). The file is a hint about which probe step to skip, not a command: a writable state file must not
@@ -368,4 +409,194 @@ esac
 mkdir -p "$D/WINDOWSAPPS"; cp "$D/stub/python3" "$D/WINDOWSAPPS/python3"; chmod +x "$D/WINDOWSAPPS/python3"; rm -f "$CF"; printf 'python3\n' > "$CF"
 OUT=$(PATH="$D/WINDOWSAPPS:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
 [ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias under WINDOWSAPPS (upper case) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WINDOWSAPPS alias: out '$OUT', cached '$P5'"; fail=1; }
+# --- 0.6.1 F1: the heartbeat's three tool-event handlers run in the background ("async": true), so a "before" can land after its
+# "after", a failed call has its own event (PostToolUseFailure: tool_name, tool_use_id, error, is_interrupt; the field names are the
+# docs' sample, no recorded event holds one), and two hooks can write at once. status.json keeps `done`, the last 32 tool_use_ids a
+# PostToolUse / PostToolUseFailure saw: a PreToolUse whose id is in it counts the call but never sets tool_running.
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"f1\",\"source\":\"startup\",$C}"
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f1\",$C}"
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1a\",$C}"
+expect "F1 a Bash call is running" "working · Bash running"
+ev "{\"hook_event_name\":\"PostToolUseFailure\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1a\",\"error\":\"Exit code 1\",\"is_interrupt\":false,\"duration_ms\":12,$C}"
+expect "F1 PostToolUseFailure clears 'running': the line moves on to last Bash" "working · last Bash"
+js "d['tool_running'] is None and d['last_tool']['name']=='Bash' and d['tool_calls']==1" && echo "PASS F1 --json: a failed call leaves no tool_running, last_tool Bash, one call" || { echo "FAIL F1 --json after PostToolUseFailure"; fail=1; }
+# PostToolUse, then a "before" of the same id that lands late: the line stays on last Bash, one call counted
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f1\",$C}"
+ev "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1b\",$C}"
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"f1b\",$C}"
+expect_not "F1 a late PreToolUse of a finished id does not set 'running'" "Bash running"
+expect "F1 the line stays on last Bash" "working · last Bash"
+expect "F1 the late PreToolUse still counts the call" "1 call this turn"
+# a PreToolUse with a new id after that: running
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Read\",\"tool_use_id\":\"f1c\",$C}"
+expect "F1 a PreToolUse with a new id is running" "working · Read running"
+js "d['tool_calls']==2" && echo "PASS F1 --json: two calls counted" || { echo "FAIL F1 two calls counted"; fail=1; }
+# a failure after a late-landing "before": same rule
+ev "{\"hook_event_name\":\"PostToolUseFailure\",\"session_id\":\"f1\",\"tool_name\":\"Read\",\"tool_use_id\":\"f1c\",\"error\":\"nope\",$C}"
+ev "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Read\",\"tool_use_id\":\"f1c\",$C}"
+expect "F1 a late PreToolUse after a failure does not set 'running' either" "working · last Read"
+# done: the last 32 ids, newest last; a prompt empties it. Seeded with 31 ids, then three finished calls.
+py - "$S" <<'PY'
+import json,sys; p=sys.argv[1]; s=json.load(open(p)); s["done"]=["seed%d" % i for i in range(31)]; json.dump(s,open(p,"w"))
+PY
+for i in 1 2 3; do ev "{\"hook_event_name\":\"PostToolUse\",\"session_id\":\"f1\",\"tool_name\":\"Bash\",\"tool_use_id\":\"fd$i\",$C}"; done
+js "len(d['done'])==32 and d['done'][-3:]==['fd1','fd2','fd3'] and 'seed0' not in d['done'] and 'seed1' not in d['done'] and d['done'][0]=='seed2'" && echo "PASS F1 done holds 32 at most: the oldest ids drop, the newest stay last" || { echo "FAIL F1 done cap: $(py -c "import json,sys; print(json.load(open(sys.argv[1])).get('done'))" "$S")"; fail=1; }
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f1\",$C}"
+js "d['done']==[]" && echo "PASS F1 a prompt empties done" || { echo "FAIL F1 done after a prompt"; fail=1; }
+ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"f2\",\"source\":\"startup\",$C}"
+js "d['done']==[]" && echo "PASS F1 a fresh session starts with done empty" || { echo "FAIL F1 done in a fresh state"; fail=1; }
+# twenty events fired at once, different ids: status.json parses and counts 20 (POSIX flock; Windows msvcrt.locking)
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"f2\",$C}"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  ( printf '%s' "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"f2\",\"tool_name\":\"Bash\",\"tool_use_id\":\"par$i\",$C}" | CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py" >/dev/null 2>&1 ) &
+done
+wait
+js "d['tool_calls']==20" && echo "PASS F1 twenty events at once: status.json parses and counts 20" || { echo "FAIL F1 twenty at once: $(py -c "import json,sys; print(json.load(open(sys.argv[1])).get('tool_calls'))" "$S" 2>&1)"; fail=1; }
+# hooks.json: the three heartbeat tool handlers are async; no guard, ledger, until-done, wait-gate or recall handler is; the
+# blocking smartuse handlers a tool call waits on (PreToolUse + PostToolUse entries whose matcher fits) are
+# Bash 1, Read 0, Write 1 now and 3, 2, 3 when "async" is ignored (0.6.0: nothing was async).
+HC=$(py - "$H/hooks.json" <<'PY'
+import json, re, sys
+h = json.load(open(sys.argv[1]))["hooks"]
+bad = []
+def handlers(ev):
+    for ent in h.get(ev, []):
+        for hd in ent.get("hooks", []):
+            yield ent.get("matcher"), hd
+def script(hd):
+    m = re.search(r"hooks/([a-z-]+)\.py", hd.get("command", ""))
+    return m.group(1) if m else None
+for ev in h:
+    for _, hd in handlers(ev):
+        s = script(hd)
+        if s is None or not hd.get("command", "").startswith('bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh"'):
+            bad.append("not a smartuse launcher command: %s %s" % (ev, hd.get("command")))
+        tool_hb = s == "heartbeat" and ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure")
+        if tool_hb:
+            if hd.get("async") is not True or hd.get("timeout") != 5:
+                bad.append("heartbeat tool handler under %s must be async with timeout 5: %s" % (ev, hd))
+        elif hd.get("async"):
+            bad.append("%s handler under %s must stay blocking" % (s, ev))
+        elif hd.get("timeout") is None:
+            bad.append("%s under %s lost its timeout" % (s, ev))
+for ev in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+    if not any(m == "*" and script(hd) == "heartbeat" for m, hd in handlers(ev)):
+        bad.append("no heartbeat handler on matcher * under " + ev)
+def waited(tool, ignore_async):
+    n = 0
+    for ev in ("PreToolUse", "PostToolUse"):   # a call that succeeds; a failed one ends in PostToolUseFailure instead of PostToolUse, with the same async heartbeat
+        for m, hd in handlers(ev):
+            if (m is None or m == "*" or re.fullmatch(m, tool)) and (ignore_async or not hd.get("async")):
+                n += 1
+    return n
+now = {t: waited(t, False) for t in ("Bash", "Read", "Write")}
+was = {t: waited(t, True) for t in ("Bash", "Read", "Write")}
+was_ok = was == {"Bash": 3, "Read": 2, "Write": 3}
+if now != {"Bash": 1, "Read": 0, "Write": 1}:
+    bad.append("blocking per call now: %s" % now)
+if not was_ok:
+    bad.append("per call with async ignored: %s" % was)
+print("blocking per call: " + " ".join("%s %d" % kv for kv in now.items()) + " (async ignored: " + " ".join("%s %d" % kv for kv in was.items()) + ")")
+print("BAD" if bad else "OK")
+for b in bad:
+    print(b)
+PY
+)
+case "$HC" in *$'\n'OK*) echo "PASS F1 hooks.json: $(printf '%s\n' "$HC" | head -1)";; *) echo "FAIL F1 hooks.json: $HC"; fail=1;; esac
+# --- 0.6.1 F5b: the switch is visible. SessionStart stores `config` (strict, rules_off, wait_gate: the CLAUDE_PLUGIN_OPTION_* texts as the
+# hook sees them; None when unset) in status.json. While valid rule names are off and strict is not on, --line ends ` · N rule(s) off` and
+# SessionStart prints ONE systemMessage naming them (E5 decides whether the user sees it; the fallback is stderr + exit 2). A name the
+# hook does not know, and the three on the floor (human-only, trust-pin, config-switch), do not count. Strict on, or a strict value the
+# hook cannot read as on or off (counts as strict), shows nothing. Every other run still prints nothing.
+evo() { OUTO=$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py"; echo "rc=$?"); }   # the event in $1, the hook's output + rc in $OUTO; the caller sets the option variables
+SS() { printf '%s' "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"$1\",\"source\":\"${2:-startup}\",$C}"; }
+CLAUDE_PLUGIN_OPTION_RULES_OFF="force-push" evo "$(SS g1)"
+case "$OUTO" in '{"systemMessage": "smartuse: rules off: force-push"}'*"rc=0") echo "PASS F5b SessionStart with one rule off prints one systemMessage naming it, exit 0";; *) echo "FAIL F5b SessionStart message: $OUTO"; fail=1;; esac
+js "d['config']=={'strict':None,'rules_off':'force-push','wait_gate':None}" && echo "PASS F5b --json: config stored as the hook saw it (unset options are None)" || { echo "FAIL F5b config: $(py -c "import json,sys; print(json.load(open(sys.argv[1])).get('config'))" "$S")"; fail=1; }
+ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"g1\",$C}"
+expect "F5b the line ends with the suffix for one rule" " · 1 rule off"
+expect_not "F5b one rule is singular" "1 rules off"
+CLAUDE_PLUGIN_OPTION_RULES_OFF="Force-Push, sudo  nonsense,human-only,trust-pin,config-switch" evo "$(SS g2)"
+case "$OUTO" in '{"systemMessage": "smartuse: rules off: force-push, sudo"}'*"rc=0") echo "PASS F5b the message names the valid rules only (case, commas and blanks separate; unknown and floor names dropped)";; *) echo "FAIL F5b message names: $OUTO"; fail=1;; esac
+expect "F5b two valid rules: plural" " · 2 rules off"
+CLAUDE_PLUGIN_OPTION_STRICT="true" CLAUDE_PLUGIN_OPTION_RULES_OFF="force-push" evo "$(SS g3)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b strict on: Rules off is ignored, nothing printed" || { echo "FAIL F5b strict on printed: $OUTO"; fail=1; }
+expect_not "F5b strict on: no suffix" "rule"
+CLAUDE_PLUGIN_OPTION_STRICT="maybe" CLAUDE_PLUGIN_OPTION_RULES_OFF="force-push" evo "$(SS g4)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b a strict value that is neither on nor off counts as strict: nothing printed" || { echo "FAIL F5b unreadable strict printed: $OUTO"; fail=1; }
+expect_not "F5b unreadable strict: no suffix" " off"
+CLAUDE_PLUGIN_OPTION_STRICT="false" CLAUDE_PLUGIN_OPTION_WAIT_GATE="on" CLAUDE_PLUGIN_OPTION_RULES_OFF="nonsense,human-only" evo "$(SS g5)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b only unknown and floor names: nothing printed" || { echo "FAIL F5b unknown names printed: $OUTO"; fail=1; }
+js "d['config']=={'strict':'false','rules_off':'nonsense,human-only','wait_gate':'on'}" && echo "PASS F5b --json: the three options stored as texts" || { echo "FAIL F5b config texts"; fail=1; }
+expect_not "F5b unknown and floor names: no suffix" "rule"
+evo "$(SS g6)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b SessionStart with no option set prints nothing" || { echo "FAIL F5b no options printed: $OUTO"; fail=1; }
+js "d['config']=={'strict':None,'rules_off':None,'wait_gate':None}" && echo "PASS F5b --json: nothing set -> config of three None" || { echo "FAIL F5b empty config"; fail=1; }
+CLAUDE_PLUGIN_OPTION_RULES_OFF="sudo" evo "$(SS g7)"; ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"g7\",$C}"
+CLAUDE_PLUGIN_OPTION_RULES_OFF="sudo" evo "$(SS g7 compact)"
+[ "$OUTO" = "rc=0" ] && echo "PASS F5b a compact of the same session does not repeat the message" || { echo "FAIL F5b compact message: $OUTO"; fail=1; }
+expect "F5b ... and the suffix stays on the line" " · 1 rule off"
+# the literal copy of bash-guard.py's RULE_NAMES in heartbeat.py (no import between hooks) must match it; skipped while bash-guard.py has no RULE_NAMES
+CMP=$(py - "$H/heartbeat.py" "$H/bash-guard.py" <<'PY'
+import ast, sys
+def tup(path, name):
+    for n in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+            return list(ast.literal_eval(n.value))
+    return None
+mine, theirs = tup(sys.argv[1], "KNOWN_RULES"), tup(sys.argv[2], "RULE_NAMES")
+if mine is None:
+    print("BAD heartbeat.py has no KNOWN_RULES")
+elif theirs is None:
+    print("SKIP bash-guard.py has no RULE_NAMES yet (the tracks are not merged)")
+elif sorted(mine) == sorted(theirs) and len(set(mine)) == len(mine):
+    print("OK %d names" % len(mine))
+else:
+    print("BAD only in heartbeat.py: %s; only in bash-guard.py: %s" % (sorted(set(mine) - set(theirs)), sorted(set(theirs) - set(mine))))
+PY
+)
+case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; SKIP*) echo "PASS (skipped) F5b KNOWN_RULES vs RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
+# --- 0.6.1 F6: --guard, the second optional first word of py.sh, on the three guard commands. No interpreter and Strict guards on (the option
+# text is anything but empty / off / false / no / 0) -> a fixed sentence on stderr and exit 2: the call is blocked and Claude is told why.
+# Light (the default, also when no option is set) -> silent exit 0 as before. With an interpreter nothing changes.
+GUARDSAY="smartuse: Python 3 was not found (tried python3, python, py -3), so this call is blocked: Strict guards is on and its guard cannot run. Install Python 3.9 or newer and restart Claude Code, or switch Strict guards off in /plugin configure."
+RC=0; OUT=$(printf '{}' | CLAUDE_PLUGIN_OPTION_STRICT=true PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && [ "$(cat "$D/missing.err")" = "$GUARDSAY" ] && echo "PASS F6 --guard, no interpreter, strict: the fixed sentence on stderr, exit 2, empty stdout" || { echo "FAIL F6 --guard strict without an interpreter: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+RC=0; OUT=$(printf '{}' | CLAUDE_PLUGIN_OPTION_STRICT=maybe PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && echo "PASS F6 --guard, no interpreter, a Strict text that is neither on nor off counts as strict: exit 2" || { echo "FAIL F6 --guard unreadable strict: stdout '$OUT', rc $RC"; fail=1; }
+for SV in UNSET "" off False " no " 0; do
+  if [ "$SV" = UNSET ]; then RC=0; OUT=$(printf '{}' | env -u CLAUDE_PLUGIN_OPTION_STRICT PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?
+  else RC=0; OUT=$(printf '{}' | CLAUDE_PLUGIN_OPTION_STRICT="$SV" PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?; fi
+  [ "$OUT" = "" ] && [ "$RC" = 0 ] && [ ! -s "$D/missing.err" ] && echo "PASS F6 --guard, no interpreter, light (Strict '$SV'): silent exit 0" || { echo "FAIL F6 --guard light ('$SV'): stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+done
+OUT=$(CLAUDE_PLUGIN_OPTION_STRICT=true PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --guard -c "print('ran')" 2>&1) || true
+[ "$OUT" = ran ] && echo "PASS F6 --guard with an interpreter: the word is dropped, the interpreter runs" || { echo "FAIL F6 --guard with an interpreter: '$OUT'"; fail=1; }
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" -c "import sys; print(' '.join(sys.argv[1:]))" --guard x 2>&1) || true
+[ "$OUT" = "--guard x" ] && echo "PASS F6 --guard in a later position reaches Python untouched" || { echo "FAIL F6 later --guard: '$OUT'"; fail=1; }
+HG=$(py - "$H/hooks.json" <<'PY'
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]
+bad, pre = [], h["PreToolUse"]
+want = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" --guard "${CLAUDE_PLUGIN_ROOT}/hooks/%s.py"'
+n = 0
+for ev, ents in h.items():
+    for ent in ents:
+        for hd in ent.get("hooks", []):
+            c = hd.get("command", "")
+            if "--guard" in c:
+                n += 1
+                if ev != "PreToolUse" or c not in (want % "bash-guard", want % "file-guard") or hd.get("async") or hd.get("timeout") != 10:
+                    bad.append("unexpected --guard: %s %r" % (ev, hd))
+            elif ("bash-guard.py" in c or "file-guard.py" in c):
+                bad.append("a guard command without --guard: %s" % c)
+bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell"]
+mcp = [e for e in pre if str(e.get("matcher", "")).startswith("mcp__")]
+if len(bash) != 1 or len(mcp) != 1 or bash[0]["hooks"] != mcp[0]["hooks"]:
+    bad.append("the Bash|PowerShell entry and the mcp tool entry must keep identical commands")
+if n != 3:
+    bad.append("%d --guard commands, expected 3" % n)
+print("BAD " + "; ".join(bad) if bad else "OK")
+PY
+)
+[ "$HG" = OK ] && echo "PASS F6 hooks.json: exactly the three guard commands carry --guard (blocking, timeout 10); the Bash and mcp entries are identical" || { echo "FAIL F6 hooks.json: $HG"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

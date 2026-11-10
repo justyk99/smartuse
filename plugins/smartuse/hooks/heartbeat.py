@@ -3,7 +3,7 @@
 Deterministic, 0 model tokens, no network, stdlib only.
 
 Hook (stdin = the event JSON; prints nothing; exit 0 always): SessionStart · UserPromptSubmit · PreToolUse · PostToolUse ·
-SubagentStart · SubagentStop · Notification (idle_prompt | permission_prompt) · Stop · SessionEnd. Every event updates
+PostToolUseFailure (treated as PostToolUse) · SubagentStart · SubagentStop · Notification (idle_prompt | permission_prompt) · Stop · SessionEnd. Every event updates
 ~/.claude/smartuse/projects/<key>/status.json (same state dir as ledger.py and until-done.py; atomic tmp + os.replace — on
 Windows the replace is retried 5 x 20 ms while another reader holds the file, then the tmp file is dropped, never an error).
 <key> is the repo's full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-"
@@ -16,7 +16,9 @@ name>/, is shared by every repo of that name and is never used, even while the k
   turn_ended (Stop sets it; UserPromptSubmit / PreToolUse / PostToolUse clear it) ·
   waiting_since (when the wait on the human began: Stop, idle_prompt or permission_prompt; cleared when work resumes) ·
   tool_calls (this turn, reset on UserPromptSubmit) · tool_running {name, tool_use_id, since} (PreToolUse sets, any
-  PostToolUse clears) · last_tool {name, at} · agents {agent_id: {type, since}} (SubagentStart adds, SubagentStop removes;
+  PostToolUse / PostToolUseFailure clears) · done (the last 32 tool_use_ids a PostToolUse / PostToolUseFailure saw; UserPromptSubmit
+  empties it: the tool-event handlers run in the background, so a PreToolUse whose id is in `done` landed after its own "after"
+  and is counted but does not set tool_running) · last_tool {name, at} · agents {agent_id: {type, since}} (SubagentStart adds, SubagentStop removes;
   entries older than 3 h are ignored when rendering) · agents_done · notification (idle_prompt | permission_prompt | null;
   Notification sets, UserPromptSubmit / PreToolUse / PostToolUse / Stop clear) · ended + end_reason (SessionEnd).
 SessionStart resets the file for the new session (counters at 0) — except source "compact" of the same session, which
@@ -53,14 +55,24 @@ Windows: Git Bash converts POSIX paths in arguments and environment variables fo
 stdin, so a "cwd" taken from it goes through native_path() ("/c/Users/x" -> "C:/Users/x"); stdin is read as bytes and decoded
 as UTF-8 (Windows Python would decode a pipe in the ANSI code page and raise on the first non-ASCII byte, losing the event);
 the renderers print UTF-8 ("·") whatever the console code page (stdout is reconfigured in main()).
+The owner's switches (0.6.1 F5b): SessionStart stores `config` {strict, rules_off, wait_gate} in status.json, the CLAUDE_PLUGIN_OPTION_*
+texts as this hook sees them (None = not set). While valid rule names are off and strict is not on (a strict text that is not off /
+false / no / 0 counts as strict), --line ends " · N rule(s) off" and SessionStart prints one {"systemMessage": "smartuse: rules off: a, b"}
+(not for source "compact"). Unknown names and the floor rules do not count. This is the one thing a hook run prints.
 Never blocks a turn. Any error -> exit 0 silently (a heartbeat must never stop the work).
 """
 import json, os, sys, re, time, datetime, pathlib
 
 HOME = pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))   # HOME first: on Windows expanduser("~") reads USERPROFILE and ignores HOME (the tests and users who set HOME need it)
-EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop",
+EVENTS = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop",
           "Notification", "Stop", "SessionEnd"}
 WAITS = ("idle_prompt", "permission_prompt")
+DONE_KEEP = 32   # finished tool_use_ids kept in status.json (`done`)
+# The rule names bash-guard.py knows (its RULE_NAMES), copied here because hooks never import each other. This copy MUST match
+# bash-guard.py's RULE_NAMES; heartbeat-test.sh reads both files as text and compares them. FLOOR_RULES are on whatever the owner types.
+KNOWN_RULES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "claude-json", "secrets-dir",
+               "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
+FLOOR_RULES = ("human-only", "trust-pin", "config-switch")
 STALE_AGENT_S = 3 * 3600
 PREFIX = "smartuse · "
 
@@ -201,13 +213,30 @@ def write_json(path, obj):
 
 
 def lock(sdir):
-    """Best-effort exclusive lock so two hooks firing at once (parallel tool calls) do not lose each other's update.
-    Released when the fd closes; no fcntl (Windows) -> unlocked, last writer wins."""
+    """Best-effort exclusive lock so two hooks firing at once (parallel tool calls; the tool-event handlers run in the background)
+    do not lose each other's update. POSIX: fcntl.flock. Windows (no fcntl): one byte of status.lock through msvcrt.locking,
+    tried every 10 ms for at most 1 s, then the hook goes on unlocked (last writer wins), as it did before the lock existed.
+    Released when the fd closes."""
     try:
-        import fcntl
         fd = os.open(str(sdir / "status.lock"), os.O_CREAT | os.O_RDWR, 0o644)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        return fd
+        try:
+            import fcntl
+        except ImportError:
+            fcntl = None
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return fd
+        import msvcrt
+        end = time.monotonic() + 1.0
+        while True:
+            try:
+                os.lseek(fd, 0, 0)   # msvcrt.locking locks from the current position
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return fd
+            except OSError:
+                if time.monotonic() >= end:
+                    return fd   # waited long enough: go on unlocked
+                time.sleep(0.01)
     except Exception:
         return None
 
@@ -215,9 +244,44 @@ def lock(sdir):
 def unlock(fd):
     try:
         if fd is not None:
+            try:
+                import msvcrt
+                os.lseek(fd, 0, 0)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)   # a no-op error when this hook went on unlocked
+            except Exception:
+                pass
             os.close(fd)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------- the owner's switches (plugin options, read from the hook's own environment)
+
+def config_now():
+    """The three plugin options as this hook process sees them: the CLAUDE_PLUGIN_OPTION_<KEY> texts (None = not set)."""
+    out = {}
+    for key in ("strict", "rules_off", "wait_gate"):
+        v = os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper())
+        out[key] = v[:500] if isinstance(v, str) else None
+    return out
+
+
+def strict_on(v):
+    """Strict is off for off / false / no / 0 and for nothing; any other text (on, true, yes, 1 or one that cannot be read) counts as strict."""
+    t = str(v if v is not None else "").strip().lower()
+    return t not in ("", "off", "false", "no", "0")
+
+
+def rules_off(cfg):
+    """The valid rule names the owner has switched off, in the order typed: none while strict is on. Names are separated by commas or blanks;
+    a name this file does not know and the floor rules (always on) do not count."""
+    if not isinstance(cfg, dict) or strict_on(cfg.get("strict")):
+        return []
+    out = []
+    for n in re.split(r"[,\s]+", str(cfg.get("rules_off") or "").lower()):
+        if n in KNOWN_RULES and n not in FLOOR_RULES and n not in out:
+            out.append(n)
+    return out
 
 
 # ---------------------------------------------------------------- state machine
@@ -225,7 +289,7 @@ def unlock(fd):
 def fresh(sid, now):
     return {"session_id": sid, "started": iso(now), "updated": iso(now), "source": None, "turn": 0, "prompt_at": None, "turn_ended": False,
             "waiting_since": None, "tool_calls": 0, "tool_running": None, "last_tool": None, "agents": {},
-            "agents_done": 0, "notification": None, "ended": False, "end_reason": None}
+            "agents_done": 0, "notification": None, "ended": False, "end_reason": None, "done": []}
 
 
 def live_agents(st, now):
@@ -263,6 +327,13 @@ def gate_will_block(sdir):
     return any((u.get("status") or "pending") in ("pending", "running", "fail") for u in units)
 
 
+def done_ids(st):
+    """The tool_use_ids a PostToolUse / PostToolUseFailure saw, oldest first, at most DONE_KEEP (a state file without the key, or with a
+    bad one, has none)."""
+    d = st.get("done")
+    return [x for x in d if isinstance(x, str)] if isinstance(d, list) else []
+
+
 def resume(st):
     st["turn_ended"] = False
     st["waiting_since"] = None
@@ -279,6 +350,7 @@ def apply(st, ev, data, now, sdir):
             st["compactions"] = to_int(st.get("compactions")) + 1
             st["compact_at"] = iso(now)
         st["source"] = data.get("source")
+        st["config"] = config_now()
     elif st is None or st.get("session_id") != sid:
         if ev == "SessionEnd" and st is not None:
             return None   # a dying session never overwrites the live one
@@ -289,15 +361,22 @@ def apply(st, ev, data, now, sdir):
         st["prompt_at"] = iso(now)
         st["tool_calls"] = 0
         st["tool_running"] = None
+        st["done"] = []
         resume(st)
     elif ev == "PreToolUse":
         st["tool_calls"] = to_int(st.get("tool_calls")) + 1
-        st["tool_running"] = {"name": data.get("tool_name") or "tool", "tool_use_id": data.get("tool_use_id"), "since": iso(now)}
-        resume(st)
-    elif ev == "PostToolUse":
+        tid = data.get("tool_use_id")
+        if tid and tid in done_ids(st):
+            pass   # the tool-event handlers run in the background: this "before" landed after its own "after"; it is counted, but must not undo it
+        else:
+            st["tool_running"] = {"name": data.get("tool_name") or "tool", "tool_use_id": tid, "since": iso(now)}
+            resume(st)
+    elif ev in ("PostToolUse", "PostToolUseFailure"):   # a failed call ends in PostToolUseFailure (fields: tool_name, tool_use_id, error, is_interrupt), not PostToolUse
         name = data.get("tool_name") or (st.get("tool_running") or {}).get("name") or "tool"
         st["last_tool"] = {"name": name, "at": iso(now)}
         st["tool_running"] = None
+        if data.get("tool_use_id"):
+            st["done"] = (done_ids(st) + [data["tool_use_id"]])[-DONE_KEEP:]
         resume(st)
     elif ev == "SubagentStart":
         agents = live_agents(st, now)
@@ -338,12 +417,18 @@ def on_event():
         sdir = state_dir(project_dir(data), create=True)
         path = sdir / "status.json"
         fd = lock(sdir)
+        msg = ""
         try:
             st = apply(read_dict(path), ev, data, now, sdir)
             if st is not None:
                 write_json(path, st)
+                if ev == "SessionStart" and data.get("source") != "compact":   # the one line a hook run may print: which rules the owner has switched off
+                    off = rules_off(st.get("config"))
+                    msg = ("smartuse: rules off: " + ", ".join(off)) if off else ""
         finally:
             unlock(fd)
+        if msg:
+            print(json.dumps({"systemMessage": msg}))
     except Exception:
         pass
 
@@ -446,6 +531,9 @@ def render(sdir, now=None, name=None):
                 state = "working"
                 body = "working · " + (f"last {lt.get('name')} {since(lt.get('at'), now)}" if lt and calls else f"thinking {fmt_dur(quiet)}") + f" · {n_calls}"
     body += routing_suffix(r)
+    n_off = len(rules_off(st.get("config"))) if st else 0
+    if n_off:
+        body += f" · {n_off} rule{'' if n_off == 1 else 's'} off"
     if st and to_int(st.get("compactions")) > 0:
         body += f" · squeezed {to_int(st.get('compactions'))}×" + (f" (last {hhmm(st.get('compact_at'))})" if hhmm(st.get("compact_at")) else "")
     return {"state": state, "line": flag + PREFIX + body, "short": flag + body, "status": st}

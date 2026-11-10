@@ -22,6 +22,7 @@ H="$(cd "$(dirname "$0")/.." && pwd)"; GATE="$H/wait-gate.py"
 D=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-wait.XXXXXX") && [ -d "$D" ] || { echo "FAIL could not create a temp dir under ${TMPDIR:-/tmp}"; exit 1; }
 trap 'case "$D" in */smartuse-wait.*) rm -rf "$D" 2>/dev/null;; esac' EXIT   # removes this run's own dir and nothing else
 export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/proj" "$D/t"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
+export CLAUDE_PLUGIN_OPTION_STRICT=true; unset CLAUDE_PLUGIN_OPTION_WAIT_GATE   # 0.6.1 F6: the gate is on in strict (and with the wait_gate option), off in light, which is the default; every case below this line is the strict bar, the light block near the end sets the options itself
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
 key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-" (~/.claude/smartuse/projects/<key>/)
@@ -1251,6 +1252,28 @@ gate incident; py -c "import json,sys; d=json.loads(sys.argv[1]); assert d['deci
   && ok "the block is {\"decision\":\"block\",\"reason\":...} on one line with ASCII escapes (no console re-encoding needed)" || ko "block shape: $OUT"
 [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 1 ] && ok "exactly one line on stdout" || ko "stdout is not one line: $OUT"
 r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: Stop runs ledger, until-done, wait-gate (timeout 10), heartbeat" || ko "hooks.json: $r"
+# ===== 6. 0.6.1 F6: the level. Light (the default, also when Claude Code passes no option) leaves at once: nothing read, nothing printed, nothing
+# written. The gate runs when Strict guards is on, or the Wait gate option is on; a value that is neither on nor off counts as on (strict).
+# The adapter's `wait_gate: off` still wins per project. The options are set here in the main shell so a failed case still counts.
+rm -f "$D/proj/.claude/smartuse.local.md"
+export CLAUDE_PLUGIN_OPTION_STRICT=false; unset CLAUDE_PLUGIN_OPTION_WAIT_GATE
+want_pass "F6 light (Strict off, Wait gate unset): the incident passes, nothing printed" incident
+[ ! -e "$P" ] && ok "F6 light writes nothing (no marker, no wait.json)" || ko "F6 light wrote: $(ls "$P")"
+unset CLAUDE_PLUGIN_OPTION_STRICT
+want_pass "F6 no option at all (Claude Code passed none): light, the incident passes" incident
+export CLAUDE_PLUGIN_OPTION_STRICT=false CLAUDE_PLUGIN_OPTION_WAIT_GATE=on
+want_block "F6 the Wait gate option alone turns the gate on" incident "wait gate: you handed off"
+export CLAUDE_PLUGIN_OPTION_STRICT=false CLAUDE_PLUGIN_OPTION_WAIT_GATE=0
+want_pass "F6 Strict off and Wait gate 0: the gate is off" incident
+export CLAUDE_PLUGIN_OPTION_STRICT=maybe; unset CLAUDE_PLUGIN_OPTION_WAIT_GATE
+want_block "F6 a Strict value that is neither on nor off counts as strict: the gate is on" incident "wait gate: you handed off"
+export CLAUDE_PLUGIN_OPTION_STRICT=true
+mkdir -p "$D/proj/.claude"; printf -- '---\nwait_gate: off\n---\n' > "$D/proj/.claude/smartuse.local.md"
+want_pass "F6 the adapter's wait_gate: off beats Strict" incident
+export CLAUDE_PLUGIN_OPTION_STRICT=false CLAUDE_PLUGIN_OPTION_WAIT_GATE=on
+want_pass "F6 ... and beats the Wait gate option" incident
+rm -f "$D/proj/.claude/smartuse.local.md"; export CLAUDE_PLUGIN_OPTION_STRICT=true; unset CLAUDE_PLUGIN_OPTION_WAIT_GATE
+want_block "F6 strict: the incident replay blocks once, as in 0.6.0" incident "wait gate: you handed off"
 CI="$H/../../../.github/workflows/ci.yml"
 if [ -f "$CI" ]; then
   grep -q 'plugins/smartuse/hooks/wait-gate.py' "$CI" && grep -q 'bash plugins/smartuse/hooks/tests/wait-gate-test.sh' "$CI" && ok "ci.yml: wait-gate.py is in the py_compile step and this suite has a step of its own" || ko "ci.yml lacks wait-gate.py or the suite's step"
