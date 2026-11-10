@@ -73,6 +73,9 @@ RULES = [
     (r"\bsvn\s+(revert|resolve\s+--accept\s+theirs-full)\b",
      "svn revert / theirs-full — colleagues' uncommitted work would be lost"),
 ]
+# One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
+RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "sql-destructive", "force-push",
+              "human-only", "fake-tty", "trust-pin", "svn-revert")
 
 # <<EOF … EOF  /  <<'EOF' … EOF  /  <<-EOF … EOF   (body = group 3)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
@@ -1303,6 +1306,233 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
     return why
 
 
+# ---- waivers (0.6.1): honest commands that two RULES entries match by mistake ----------------------------------------------------
+# A match of a rule named in WAIVABLE can be waived, and only when EVERY match of that rule in the text is such a case. Anything the
+# waiver cannot read cleanly stays denied: a text complexity() tags, a text words() or flex_split cannot split, a line continuation.
+#   pipe-to-shell: a download piped into Python, Node or Perl that was given its own program (a module, a program text or a script
+#                  file, never standard input), so the download is that program's data. A shell, a bare interpreter, an interpreter
+#                  behind sudo or other wrapper, or a program that evaluates its own input is not waived.
+#   sudo:          the word carried as text, in an argument of a command that only carries text (the message of git commit / tag /
+#                  notes, echo, printf, grep, rg, the title and body of gh pr / issue / release). Not waived when the text holds a
+#                  command substitution or process substitution anywhere, when any segment has sudo or doas before its command, or
+#                  when a pipe feeds anything but a plain filter.
+WAIVABLE = frozenset(("pipe-to-shell", "sudo"))
+PIPE_OK = frozenset(("head", "tail", "wc", "sort", "uniq", "cat", "cut", "tr", "less", "more", "grep", "rg", "nl", "column", "jq"))   # read what is piped in, run nothing
+STDIN_MODULES = frozenset(("code", "codeop", "pdb", "runpy", "cprofile", "profile", "trace", "timeit", "idlelib", "pydoc", "doctest", "pickle"))   # standard modules that run or load what they read from stdin
+PROGRAM_CODE = re.compile(r"\b(?:eval|exec|compile|system|popen|spawn|Function|__import__|runpy|import_module)|\$\(|`|\bqx\b")   # a program text that evaluates input, or a substitution
+PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))
+NODE_FLAG = re.compile(r"--(?:no-warnings|no-deprecation|trace-warnings|enable-source-maps|use-strict|harmony|max-old-space-size=\d+|input-type=\w+)")
+NODE_VALUED = frozenset(("-r", "--require", "--import", "--loader", "--experimental-loader", "--input-type"))
+PERL_PROGRAM = re.compile(r"-[lanpwWtTuU0-9]*[eE]")   # -e -ne -lane -pe -0777ne: the program text is the next word
+PERL_FLAGS = re.compile(r"-[lanpwWtTuU0-9]+|-[MmIF]\S+")
+
+
+def _shell_tokens(t):
+    """[(kind, value, start, end)] for a shell text read as flex_split reads it (redirections and their targets leave no word), or
+    None when it does not split cleanly."""
+    out, pos = [], 0
+    while pos < len(t):
+        m = FLEX.match(t, pos)
+        if not m:
+            return None
+        s, pos = pos, m.end()
+        if m.group("word"):
+            out.append(("word", UNQUOTE.sub(lambda q: next(g for g in q.groups() if g is not None), m.group("word")), s, pos))
+        elif m.group("sep"):
+            out.append(("sep", m.group("sep"), s, pos))
+    return out
+
+
+def _option_values(v, start, letters, flags, longs):
+    """Indices of the words of v (from `start`) that are the VALUE of an option: -m VALUE, -mVALUE, -am VALUE (a bundle of `flags`
+    letters ending in an option letter of `letters`), --message VALUE, --message=VALUE. Nothing after a bare --."""
+    out, take = set(), False
+    for j in range(start, len(v)):
+        a = v[j]
+        if take:
+            out.add(j)
+            take = False
+        elif a == "--":
+            break
+        elif a in longs:
+            take = True
+        elif a.startswith("--"):
+            k = a.find("=")
+            if k > 0 and a[:k] in longs:
+                out.add(j)
+        elif a.startswith("-") and len(a) > 1:
+            n = 1
+            while n < len(a) and a[n] in flags:
+                n += 1
+            if n < len(a) and a[n] in letters:
+                if n + 1 < len(a):
+                    out.add(j)
+                else:
+                    take = True
+    return out
+
+
+def _text_words(v, i):
+    """The words of the command v[i:] that are text and nothing else (True: every argument), or None when the command is not one
+    that only carries text: git commit / tag / notes (the message options), echo, printf, grep, rg (not its --pre program), gh pr /
+    issue / release (the title, body and notes options)."""
+    cmd = base_name(v[i]).lower()
+    if cmd in ("echo", "printf", "grep"):
+        return True
+    if cmd == "rg":
+        return None if any(a == "--pre" or a.startswith("--pre=") for a in v[i + 1:]) else True
+    if cmd == "git":
+        k = i + 1
+        while k < len(v) and v[k].startswith("-"):
+            k += 2 if v[k] in ("-C", "-c", "--git-dir", "--work-tree", "--namespace") else 1
+        if k < len(v) and v[k] in ("commit", "tag", "notes"):
+            return _option_values(v, k + 1, "m", "aensvq", ("--message",))
+        return None
+    if cmd == "gh" and i + 1 < len(v) and v[i + 1] in ("pr", "issue", "release"):
+        return _option_values(v, i + 2, "tbn", "", ("--title", "--body", "--notes"))
+    return None
+
+
+def _own_program(kind, a):
+    """Does this interpreter, given the words `a` after its name, run a module, a program text or a script file of its own, and
+    never standard input as the program? Any option it does not know counts as no."""
+    def text_ok(s):
+        return bool(s) and not PROGRAM_CODE.search(s)
+    def script_ok(w):
+        name = re.split(r"[\\/]", w)[-1]
+        return not (STDIN_FILE.match(w) or name in ("", "stdin", "0") or re.search(r"[$`]", name))
+    i, n = 0, len(a)
+    while i < n:
+        w = a[i]
+        if kind == "python":
+            if w in ("-m", "-c") or (len(w) > 2 and w[:2] in ("-m", "-c")):
+                v = (a[i + 1] if i + 1 < n else "") if len(w) == 2 else w[2:]
+                if w[:2] == "-c":
+                    return text_ok(v)
+                return bool(re.fullmatch(r"[A-Za-z_][\w.]*", v)) and v.split(".")[0].lower() not in STDIN_MODULES
+            if w in PY_FLAGS:
+                i += 1
+            elif w in ("-X", "-W"):
+                i += 2
+            elif w.startswith("-"):
+                return False
+            else:
+                return script_ok(w)
+        elif kind == "node":
+            if w in ("-e", "--eval", "-p", "--print"):
+                return i + 1 < n and text_ok(a[i + 1])
+            if w.startswith(("--eval=", "--print=")):
+                return text_ok(w.split("=", 1)[1])
+            if w in NODE_VALUED:
+                i += 2
+            elif NODE_FLAG.fullmatch(w):
+                i += 1
+            elif w.startswith("-"):
+                return False
+            else:
+                return script_ok(w)
+        else:   # perl
+            if PERL_PROGRAM.fullmatch(w):
+                return i + 1 < n and text_ok(a[i + 1])
+            if PERL_FLAGS.fullmatch(w):
+                i += 1
+            elif w.startswith("-"):
+                return False
+            else:
+                return script_ok(w)
+    return False
+
+
+WAIVER_ERRORS = []   # what a waiver raised, if anything (a test reads it); a waiver that raises waives nothing
+
+
+def waived(name, text, ps):
+    """True when `name` is a waivable rule and every match of it in `text` (the text main() runs RULES on; `ps` for the PowerShell
+    tool) is an honest command of its class (see above). An error is a no."""
+    try:
+        return _waived(name, text, ps)
+    except Exception as e:
+        WAIVER_ERRORS.append(repr(e))
+        return False
+
+
+def _waived(name, text, ps):
+    """The work of waived. Linear in the text: the matches and the words are walked once, side by side."""
+    if name not in WAIVABLE or complexity(text, ps):
+        return False
+    t = text.replace("\\", "/") if ps else text   # PowerShell has no backslash escape: read as a bash text it would hide a command inside a quote
+    if "\\\n" in t or words(t) is None:
+        return False
+    toks = _shell_tokens(t)
+    if toks is None:
+        return False
+    segs, ends = [[]], []
+    for kind, val, s, e in toks:
+        if kind == "word":
+            segs[-1].append((val, s, e))
+        else:
+            ends.append(val)
+            segs.append([])
+    ends.append("")
+    vals = [[w[0] for w in seg] for seg in segs]
+    first = [command_start(v) for v in vals]
+    hits = list(re.finditer(RULES[RULE_NAMES.index(name)][0], t, re.I | re.S))
+    if not hits:
+        return False
+    flat = [(w[1], w[2], si, wi) for si, seg in enumerate(segs) for wi, w in enumerate(seg)]
+    ptr = [0]
+    def token_at(pos):   # (segment, word) of the word that holds position pos, or None; positions come in ascending order
+        p = ptr[0]
+        while p < len(flat) and flat[p][1] <= pos:
+            p += 1
+        ptr[0] = p
+        return (flat[p][2], flat[p][3]) if p < len(flat) and flat[p][0] <= pos else None
+    if name == "sudo":
+        if "$(" in t or "`" in t or "<(" in t or ">(" in t:
+            return False
+        for si, v in enumerate(vals):
+            if any(base_name(w).lower() in ("sudo", "doas") for w in v[:first[si]]):
+                return False
+            if si and ends[si - 1] in ("|", "|&") and (first[si] >= len(v) or base_name(v[first[si]]).lower() not in PIPE_OK):
+                return False
+    memo = {}
+    for m in hits:
+        if name == "sudo":
+            tk = token_at(m.start())
+            if tk is None:
+                return False
+            si, wi = tk
+            i = first[si]
+            if wi <= i or i >= len(vals[si]):
+                return False
+            if si not in memo:
+                memo[si] = _text_words(vals[si], i)
+            if memo[si] is None or (memo[si] is not True and wi not in memo[si]):
+                return False
+        else:
+            if m.group(2):   # (sudo\s+)? of the pattern
+                return False
+            tk = token_at(m.end() - 1)
+            if tk is None or tk[1] != 0 or tk[0] == 0 or ends[tk[0] - 1] != "|":
+                return False
+            si, pj = tk[0], tk[0] - 1
+            v = vals[si]
+            n = base_name(v[0]).lower()
+            kind = "python" if PYFAM.fullmatch(n) else (n if n in ("node", "perl") else "")
+            if not kind or not _own_program(kind, v[1:]):
+                return False
+            pv = vals[pj]
+            if first[pj] >= len(pv) or base_name(pv[first[pj]]).lower() not in ("curl", "wget") \
+                    or not (segs[pj][0][1] <= m.start() < segs[pj][-1][2]):
+                return False
+            k = si   # what the interpreter prints must not be piped on into a shell: the download would reach it
+            while ends[k] in ("|", "|&"):
+                k += 1
+                if first[k] >= len(vals[k]) or base_name(vals[k][first[k]]).lower() not in PIPE_OK:
+                    return False
+    return True
+
+
 def deny(why):
     msg = f"bash-guard: {why}"
     if len(msg) > MAX_REASON:
@@ -1351,8 +1581,8 @@ def main():
             leave()
             return
     text = ps_text(pre) if ps else (pre if many_heredocs(pre) else strip_heredocs(pre))   # no heredocs in PowerShell
-    for pat, why in RULES:
-        if re.search(pat, text, re.I | re.S):
+    for (pat, why), name in zip(RULES, RULE_NAMES):
+        if re.search(pat, text, re.I | re.S) and not (name in WAIVABLE and not tag and waived(name, text, ps)):
             deny(why)
             return
     why = None if early else gate()
