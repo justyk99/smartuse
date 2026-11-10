@@ -84,14 +84,27 @@ RULES = [
      "pinning a check script is a human-only action — the user runs it in their own terminal"),
     (r"\bsvn\s+(revert|resolve\s+--accept\s+theirs-full)\b",
      "svn revert / theirs-full — colleagues' uncommitted work would be lost"),
+    # config-switch (0.6.1): the shell routes that would change smartuse's switches, by text. (1) the plugin command's configure / enable /
+    # disable / uninstall naming this plugin (any @marketplace), or `disable --all`, and an install of it that sets options; (2) a write to
+    # a Claude Code settings file, in a command that also names one of the keys that hold the switches. It reads text only: a write hidden
+    # inside another program or built at run time is not seen. Linear: every repetition is bounded or cannot start inside its own run.
+    (r"(?<![\w.-])claude(?:\.exe)?(?:\s+-[^\s;&|]+)*\s+plugins?\s+(?:"
+     r"(?:configure|config|enable|disable|uninstall|remove|rm)(?:\s+[^\s;&|]+){0,8}?\s+(?:[\"']?smartuse(?![\w-])|--all(?![\w-]))"
+     r"|install(?:\s+[^\s;&|]+){0,8}?\s+[\"']?smartuse(?![\w-])[^\s;&|]*(?:\s+[^\s;&|]+){0,16}?\s+(?:--[\w-]*(?:config|option|set)[\w-]*|(?:strict|rules_off|wait_gate)\b))"
+     r"|^(?=.*(?:pluginConfigs|enabledPlugins|disableAllHooks))(?:"
+     r"(?=.*(?:>\s*[^\s;&|>]*(?<![\w.-])settings(?:\.local)?\.json(?![\w-])"
+     r"|\b(?:tee|cp|mv|sponge|install|sed\s+-i)\b(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*(?<![\w.-])settings(?:\.local)?\.json(?![\w-])))"
+     r"|(?=.*(?<![\w.-])settings(?:\.local)?\.json(?![\w-]))(?=.*\b(?:python3?|py\.sh|node|perl|ruby|set-content|add-content|out-file|tee-object)\b)"
+     r"(?=.*(?:write|dump|[\"'][wa][b+]?[\"']|content|out-file)))",
+     "switching smartuse's guards is the owner's action: /plugin configure or /config"),
 ]
 # One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
 RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
-              "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert")
+              "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
 # The guard level (0.6.1). Strict: every rule. Light (the default): the rules in LIGHT_OFF are off, and so is any rule named in the
 # plugin option rules_off, except the FLOOR, which protects the switches themselves and is always on.
-LIGHT_OFF = frozenset(("force-with-lease", "secrets-dir", "claude-json"))
-FLOOR = frozenset(("human-only", "trust-pin"))
+LIGHT_OFF = frozenset(("force-with-lease", "claude-json"))
+FLOOR = frozenset(("human-only", "trust-pin", "config-switch"))
 
 # <<EOF … EOF  /  <<'EOF' … EOF  /  <<-EOF … EOF   (body = group 3)
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
@@ -1577,7 +1590,8 @@ def _main():
     for (pat, why), name in zip(RULES, RULE_NAMES):
         if not strict and name not in FLOOR and (name in LIGHT_OFF or name in off):
             continue
-        if re.search(pat, text, re.I | re.S) and not (name in WAIVABLE and not tag and waived(name, text, ps)):
+        # config-switch reads the command as typed: a heredoc written to a settings file carries the key in its body (stripped from `text`)
+        if re.search(pat, pre if name == "config-switch" and not ps else text, re.I | re.S) and not (name in WAIVABLE and not tag and waived(name, text, ps)):
             deny(why, name)
             return
     why = None if early else gate()
