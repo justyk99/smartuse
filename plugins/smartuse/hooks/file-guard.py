@@ -109,25 +109,6 @@ def read_settings(paths):   # the file as it is now: "" when it does not exist, 
         return b.decode("utf-8", "replace") if len(b) <= MAX_SETTINGS else None
     return ""
 
-FOLD = str.maketrans({"‘": "'", "’": "'", "‚": "'", "‛": "'", "“": '"', "”": '"', "„": '"', "‟": '"'})   # typographic quotes -> ASCII, one character each
-
-def replace_text(text, o, n, every):   # text with old_string o replaced by n; None when o is not there even after folding typographic quotes
-    if o in text:
-        return text.replace(o, n) if every else text.replace(o, n, 1)
-    ft, fo = text.translate(FOLD), o.translate(FOLD)   # Claude Code's Edit may match after this folding; the folded text has the same length, so positions carry over
-    if fo not in ft:
-        return None
-    out, pos = [], 0
-    while True:
-        i = ft.find(fo, pos)
-        if i < 0:
-            break
-        out += [text[pos:i], n.translate(FOLD)]
-        pos = i + len(fo)
-        if not every:
-            break
-    return "".join(out) + text[pos:]
-
 def edited(tool, ti, before):   # the text the tool call would leave in the file; None when that cannot be known
     if tool == "Write":
         c = ti.get("content")
@@ -144,10 +125,10 @@ def edited(tool, ti, before):   # the text the tool call would leave in the file
             if text.strip():
                 return None
             text = n
+        elif o not in text:
+            return None   # not found verbatim: Claude Code's Edit may still match it (it handles typographic quotes its own way), so no result is predicted
         else:
-            text = replace_text(text, o, n, e.get("replace_all"))
-            if text is None:
-                return None   # not found, even folded: the tool may still match it some other way, so the result is unknown
+            text = text.replace(o, n) if e.get("replace_all") else text.replace(o, n, 1)
     return text
 
 def switch_change(tool, ti, paths):   # True: the call would change one of the three values (or cannot be shown not to)
