@@ -903,6 +903,17 @@ G_CASES = (
     ("ps_escaped_double_quote", "an escaped quote", PS('Write-Host "say `"hi`""'), None),
     ("ps_escaped_single_quote", "an escaped quote", PS("Write-Host 'a`'b'"), None),
     ("ps_escaped_backtick", "an escaped quote", PS("Write-Host a``b"), None),
+    ("ps_block_comment", "a block comment", PS("<# note #> Write-Host hi"), None),
+    ("ps_block_comment_multiline", "a block comment", PS("<#\nnote\n#>\nGet-Date"), None),
+    ("ps_block_comment_unclosed", "a block comment", PS("Get-Date <# open"), None),
+    ("ps_block_comment_after_code", "a block comment", PS("Get-Date; <# a #> Get-Location <# b #>"), None),
+    ("ps_start_process_group", "Start-Process with grouped arguments", PS("Start-Process notepad -ArgumentList (Get-Item a.txt)"), None),
+    ("ps_start_process_array", "Start-Process with grouped arguments", PS("Start-Process notepad -ArgumentList @('a.txt')"), None),
+    ("ps_start_process_upper", "Start-Process with grouped arguments", PS("START-PROCESS notepad (1)"), None),
+    ("ps_saps_mixed_case", "Start-Process with grouped arguments", PS("Saps notepad @('a.txt')"), None),
+    ("ps_start_alias", "Start-Process with grouped arguments", PS("start (Get-Item a.txt)"), None),
+    ("ps_start_process_assigned", "Start-Process with grouped arguments", PS("$p=Start-Process notepad -ArgumentList (1)"), None),
+    ("ps_start_process_paren_first", "Start-Process with grouped arguments", PS("(Get-Item a.txt) | Start-Process"), None),
     ("nested_bash_c", "a nested shell string", dict(cmd='bash -c "echo hi"'), None),
     ("nested_sh_c_single", "a nested shell string", dict(cmd="sh -c 'echo hi'"), None),
     ("nested_bash_lc", "a nested shell string", dict(cmd='bash -lc "echo hi"'), None),
@@ -932,7 +943,38 @@ make("a_g_ps_backticks_are_not_substitutions", ex(ALLOW), tr=lambda P: base(P), 
 make("a_g_ps_two_subexpressions", ex(ALLOW), tr=lambda P: base(P), **PS('Write-Host "$(1) $(2)"'))
 make("a_g_bash_backtick_quote_is_not_a_ps_tag", ex(ALLOW), cmd="echo `date`'x' \"`pwd`\"", tr=lambda P: base(P))   # a backtick before a quote is ordinary in Bash (two pairs here)
 make("a_g_bash_typographic_is_not_a_tag", ex(ALLOW), cmd="echo ‘hi’ – “there”", tr=lambda P: base(P))
-make("d_g_first_tag_wins_size_over_nested", ex(DENY, has=cx("over 32 KB")), cmd='bash -c "echo hi"; echo ' + "a" * 33000, tr=lambda P: base(P))
+# round J (section 7g): a PowerShell block comment (`<#` anywhere) and a Start-Process word with a `(` anywhere are tags too. A publish in either
+# shape is denied with the tag named; so is an honest command of the same shape (the accepted over-deny, one turn); with the sources opened
+# neither tag denies; Bash text with the same characters is not tagged
+make("d_j_block_comment_publish_complex", ex(DENY, has=cx("a block comment")), tr=lambda P: base(P), **PS("<# deploy #> git push origin main"))
+make("d_j_block_comment_two_on_a_line_publish_complex", ex(DENY, has=cx("a block comment")), tr=lambda P: base(P), **PS("<# it's #> git push <# don't #>"))
+make("d_j_block_comment_no_publish_complex", ex(DENY, has=cx("a block comment")), tr=lambda P: base(P), **PS("<# deploy #> git status"))
+make("d_j_start_process_group_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+     **PS("Start-Process git -ArgumentList @('push')"))
+make("d_j_start_process_paren_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+     **PS("Start-Process -FilePath git -ArgumentList ('push', 'origin')"))
+make("d_j_saps_mixed_case_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+     **PS("Saps git -ArgumentList (@('push'))"))
+make("d_j_start_process_group_no_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+     **PS("Start-Process notepad -ArgumentList (Get-Item a.txt)"))
+make("d_j_start_process_assigned_publish_complex", ex(DENY, has=cx("Start-Process with grouped arguments")), tr=lambda P: base(P),
+     **PS("$p=Start-Process git -ArgumentList @('push') -PassThru"))
+for nm, cm in (("block_comment", "<# deploy #> git push origin main"), ("start_process_group", "Start-Process git -ArgumentList @('push')"),
+               ("saps_group", "Saps git -ArgumentList (@('push'))")):
+    # sources opened: the same commands (a publish, and its no-publish twin) are not denied by the tag
+    make("a_j_" + nm + "_publish_opened", ex(ALLOW), tr=OPENED, **PS(cm))
+    make("a_j_" + nm + "_no_publish_opened", ex(ALLOW), tr=OPENED, **PS(cm.replace("push", "status")))
+for nm, cm in (("bash_block_comment_opener_text", "echo 'a <# b'"), ("bash_start_word_paren", "echo start (hi)"), ("bash_start_process_paren", "echo Start-Process (x)")):
+    make("a_j_" + nm + "_is_not_a_tag", ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+make("a_j_ps_start_process_without_paren_is_not_tagged", ex(ALLOW), tr=lambda P: base(P), **PS("Start-Process notepad -ArgumentList a.txt"))
+make("a_j_ps_paren_without_start_word_is_not_tagged", ex(ALLOW), tr=lambda P: base(P), **PS("Write-Host (Get-Date)"))
+make("a_j_ps_hash_without_angle_is_not_a_block_comment", ex(ALLOW), tr=lambda P: base(P), **PS("Get-Date # note #"))
+make("a_j_ps_hash_then_angle_is_not_a_block_comment", ex(ALLOW), tr=lambda P: base(P), **PS("Get-Date # a #> b"))
+for nm, cm in (("restart_service", "Restart-Service (Get-Service x)"), ("start_job", "start-job (1)"), ("start_sleep", "Start-Sleep (1)"),
+               ("word_before_start", "my-start (1)"), ("underscore_after", "start_x (1)"), ("digit_after", "start2 (1)"),
+               ("process_suffix", "Start-Process-x (1)"), ("letters_before", "restart (1)"), ("dash_after_alias", "saps-x (1)")):
+    make("a_j_ps_word_" + nm + "_is_not_tagged", ex(ALLOW), tr=lambda P: base(P), **PS(cm))
+make("d_g_first_tag_wins_size_over_nested",ex(DENY, has=cx("over 32 KB")), cmd='bash -c "echo hi"; echo ' + "a" * 33000, tr=lambda P: base(P))
 make("d_g_first_tag_wins_heredocs_over_substitutions", ex(DENY, has=cx("heredocs past the scan cap")), cmd=HD(17, "data") + "echo $(a) $(b) $(c)", tr=lambda P: base(P))
 make("d_g_two_of_three_unopened", ex(DENY, has=cx("an escaped quote", "2 of 3") + ["jobs/demo/photos/a.jpg, jobs/demo/photos/b.jpg"], no=["jobs/demo/plan.pdf"]),
      tr=lambda P: base(P).read(P + "/" + PLAN), **PS('Write-Host "say `"hi`""'))
