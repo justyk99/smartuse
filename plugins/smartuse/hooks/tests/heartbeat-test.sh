@@ -556,4 +556,47 @@ else:
 PY
 )
 case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; SKIP*) echo "PASS (skipped) F5b KNOWN_RULES vs RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
+# --- 0.6.1 F6: --guard, the second optional first word of py.sh, on the three guard commands. No interpreter and Strict guards on (the option
+# text is anything but empty / off / false / no / 0) -> a fixed sentence on stderr and exit 2: the call is blocked and Claude is told why.
+# Light (the default, also when no option is set) -> silent exit 0 as before. With an interpreter nothing changes.
+GUARDSAY="smartuse: Python 3 was not found (tried python3, python, py -3), so this call is blocked: Strict guards is on and its guard cannot run. Install Python 3.9 or newer and restart Claude Code, or switch Strict guards off in /plugin configure."
+RC=0; OUT=$(printf '{}' | CLAUDE_PLUGIN_OPTION_STRICT=true PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && [ "$(cat "$D/missing.err")" = "$GUARDSAY" ] && echo "PASS F6 --guard, no interpreter, strict: the fixed sentence on stderr, exit 2, empty stdout" || { echo "FAIL F6 --guard strict without an interpreter: stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+RC=0; OUT=$(printf '{}' | CLAUDE_PLUGIN_OPTION_STRICT=maybe PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?
+[ "$OUT" = "" ] && [ "$RC" = 2 ] && echo "PASS F6 --guard, no interpreter, a Strict text that is neither on nor off counts as strict: exit 2" || { echo "FAIL F6 --guard unreadable strict: stdout '$OUT', rc $RC"; fail=1; }
+for SV in UNSET "" off False " no " 0; do
+  if [ "$SV" = UNSET ]; then RC=0; OUT=$(printf '{}' | env -u CLAUDE_PLUGIN_OPTION_STRICT PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?
+  else RC=0; OUT=$(printf '{}' | CLAUDE_PLUGIN_OPTION_STRICT="$SV" PATH="$D/stub" HOME="$D/home4" "$BASH" "$H/py.sh" --guard "$H/file-guard.py" 2>"$D/missing.err") || RC=$?; fi
+  [ "$OUT" = "" ] && [ "$RC" = 0 ] && [ ! -s "$D/missing.err" ] && echo "PASS F6 --guard, no interpreter, light (Strict '$SV'): silent exit 0" || { echo "FAIL F6 --guard light ('$SV'): stdout '$OUT', rc $RC, stderr '$(cat "$D/missing.err")'"; fail=1; }
+done
+OUT=$(CLAUDE_PLUGIN_OPTION_STRICT=true PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --guard -c "print('ran')" 2>&1) || true
+[ "$OUT" = ran ] && echo "PASS F6 --guard with an interpreter: the word is dropped, the interpreter runs" || { echo "FAIL F6 --guard with an interpreter: '$OUT'"; fail=1; }
+OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" -c "import sys; print(' '.join(sys.argv[1:]))" --guard x 2>&1) || true
+[ "$OUT" = "--guard x" ] && echo "PASS F6 --guard in a later position reaches Python untouched" || { echo "FAIL F6 later --guard: '$OUT'"; fail=1; }
+HG=$(py - "$H/hooks.json" <<'PY'
+import json, sys
+h = json.load(open(sys.argv[1]))["hooks"]
+bad, pre = [], h["PreToolUse"]
+want = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" --guard "${CLAUDE_PLUGIN_ROOT}/hooks/%s.py"'
+n = 0
+for ev, ents in h.items():
+    for ent in ents:
+        for hd in ent.get("hooks", []):
+            c = hd.get("command", "")
+            if "--guard" in c:
+                n += 1
+                if ev != "PreToolUse" or c not in (want % "bash-guard", want % "file-guard") or hd.get("async") or hd.get("timeout") != 10:
+                    bad.append("unexpected --guard: %s %r" % (ev, hd))
+            elif ("bash-guard.py" in c or "file-guard.py" in c):
+                bad.append("a guard command without --guard: %s" % c)
+bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell"]
+mcp = [e for e in pre if str(e.get("matcher", "")).startswith("mcp__")]
+if len(bash) != 1 or len(mcp) != 1 or bash[0]["hooks"] != mcp[0]["hooks"]:
+    bad.append("the Bash|PowerShell entry and the mcp tool entry must keep identical commands")
+if n != 3:
+    bad.append("%d --guard commands, expected 3" % n)
+print("BAD " + "; ".join(bad) if bad else "OK")
+PY
+)
+[ "$HG" = OK ] && echo "PASS F6 hooks.json: exactly the three guard commands carry --guard (blocking, timeout 10); the Bash and mcp entries are identical" || { echo "FAIL F6 hooks.json: $HG"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

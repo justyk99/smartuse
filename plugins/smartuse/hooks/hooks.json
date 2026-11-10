@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" --guard \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" --guard \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"",
             "timeout": 10
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/file-guard.py\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" --guard \"${CLAUDE_PLUGIN_ROOT}/hooks/file-guard.py\"",
             "timeout": 10
           }
         ]

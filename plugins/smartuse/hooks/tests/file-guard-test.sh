@@ -87,7 +87,13 @@ chk allow "$(swj MultiEdit "$SP" '"other@m":true' '"other@m":false' '"Bash(ls)"'
 chk allow "$(swj Write "$SL" '{"model":"x"}')" "F5b Write: a first settings.local.json without the plugin"
 chk allow "$(swj Write "$SL" '{ this is not json }')" "F5b Write: an unparsable result that names none of the three, over a file that holds none"
 chk deny  "$(swj Write "$SP" '{ this is not json }')" "F5b Write: an unparsable result over a file that holds the switches (they would be lost)"
-chk allow "$(swj Edit "$SP" '"nothing-like-this"' '"model":"x"')" "F5b Edit: old_string not found and nothing named"
+chk allow "$(swj Edit "$SL" '"nothing-like-this"' '"model":"x"')" "F5b Edit: old_string not found, nothing named, in a settings file that holds none of the three"
+chk deny  "$(swj Edit "$SP" '"nothing-like-this"' '"model":"x"')" "F5b Edit: old_string not found in a settings file that holds the switches (the result cannot be shown to keep them)"
+# Claude Code's Edit may still match an old_string after folding typographic quotes to ASCII: the guard folds too, so the comparison runs
+chk deny  "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$SP\",\"old_string\":\"\\u201cstrict\\u201d:true\",\"new_string\":\"\\u201cstrict\\u201d:false\"}}" "F5b Edit: typographic quotes in old_string and new_string flip Strict (folded, compared)"
+chk deny  "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$SP\",\"old_string\":\"\\u201crules_off\\u201d:\\u201cforce-push\\u201d\",\"new_string\":\"\\u201crules_off\\u201d:\\u201c\\u201d\"}}" "F5b Edit: typographic quotes, the Rules off value emptied"
+chk deny  "{\"tool_name\":\"MultiEdit\",\"tool_input\":{\"file_path\":\"$SP\",\"edits\":[{\"old_string\":\"\\u201cother@m\\u201d:true\",\"new_string\":\"\\u201cother@m\\u201d:false\"},{\"old_string\":\"\\u201cstrict\\u201d:true\",\"new_string\":\"\\u201cstrict\\u201d:false\"}]}}" "F5b MultiEdit: typographic quotes, the second edit flips Strict"
+chk allow "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$SP\",\"old_string\":\"\\u201cother@m\\u201d:true\",\"new_string\":\"\\u201cother@m\\u201d:false\"}}" "F5b Edit: typographic quotes that change another plugin only (folded, compared, equal)"
 chk allow "$(swj Write "$DP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: a settings.json outside any .claude folder"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/settings.json.bak","content":"{\"disableAllHooks\":true}"}}' "F5b Write: settings.json.bak is not a settings file"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/notes/settings.json","content":"{\"disableAllHooks\":true}"}}' "F5b Write: .claude/notes/settings.json is not a settings file"
@@ -98,10 +104,48 @@ chke "SMARTUSE_NO_SUCH=1" allow "$(swj Write "$CP" '{"enabledPlugins":{"smartuse
 BIG="$T5/big/.claude"; mkdir -p "$BIG"; { printf '{}'; head -c 1100000 /dev/zero | tr '\0' ' '; } > "$BIG/settings.json"; BP=$(wp "$BIG/settings.json")
 chk deny  "$(swj Edit "$BP" '{}' '{"disableAllHooks":true}')" "F5b Edit: a settings file over 1 MB and the edit names a switch"
 chk allow "$(swj Edit "$BP" '{}' '{"model":"x"}')" "F5b Edit: a settings file over 1 MB and the edit names none"
+# CLAUDE_CONFIG_DIR on a case-insensitive file system (Windows, macOS): the same folder in another case is the same folder. On Linux it is not.
+CDU=$(py -c "import sys; print(sys.argv[1].upper())" "$CD"); CPU=$(py -c "import sys; print(sys.argv[1].upper())" "$CP")
+case "$OSTYPE" in
+  msys*|cygwin*|darwin*) chke "CLAUDE_CONFIG_DIR=$CDU" deny "$(swj Write "$CP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: CLAUDE_CONFIG_DIR spelled in upper case (a case-insensitive system)"
+                         chke "CLAUDE_CONFIG_DIR=$CD" deny "$(swj Write "$CPU" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: the file path spelled in upper case (a case-insensitive system)";;
+  *) chke "CLAUDE_CONFIG_DIR=$CDU" allow "$(swj Write "$CP" '{"enabledPlugins":{"smartuse@smartuse":false}}')" "F5b Write: another case of the config folder is another folder on Linux";;
+esac
+# the same rule where this machine cannot show it: the guard's functions with a macOS-like platform (posix paths, sys.platform darwin), and Linux
+CI5=$(py - "$H/file-guard.py" <<'PY'
+import os, posixpath, sys
+src = open(sys.argv[1], encoding="utf-8").read().rsplit("\nmain()", 1)[0]
+g = {"__name__": "fg"}
+exec(compile(src, "file-guard", "exec"), g)
+os.environ["CLAUDE_CONFIG_DIR"] = "/Users/x/Cfg"
+os.path, os.name = posixpath, "posix"
+res = []
+for plat in ("darwin", "linux"):
+    sys.platform = plat
+    res.append(str(bool(g["is_settings_file"]("/users/x/cfg/settings.json"))))
+print(" ".join(res))
+PY
+)
+[ "$CI5" = "True False" ] && echo "PASS F5b the config folder is compared case-insensitively on macOS-like systems and exactly on Linux ($CI5)" || { echo "FAIL F5b case-insensitive folder compare: darwin/linux gave '$CI5', expected 'True False'"; fail=1; }
 case "$OSTYPE" in   # a link to the folder: the resolved path is the settings file
   msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
   *) ln -s "$T5/proj/.claude" "$T5/lnk"; chk deny "$(swj Write "$T5/lnk/settings.json" '{"disableAllHooks":true}')" "F5b Write: settings.json through a symlinked .claude folder"
      ln -s "$T5/proj/.claude/settings.json" "$T5/docs/linked.json"; chk deny "$(swj Write "$T5/docs/linked.json" '{"disableAllHooks":true}')" "F5b Write: a link whose target is a settings file";;
 esac
 rm -rf "$T5"
+# --- 0.6.1 F6: strict fails closed on an unexpected error. tool_input as a string makes the guard raise: strict (an option text that is not
+# empty / off / false / no / 0) -> a deny with its own reason; light (the default) -> nothing printed, as before.
+ERR='{"tool_name":"Write","tool_input":"not an object"}'
+out=$(printf '%s' "$ERR" | env CLAUDE_PLUGIN_OPTION_STRICT=true bash "$H/py.sh" "$H/file-guard.py" 2>/dev/null)
+case "$out" in *'"permissionDecision": "deny"'*"internal error; strict guards fail closed"*) echo "PASS F6 strict: an unexpected error denies, with its own reason";; *) echo "FAIL F6 strict error path: '${out:0:200}'"; fail=1;; esac
+out=$(printf '%s' "$ERR" | env CLAUDE_PLUGIN_OPTION_STRICT=maybe bash "$H/py.sh" "$H/file-guard.py" 2>/dev/null)
+case "$out" in *'"permissionDecision": "deny"'*) echo "PASS F6 a Strict text that is neither on nor off counts as strict: the error denies";; *) echo "FAIL F6 unreadable strict error path: '${out:0:200}'"; fail=1;; esac
+for SV in off ""; do
+  out=$(printf '%s' "$ERR" | env CLAUDE_PLUGIN_OPTION_STRICT="$SV" bash "$H/py.sh" "$H/file-guard.py" 2>/dev/null)
+  [ -z "$out" ] && echo "PASS F6 light (Strict '$SV'): the same error prints nothing, as in 0.6.0" || { echo "FAIL F6 light error path ('$SV'): '${out:0:200}'"; fail=1; }
+done
+out=$(printf '%s' "$ERR" | env -u CLAUDE_PLUGIN_OPTION_STRICT bash "$H/py.sh" "$H/file-guard.py" 2>/dev/null)
+[ -z "$out" ] && echo "PASS F6 light (no option at all): the same error prints nothing" || { echo "FAIL F6 light error path (unset): '${out:0:200}'"; fail=1; }
+out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/x.md","content":"x"}}' | env CLAUDE_PLUGIN_OPTION_STRICT=true bash "$H/py.sh" "$H/file-guard.py" 2>/dev/null)
+[ -z "$out" ] && echo "PASS F6 strict: an ordinary write is still allowed, nothing printed" || { echo "FAIL F6 strict ordinary write: '${out:0:200}'"; fail=1; }
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

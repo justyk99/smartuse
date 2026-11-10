@@ -226,6 +226,16 @@ def clean(text, n=60):
     return s if len(s) <= n else s[:n - 1].rstrip() + "…"
 
 
+def gate_on():
+    """0.6.1 F6: the wait gate runs when Strict guards is on or the Wait gate option is on (the plugin options, read from this hook's own
+    environment). Light is the default, also when Claude Code passes no option: both unset, empty, off / false / no / 0 -> off. Any other
+    text counts as on (a value that cannot be read is strict). The adapter's `wait_gate: off` (gate_off) still wins per project."""
+    for key in ("CLAUDE_PLUGIN_OPTION_STRICT", "CLAUDE_PLUGIN_OPTION_WAIT_GATE"):
+        if str(os.environ.get(key) or "").strip().lower() not in ("", "off", "false", "no", "0"):
+            return True
+    return False
+
+
 def gate_off(project):
     """`wait_gate: off` in the YAML frontmatter of the human-authored adapter .claude/smartuse.local.md (off / false / no / 0 / disabled)."""
     try:
@@ -582,6 +592,8 @@ def block(reason):
 
 
 def main():
+    if not gate_on():   # light: leave at once, before stdin, the adapter or the transcript is read
+        allow()
     try:
         data = stdin_json()
     except Exception:

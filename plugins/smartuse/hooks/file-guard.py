@@ -61,10 +61,24 @@ def is_settings_file(f):   # one reading of the path
         head, _, name = norm(os.path.abspath(f)).rpartition("/")
         if SETTINGS_NAME.match(name):
             try:
-                return head in (norm(os.path.abspath(d)).rstrip("/"), norm(os.path.realpath(d)).rstrip("/"))
+                fold = (lambda s: s.lower()) if os.name == "nt" or sys.platform == "darwin" else (lambda s: s)   # Windows and macOS: another case is the same folder
+                if fold(head) in (fold(norm(os.path.abspath(d)).rstrip("/")), fold(norm(os.path.realpath(d)).rstrip("/"))):
+                    return True
+                return same_dir(os.path.dirname(os.path.abspath(f)), d)   # the same folder under another name (a link, a short name)
             except Exception:
                 return True   # the folder cannot be compared: a file of that name is treated as the settings file (fail closed)
     return False
+
+def same_dir(a, b, wait=1.0):   # os.path.samefile in a worker thread: False when either folder is missing, the call fails or takes longer than `wait` s
+    out = []
+    def work():
+        try:
+            out.append(os.path.isdir(a) and os.path.isdir(b) and os.path.samefile(a, b))
+        except Exception:
+            out.append(False)
+    t = threading.Thread(target=work, daemon=True)
+    t.start(); t.join(wait)
+    return bool(out and out[0])
 
 def switch_values(text):   # the three values as one comparable string; None when the text does not parse (or is over 1 MB)
     if len(text) > MAX_SETTINGS:
@@ -95,6 +109,25 @@ def read_settings(paths):   # the file as it is now: "" when it does not exist, 
         return b.decode("utf-8", "replace") if len(b) <= MAX_SETTINGS else None
     return ""
 
+FOLD = str.maketrans({"‘": "'", "’": "'", "‚": "'", "‛": "'", "“": '"', "”": '"', "„": '"', "‟": '"'})   # typographic quotes -> ASCII, one character each
+
+def replace_text(text, o, n, every):   # text with old_string o replaced by n; None when o is not there even after folding typographic quotes
+    if o in text:
+        return text.replace(o, n) if every else text.replace(o, n, 1)
+    ft, fo = text.translate(FOLD), o.translate(FOLD)   # Claude Code's Edit may match after this folding; the folded text has the same length, so positions carry over
+    if fo not in ft:
+        return None
+    out, pos = [], 0
+    while True:
+        i = ft.find(fo, pos)
+        if i < 0:
+            break
+        out += [text[pos:i], n.translate(FOLD)]
+        pos = i + len(fo)
+        if not every:
+            break
+    return "".join(out) + text[pos:]
+
 def edited(tool, ti, before):   # the text the tool call would leave in the file; None when that cannot be known
     if tool == "Write":
         c = ti.get("content")
@@ -111,19 +144,21 @@ def edited(tool, ti, before):   # the text the tool call would leave in the file
             if text.strip():
                 return None
             text = n
-        elif o not in text:
-            return None   # the tool may still match it (it normalises quotes): not knowing is not the same as "no change"
         else:
-            text = text.replace(o, n) if e.get("replace_all") else text.replace(o, n, 1)
+            text = replace_text(text, o, n, e.get("replace_all"))
+            if text is None:
+                return None   # not found, even folded: the tool may still match it some other way, so the result is unknown
     return text
 
 def switch_change(tool, ti, paths):   # True: the call would change one of the three values (or cannot be shown not to)
     before = read_settings(paths)
     after = edited(tool, ti, before)
-    if after is None:   # the result is unknown: decided by what the call itself names
-        parts = [ti.get("content")] if tool == "Write" else [x for e in (ti.get("edits") or [ti]) if isinstance(e, dict) for x in (e.get("old_string"), e.get("new_string"))]
-        return bool(SWITCH_NAMES.search("\n".join(p for p in parts if isinstance(p, str))))
     bv = switch_values(before) if before is not None else None
+    if after is None:   # the result is unknown
+        if bv is not None and bv != EMPTY:   # the file holds a switch value and the call cannot be shown to keep it
+            return True
+        parts = [ti.get("content")] if tool == "Write" else [x for e in (ti.get("edits") or [ti]) if isinstance(e, dict) for x in (e.get("old_string"), e.get("new_string"))]
+        return bool(SWITCH_NAMES.search("\n".join(p for p in parts if isinstance(p, str))))   # a file that holds none: decided by what the call names
     av = switch_values(after)
     if av is not None:
         return av != (EMPTY if bv is None else bv)   # the file as it was is unknown (unreadable or over 1 MB): anything the result holds is a change
@@ -131,7 +166,19 @@ def switch_change(tool, ti, paths):   # True: the call would change one of the t
         return True
     return bool(SWITCH_NAMES.search(after))   # unparsable (or over 1 MB): denied when it names a switch
 
-def main():
+def strict_level():   # Strict guards (plugin option): anything but empty / off / false / no / 0 counts as on, so a text that cannot be read is strict
+    return str(os.environ.get("CLAUDE_PLUGIN_OPTION_STRICT") or "").strip().lower() not in ("", "off", "false", "no", "0")
+
+def main():   # 0.6.1 F6: under strict an unexpected error denies; in light it is raised as before (a traceback on stderr, nothing on stdout)
+    try:
+        run()
+    except Exception:
+        if not strict_level():
+            raise
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+              "permissionDecisionReason": "file-guard: internal error; strict guards fail closed. Retry, or ask the user."}}))
+
+def run():
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:

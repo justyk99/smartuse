@@ -131,4 +131,8 @@ printf -- '---\r\ncheck: false\r\n---\r\n' > "$ADP"; fresh; expect block "CRLF: 
 printf -- '---\ncheck: false\n---\n' > "$ADP"; fresh; expect block "a normal check: false still blocks"
 printf -- '---\ncheck: true\n---\n' > "$ADP"; fresh; expect allow "a normal check: true still allows"
 printf -- "---\ncheck:   'false'  \n---\n" > "$ADP"; fresh; expect block "a quoted value with blanks around it is still the check"
+# states today's behaviour (no code change): the FIRST `check:` line is the one read, so an empty one above a second `check:` line means no
+# check at all; the second line is not borrowed
+printf -- '---\ncheck:\ncheck: false\n---\n' > "$ADP"; fresh; expect allow "an empty check: above a second check: line: the empty first one wins, the gate has no check"
+printf -- '---\ncheck: false\ncheck: true\n---\n' > "$ADP"; fresh; expect block "two check: lines: the first one is the check"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
