@@ -51,6 +51,8 @@ HEREDOC_DELIM_MAX = 64   # longest heredoc delimiter the opener scan is run on: 
 # the heads of the rules that were split out of a parent rule in 0.6.1 (the parent's own pattern is unchanged but for the moved alternative)
 _READER = (r"\b(cat|less|more|head|tail|sed|awk|grep|strings|base64|xxd|cp|scp|rsync|curl|python3?|node|tee|jq|find|type)\b[^;&|]*")
 _GIT_PUSH = r"\bgit\b(\s+-\S+(\s+[^-\s]\S*)?)*\s+push\b[^;&|]*"
+# 0.7.0 F7: the download cmdlets, their aliases and the .NET download methods, as a word (ps-download-exec). Every gap after them is bounded, so a dense run of them costs linear time.
+_PS_DL = r"(?<![\w-])(?:invoke-webrequest|invoke-restmethod|start-bitstransfer|iwr|irm|curl|wget|downloadstring|downloaddata)(?![\w-])"
 
 RULES = [
     (r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?(bash|sh|zsh|dash|python3?|node|perl)\b",
@@ -122,13 +124,39 @@ RULES = [
     # owner-file (0.7.0 F3): the paid-run counter paid-runs.json, its lock and the claim markers paid.<id>.done in the state folder record the runs
     # the owner allowed. Same shape as settings-file: the names alone, read as typed, and the same reader waiver (_settings_waived) frees only
     # a plain argument of a reader, text, or a text-only heredoc line. A trailing dot or ::$DATA is the file on Windows. receipts.jsonl is not matched. Linear.
-    (r"(?<![\w.-])paid-runs\.(?:json|lock)(?![\w-]|\.\w)|(?<![\w.-])paid\.[\w-][\w.-]*\.done(?![\w-]|\.\w)",
+    # 0.7.0 F7 (D-YK8): the adapter, the trust file and the launcher file join it, by the three names human-only's pattern lists (human-only
+    # itself is unchanged: it lists the Bash writers; this rule closes the PowerShell verbs and every other writer, readers excepted).
+    (r"(?<![\w.-])paid-runs\.(?:json|lock)(?![\w-]|\.\w)|(?<![\w.-])paid\.[\w-][\w.-]*\.done(?![\w-]|\.\w)"
+     r"|(?<![\w-])smartuse\.local\.md(?![\w-]|\.\w)|(?<![\w.-])trusted-checks\.json(?![\w-]|\.\w)"
+     r"|\.claude[. ]*[/\\]smartuse[. ]*[/\\]interpreter(?![\w-]|\.\w)",
      "owner-only file (it records the paid runs the owner allowed): the shell may read it, nothing else. Ask the owner."),
+    # ps-download-exec (0.7.0 F7): a download cmdlet or alias (_PS_DL) whose output runs as commands. (1) piped on to iex / Invoke-Expression or
+    # powershell / pwsh / cmd (a pipe into bash, sh and the like stays pipe-to-shell's); (2) given to iex / Invoke-Expression, or to [scriptblock]::Create, in the same segment; (3) a script the same command saves with
+    # -o / -OutFile / -Output / -Destination and runs: the file named there is the next command, or the first argument of an interpreter, in one of
+    # the next three segments. Every gap is bounded and a segment ends at ; & | or a newline, so the cost stays linear; a gap past its bound is a
+    # limit (SECURITY.md). Downloading to a file, or reading a download as data, is not matched.
+    (_PS_DL + r"[^;&\n]{0,300}?\|\s*(?:&\s*)?[\"']?(?:iex|invoke-expression|powershell|pwsh|cmd)(?:\.exe)?(?![\w-])"
+     r"|(?<![\w.-])(?:iex|invoke-expression)(?![\w-])[^;&|\n]{0,300}?" + _PS_DL +
+     r"|\[scriptblock\]\s*::\s*create[^;&|\n]{0,300}?" + _PS_DL +
+     r"|" + _PS_DL + r"[^;&|\n]{0,150}?\s-(?:[a-z]*o|-?out(?!v)[a-z]*|-?output|-?dest[a-z]*)\s+[\"']?([^\s;&|\"']+)[\"']?"
+     r"[^;&|\n]{0,150}[;&|\n]+(?:[^;&|\n]{0,100}[;&|\n]+){0,2}\s*(?:&\s*|\.\s+)?"
+     r"(?:(?:start-process|start|powershell|pwsh|cmd|bash|sh|zsh|python3?|py|node|perl|ruby|wscript|cscript)(?:\.exe)?(?![\w-])"
+     r"(?:\s+(?:-\S+|/[a-z]\b|bypass|unrestricted|remotesigned|allsigned|hidden|minimized))*\s+)?[\"']?(?:\.[\\/])?\1(?![\w.-])",
+     "download then execute in PowerShell (a download run as commands, or a script the same command downloads and runs) — save the file, read it, then run it on purpose"),
+    # ps-rm-root (0.7.0 F7): Remove-Item or an alias (rm, ri, del, erase, rd, rmdir; not `git rm`) with a recurse flag (-r…, /s) and a force flag (-fo…,
+    # -f, /q) in one segment, and as a word of it a root (/, \, C:, C:\, with a trailing *), the home folder (~, $HOME, $env:USERPROFILE, %USERPROFILE%,
+    # C:\Users\<name>, /home/<name>), `.` or `*`. A path below them (.\build, $HOME\.cache, *.tmp) is not matched. The three scans are bounded.
+    (r"(?<![\w.-])(?<!git )(?:remove-item|ri|rm|del|erase|rd|rmdir)(?![\w-])"
+     r"(?=[^;&|\n]{0,300}?\s(?:--?r[a-z]*|/s)(?![\w/-]))(?=[^;&|\n]{0,300}?\s(?:--?f(?:o[a-z]*)?|/q)(?![\w/-]))"
+     r"[^;&|\n]{0,300}?\s[\"']?(?:\*(?:\.\*)?|[\\/]+\*?|[a-z]:[\\/]*\*?|~[\\/]*\*?|\$\{?home\}?[\\/]*\*?"
+     r"|\$env:(?:userprofile|homepath|homedrive|systemdrive)[\\/]*\*?|%userprofile%[\\/]*\*?|\.[\\/]*\*?"
+     r"|[a-z]:[\\/]+users[\\/]+[^\\/\s\"';&|)]+[\\/]*\*?|/home/[^/\s\"';&|)]+/*\*?)[\"']?(?=[\s;&|)]|$)",
+     "Remove-Item -Recurse -Force of a root, the home folder, . or * — delete named paths only"),
 ]
 # One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
 RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
               "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch",
-              "settings-file", "owner-file")
+              "settings-file", "owner-file", "ps-download-exec", "ps-rm-root")
 # 0.7.0 F3: the checks that are not RULES entries, one name each (V4). `paid` runs last in _main(); light can name it in Rules off (it is
 # not on the FLOOR); every reason of it ends [rule paid]. RULE_NAMES keeps the length of RULES.
 GATE_NAMES = ("paid",)
