@@ -185,4 +185,28 @@ out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/x.
 out=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/doctor-canary","content":"canary"}}' | env -u CLAUDE_PLUGIN_OPTION_STRICT bash "$H/py.sh" "$H/file-guard.py")
 case "$out" in *'"permissionDecision": "deny"'*"file-guard: doctor canary"*"the guard is live"*"light"*) echo "PASS F7 the canary file is denied: doctor canary, the guard is live, the level (light)";; *) echo "FAIL F7 canary deny: '${out:0:200}'"; fail=1;; esac
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/doctor-canary2","content":"x"}}' "F7 a sibling of the canary file (doctor-canary2) is not the canary"
+# --- 0.7.0 F9: the paid counter and the session transcripts are the owner's. The counter (~/.claude/smartuse/projects/<key>/paid-runs.json), its lock
+# (paid-runs.lock) and its claim markers (paid.<tool_use_id>.done) decide how many paid runs are left; a transcript (~/.claude/projects/**/*.jsonl, a
+# subagent's included) is what the paid check reads to find the owner's "go" and "test ok". Claude may not write either. Not caught: a memory .md
+# beside the transcripts, receipts.jsonl and the ledger's receipt.<agent>.done markers in the state folder.
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/paid-runs.json","content":"{}"}}' "F9 Write the paid counter"
+chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/paid-runs.json","old_string":"\"used\": 1","new_string":"\"used\": 0"}}' "F9 Edit the paid counter (used 1 -> 0)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/paid-runs.lock","content":""}}' "F9 Write the counter's lock"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/paid.toolu_01abc.done","content":""}}' "F9 Write a claim marker (paid.<tool_use_id>.done)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/projects/-home-u-proj/0a1b2c3d.jsonl","content":"x"}}' "F9 Write a session transcript"
+chk deny  '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/projects/-home-u-proj/0a1b2c3d.jsonl","old_string":"a","new_string":"b"}}' "F9 Edit a session transcript"
+chk deny  '{"tool_name":"MultiEdit","tool_input":{"file_path":"/home/u/.claude/projects/-home-u-proj/0a1b2c3d.jsonl","edits":[{"old_string":"a","new_string":"b"}]}}' "F9 MultiEdit a session transcript"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.Claude\\Projects\\C--dev-proj\\0A1B2C3D.JSONL","content":"x"}}' "F9 Write a transcript with backslashes and mixed case (Windows spelling)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\projects\\k1\\paid-runs.json::$DATA","content":"{}"}}' "F9 Write the counter as paid-runs.json::\$DATA (Windows spelling)"
+chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/projects/-home-u-proj/0a1b2c3d/subagents/agent-ab12cd.jsonl","content":"x"}}' "F9 Write a subagent transcript"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/projects/-home-u-proj/memory/notes.md","content":"x"}}' "F9 Write a project memory .md beside the transcripts"
+chk allow '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/projects/-home-u-proj/memory/MEMORY.md","old_string":"a","new_string":"b"}}' "F9 Edit MEMORY.md beside the transcripts"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/receipts.jsonl","content":"x"}}' "F9 Write receipts.jsonl in the state folder"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/receipt.agent1.done","content":""}}' "F9 Write the ledger's receipt.<agent>.done marker"
+chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/data/events.jsonl","content":"x"}}' "F9 Write a .jsonl outside .claude/projects"
+case "$OSTYPE" in   # a link that resolves to a transcript (the resolved path is matched; Windows has no symlinks here)
+  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  *) T9=$(mktemp -d); mkdir -p "$T9/h/.claude/projects/p1" "$T9/docs"; : > "$T9/h/.claude/projects/p1/s1.jsonl"; ln -s "$T9/h/.claude/projects/p1/s1.jsonl" "$T9/docs/notes.md"
+     chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$T9/docs/notes.md\",\"content\":\"x\"}}" "F9 Write through a link that resolves to a session transcript"; rm -rf "$T9";;
+esac
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
