@@ -177,6 +177,9 @@ Status: **approved 2026-11-13: YK picked "2", the whole plan F0–F10 as one 0.7
 - **V13. PowerShell parity is plain `RULES` entries with their own names** (`ps-download-exec`, `ps-rm-root` *new*). They run on both tools: a PowerShell command started from Bash is the same harm.
 - **V14. The comment fix gets one try.** If method D shows a flip that is not on its list, the feature is reverted and the limit stays pinned.
 - **V15. No new hook, no new process.** `hooks.json` stays byte-identical. The version is 0.7.0.
+- **V16. `only` sits on the `paid_scripts:` item, not on a go line (2026-11-13, after the replay; changes one line of F4; built in F4b).** A go line grants runs, so it cannot also be the line that says "refuse this without a go". One home for one fact: the item says when a script is paid, the go says how many runs. No new key, so `PAID_ARM` and the go grammar (shared with the typed go, F5) stay as they are, and "a typed go cannot carry `only`" is true by construction. `only` takes one or more flags. Not picked: a `paid_only:` key, a fifth key that would also have to make the script a paid script (two keys for one fact, and a new piece under §8.11).
+- **V17. A script is looked for in every folder the command names; `cd` is not followed (needs the owner, D-YK13; built in F4b).** No list of folder-changing commands (such a list is never complete, as V6 says of writers), no scope to track (a subshell, `popd`), and no new deny. A folder that comes from a variable or a substitution is not followed: the same stated limit as a script path from a variable (`paid_read_script`). Failing closed there was weighed and dropped: closing the folder case alone only moves the miss to the path case, and closing both would refuse, in strict, the plugin's own commands, which name their scripts through a variable.
+- **V18. Two findings of the automated review are limits, not fixes** (the no-spiral rule, §8.6): a count flag in a shortened spelling, and the removal of the state folder. Reasons in F4b.
 
 ### 8.3 Research
 **Own work first** (lessons, decisions and the reuse map of the owner's notes; the code in this repo).
@@ -272,7 +275,7 @@ Status: **approved 2026-11-13: YK picked "2", the whole plan F0–F10 as one 0.7
 
 #### F4 — proven on the owner's real repo; free runs (0.75 day; needs D-YK7)
 - **Part 1, the replay (a tester; no repo file changes).** The commands that repo documents for itself are sent to the ported guard as event JSON, with that repo as `cwd` and a temp HOME. Nothing is run and nothing is spent. One row per class: a paying client call; the same call as a dry run; a client that pays only with its pay flag, with and without it; an offline check that names a key; an entry script whose call sits in a helper; the test gate script. The table goes into §8.10.
-- **Part 2, only what the table shows is missing (a builder).**
+- **Part 2, only what the table shows is missing (a builder).** Built as F4b below, which is the builder's text. It changes one line here: `only` sits on the `paid_scripts:` item (V16).
   - `paid_free:` *new*, adapter only. Its items are flags and project-relative path patterns. A run of a paid script is free (allowed, not counted, no go needed) when its plain literal arguments hold a listed flag, or the script's path matches a listed pattern.
   - `only <flag>` *new* on a go line: the script is paid only when that flag is present.
   - `paid_scripts:` also takes project-relative paths and patterns, for entry scripts whose call sits in a helper.
@@ -283,6 +286,106 @@ Status: **approved 2026-11-13: YK picked "2", the whole plan F0–F10 as one 0.7
 - **Interactive scenario.** In the real repo the owner asks Claude for a dry run (it runs), then for a paying run (refused, nothing spent).
 - **Files.** `bash-guard.py`, `paid-guard-test.sh`, `paid-cases.txt`. **Must not change.** F3's results for an adapter without the new keys.
 - **T1.** `paid-guard-test.sh`, `run.sh`.
+
+#### F4b — F4 part 2 as built: free runs, pay flags, entry scripts, a script run from another folder (1 day; step 1 needs D-YK13; added 2026-11-13)
+- **What the replay showed** (43 commands of the real repo through the guard as merged after F3; nothing run; strict and armed light agree on every row).
+  - Refused though free: every dry run, mock run and self-test of a client; the offline checks that name a key.
+  - Allowed though paid: the entry scripts whose call sits in a helper; one client whose host is not on the built-in list; any paying script when the same command first moves to its folder (`cd sub && python client.py`, `pushd`, PowerShell `Set-Location`).
+  - No place in F4's text: a script that pays only with its pay flag. It must be refused without a go when the flag is there, and a go line grants the go (V16).
+  - Read in that repo's code, not in the table: one entry script also pays without its pay flag, when a job file switches the paid step on. The guard never reads a job file, so that script's item lists every flag that can lead to the call.
+- **Adapter syntax (no new key; `PAID_ARM` is unchanged).**
+  ```
+  paid_scripts: <item>, <item>, ...
+      <script>                           paid on every run
+      <script> only <flag> [<flag> ...]  paid only when one of these flags is on the command line
+    <script> is a file name (render.py: that name in any folder, as F3 built it)
+             or a project-relative path or pattern (tools/batch.py, tools/*_job.py)
+  paid_free: <item>, <item>, ...
+      <flag>                             a run of any paid script with this flag is free (--dry-run)
+      <path or pattern>                  a script at this project-relative path is free (tests/check_*.py)
+  <flag>     two dashes, then letters, digits, - or _
+  <pattern>  * and ? stay inside one path part; / or \ between parts; never absolute, never ..
+  ```
+- **What changes, in build order.**
+  - **Step 1, the folder lookup (V17; only with D-YK13).**
+    - Today a relative script word is joined to the event's `cwd` and nothing else (`paid_read_script`, `bash-guard.py:1896`).
+    - New: the files that word may be. They are looked for under the event's `cwd` and under each folder that a plain word before the script word names. The command word that runs the script is not such a word; `--opt=value` gives its value; `~` is expanded. Folders chain in command order (`cd a && cd b`), and the list is handed down into a `bash -c` string (`paid_scan`, `:2000`).
+    - Every file found is read (first 256 KB each). A signal in any of them makes the run paid. The reason and the go use the file name, as today.
+    - Cost (V9): nothing is looked up until a relative script word is seen. Then at most the 64 words nearest before it and 6 folders, by looking at the named paths only. No folder is ever listed. `PAID_FIRST` is unchanged.
+    - Not followed, and stated as a limit: a folder from a variable, a substitution or a glob; a folder the command itself creates; `cd -`. A script listed by file name in `paid_scripts:` is still caught there.
+    - PowerShell tool: a `\` in a folder or script word is read as `/`.
+    - Without D-YK13 this step is left out: a script is the file under the event's `cwd`, as today, and steps 2 and 3 are built on that.
+  - **Step 2, `paid_scripts:` items.**
+    - `paid_hit` (`:2050`) parses each item once: the script part, and the flags after `only`.
+    - A file-name item matches the script word's file name in any folder and any case, as F3 built it.
+    - A path item matches a found file's project-relative path, as written or resolved, in any case. A script the guard cannot find (a missing file, a word that is not a plain literal) is matched by file name alone.
+    - An absolute or climbing item is read by its file name alone. An item that does not parse (`x.py only`, a single-dash flag, extra words) makes its first word a script that is paid on every run.
+    - A go line never carries `only`. `paid_parse_go` (`:2029`) is not changed: it skips a part it does not know, so the go stands and the script is paid on every run.
+  - **Step 3, `paid_free:`.**
+    - A flag item frees a run only as an exact word or as `flag=value`, before any bare `--`. A shortened spelling is not the flag.
+    - A path item frees a script only when every found file, as written and resolved (links followed), lies inside the project and matches. Case follows the file system. A script the guard cannot find is never free by path.
+    - A script listed in `paid_scripts:` or named by a go line is never free by path. A free flag still frees it.
+    - Ignored: an absolute item, one that climbs (`..`), a single-dash flag.
+  - **One run of a script (one command segment), decided in this order.**
+    1. Is it a paid script? Its source holds a signal, or a `paid_scripts:` item matches, or a go line names it (F3).
+    2. Free flag: every argument is a plain literal (`paid_not_plain`, `:2108`) and one of them is a free flag. The run is free.
+    3. `only`: at least one item matches the script and each matching item carries it. The run is paid when a flag is present, else free. Present means a plain argument equal to a flag, the flag with `=value`, or a shortened start of it that a parser accepts (`--pa` for `--pay`); or any argument that is not a plain literal; or arguments the guard cannot read.
+    4. Free path (step 3).
+    5. Otherwise paid: F3's rules (the go, the count rule, the counter).
+    - A free run is not a hit: allowed, nothing printed, not counted, no go needed, and no part of the "same script twice" rule.
+    - Free is decided per run, from that run's own arguments. `python x.py --dry-run && python x.py` holds one free run and one paid run. The count rule must then read the paid run's arguments: today `paid_seg_args` (`:2083`) returns the first segment that holds the script.
+    - In a command that is not read cleanly (V10, `blind`) no run is free.
+    - A free flag is the owner's word that every paid script of the project treats it as free, whatever other flags stand beside it. The docs say so. A flag that another flag of the same script can override is not listed.
+- **The lines for the real repo** (by class here; the exact lines are in the session report, and the owner pastes them: the adapter is human-only).
+  ```
+  paid_scripts: tools/<batch entry>.py only <its picture flags> --polish, tools/<plan reader>.py only --pay, polish/<video client>.py only --pay, polish/<preview client>.py only --pay, tools/<paint entry>.py, polish/<benchmark>.py
+  paid_free: --dry-run, --mock, --test, --rescore, tests/check_*.py
+  paid_hosts: <the API host of the one client that is not on the built-in list>
+  ```
+  - The clients that pay unless they get a dry-run flag need no line: their source holds a signal.
+  - A go is added on the day he wants to spend: `paid: <client>.py x 3, cap RM1, count none`.
+- **Acceptance (the owner, in his real repo, light).**
+  1. He pastes the three lines into the adapter.
+  2. He asks for a dry run of a client, a client's self-test and an offline check. Each runs, nothing is printed, the counter is untouched.
+  3. He asks for the paying run of a client. It is refused before it runs; the reason names the script and the go line to type.
+  4. He asks for the batch entry without its picture flags: it runs. With them: refused without a go.
+  5. He asks for a pay-flag client without the flag: it runs. With the flag: refused.
+  6. He asks Claude to run a client "from inside its folder": refused the same way (D-YK13).
+  7. He adds a go line. One paying run passes and is counted; a dry run after it is not counted.
+  8. A project whose adapter has none of the new forms behaves as after F3.
+- **Unit tests (`paid-guard-test.sh`, about 50, red first; the pins are green before and after).** Fixtures are generic (`render.py`, `sub/client.py`, `tests/check_a.py`, `tools/entry.py`), written through `printf` as the suite does.
+  - Free flags (11): a free flag allows with no go and writes no state; with a go, `used` stays; `--flag=value`; a `$VAR` beside it denies; a glob beside it denies; the flag after a bare `--` denies; a shortened or look-alike spelling denies; a single-dash item is ignored; inside `bash -c "…"` it frees; a literal loop of free runs is allowed; a tagged command (V10) is not freed.
+  - Free paths (8): `tests/check_*.py` frees a check that names a key; the same name under `tools/` is not freed; `*` does not cross a folder (`tests/sub/…`); a `\` in the item and in the script word; an absolute and a climbing item are ignored; the script by an absolute path inside the project is freed and one outside it is not; a link under `tests/` to a paying script is not freed (skipped where no link can be made); a script that is also listed, or named by a go, stays paid.
+  - `paid_scripts:` items and `only` (15): a path item denies its script and allows the same name in another folder; a pattern item; a file-name item as in F3; `only`: no flag allows and writes no state, the flag denies without a go, with a go it counts; `only` on a script whose source holds a signal; a shortened flag denies; `flag=value` denies; a `$VAR` with the flag absent denies; several flags; a second item for the script without `only` makes it paid on every run; a pay flag beside a free flag is free; an item that does not parse is paid on every run; `only` on a go line is not read; a path item and a script word from a variable match by file name; a free run then a paid run of one script in one command: the count rule reads the paid run (one allow at count 1, one deny at count 6).
+  - Folder lookup (15, with D-YK13): `cd sub && python client.py` denies and names `client.py`; the `;` and newline forms; `pushd sub && … && popd`; PowerShell tool `Set-Location sub; …`, `Set-Location -Path .\sub; …` and `Push-Location`; two chained folders; a subshell `(cd sub && …)`; a subshell that moves elsewhere, then the root's paid script (still read); `bash -c "cd sub && …"` and `cd sub && bash -c "…"`; a wrapper's folder option (`env -C sub …`); `cd sub && python ../render.py`; one name in two folders, only the inner one paid; allow: a plain script after `cd`, and a missing one; with a go, the run after `cd` counts once; a free path and an `only` item both hold after `cd`; a folder from a variable is not followed, and the same script listed by file name is denied.
+  - Timing, inside the process (2): 3,000 plain words and then a relative script word, under 1 s; a `paid_scripts:` line of 2,000 items against a 30 KB argument list, under 1 s. The suite's own timing case (four ordinary commands under 5 ms each) still passes.
+  - Pins (2): a shortened count flag on its own is refused, "no count flag"; a `paid_free:` line with no free run in the command still arms light (`paid-guard-test.sh:615`).
+- **Integration test.** Method D in an empty temp project, both tools, both levels: no flip among the strings of `run.sh` and `fresh-gate-test.sh`. Then the replay again, after the owner has pasted his lines (the repo's own adapter is the only one used; nothing is run):
+
+  | Class of command | After F3 | Target |
+  |---|---|---|
+  | a paying client call | deny | deny |
+  | the client whose host is not built in | allow | deny (`paid_hosts:`) |
+  | the same calls as a dry run; a client's self-test | deny | allow, not counted |
+  | a pay-flag client with its flag | deny | deny |
+  | the same without the flag, as a dry run, as a mock run | deny | allow |
+  | an offline check that names a key | deny | allow |
+  | an entry script with a flag that can lead to the call | allow | deny |
+  | the same entry scripts without those flags, or mocked | allow | allow |
+  | an entry script that pays unless mocked; the benchmark | allow | deny; mocked or rescored: allow |
+  | the test gate, the UI start, the prompt builder | allow | allow (a script's own child processes are not seen: a stated limit) |
+  | a client or an entry script after `cd`, `pushd`, `Set-Location` | allow | deny; its dry run: allow (D-YK13) |
+  | the two controls (the event's `cwd` is the subfolder) | deny | deny |
+- **Interactive scenario.** Acceptance steps 2, 3 and 6, asked in plain words in the real repo: a dry run runs, the paying run is refused and nothing is spent, the same ask "from its folder" is refused.
+- **Files.** `bash-guard.py`, `paid-guard-test.sh` (`paid-cases.txt` only for a case that needs no file and no adapter).
+- **Must not change.** Every F3 case, among them `paid-guard-test.sh:227` (a `cd .` before the run counts once), `:296` (a missing script is no error), `:304` (an absolute path from any `cwd`), `:615` (arming). `PAID_FIRST`, `PAID_ARM`, `PAID_GO`, `paid_parse_go`. Every reason text; no new reason family. No new state file, no new top-level import, no listing of a folder. The frozen names (§8.6) and `hooks.json`.
+- **T1.** `paid-guard-test.sh`, `run.sh`.
+- **Findings classed here and not built (V18).**
+  - *A count flag in a shortened spelling.* The one-output rule reads the count flags it knows, spelled in full. A shortened one on its own is refused (the pin above). Reading shortened spellings as count flags was weighed and dropped: the real repo's clients take an input flag that is the start of a listed count flag, so every first run would be refused. The guard cannot know a script's own flags without reading its parser. It stays in the review round as a minor: a limit in SECURITY.md. `only` is new code, so its flags are read in shortened form from the first day (rule 3 above).
+  - *The removal of the state folder.* `owner-file` matches the counter by file name; a command that removes the folder around it names no counter file. This is a recorded limit (§5, last bullet). A rule on the folder's path is the class V6 rejects: a folder is reached through a parent, a pattern or a folder change, and that list is never complete. It would also be a third floor rule on a folder tree that seven of the plugin's own skills name. A marker beside the counter goes with the folder; a marker elsewhere under the same home moves the line, and adds a refusal on a restored or new machine. What a removal gives back: with no `test ok` on the go line, one single-output run before the batch waits again; with it, the go's runs once more. A stored `paid stop` (F5) goes with the counter. The owner's lever is the adapter line: no line, no go. If a miss is reported: the marker outside `projects/`, about 0.25 day.
+- **F10 states** (SECURITY.md and the README's adapter keys): the two forms of `paid_scripts:` and of `paid_free:`; a free flag is the owner's word; a folder or a script path from a variable is not followed; a script's own child processes are not seen; a count flag is read in its full spelling; removing the state folder removes the counter and a stored stop, and removing the go line is the way to stop for good.
+- **Estimate** (not measured; replaces the part 2 share of F4's row in §8.12): one builder, about 1.5 M tokens and 5 to 6 hours on the laptop (about 50 cases, about 150 lines; each T1 round is two suites of about 10 minutes); one tester for the replay, 0.2 M and half an hour; ten minutes of the owner. Without step 1: about a quarter less.
+- **Alt:** none beyond V17: of the two ways offered for the folder change (follow `cd`, or refuse what cannot be found after one), neither is built; the script is looked for in the folders the command names.
 
 #### F5 — the owner-quote check: the typed go, `test ok`, `paid stop` (1 day; old F3)
 - **What changes.** The typed-go code of `040316c` goes in after its cases exist. Added to it:
@@ -396,6 +499,7 @@ One fresh review of the merged code before any push, on Opus at xhigh, over the 
 - **D-YK9. `onFailure: "block"` on the guards.** Recommend no. It is one static setting for every user; in light an internal error would then block the call, against the 1.0 bar; and a machine that cannot start the hook command would have every Bash and PowerShell call blocked. The paid check denies on its own errors once a call is paid (D5, V8).
 - **D-YK10. One release or two.** Recommend: build in this order and decide after F4. 0.7.0 can ship there; the typed go, PowerShell parity and the comment fix follow as 0.7.1.
 - **D-YK11. The repo's `CLAUDE.md` test lines** (add `paid-guard-test.sh` to T1; T2 one suite at a time on a small machine). The owner's edit or his yes.
+- **D-YK13. The folder lookup (from F4's replay; V17; open).** Recommend yes: F4b step 1, about 0.25 day and 15 cases. It is past the three pieces §8.11 names, so it waits for the owner. If no: a paying script run after a folder change in the same command is not read, SECURITY.md says so, and the owner lists his paying scripts by file name in `paid_scripts:` (a name match holds in any folder, as F3 built it).
 - **D-YK12. Monitor (from E5). Decided 2026-11-13: yes ("g all").** Recommend: the guard matcher becomes `Bash|PowerShell|Monitor` and `_main()` reads a Monitor command as a Bash one, with cases, in F3. This breaks V15's "`hooks.json` byte-identical" by one word; V15's reason (no new hook, no new process) still holds. The other choice: `hooks.json` stays as it is, and SECURITY.md says a command started through Monitor is not checked.
 
 ### 8.10 Unknowns, each an experiment (results are written here)
