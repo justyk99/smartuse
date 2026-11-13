@@ -1121,7 +1121,7 @@ elif mode == "imports":  # imports <bash-guard.py>: stdlib only, no process or n
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading", "base64"} and not calls
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading", "base64", "hashlib", "pathlib"} and not calls   # hashlib and pathlib: 0.7.0 F3, imported inside the paid path only
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "execsilent":   # execsilent <bash-guard.py>: until-done.py's way of reusing RULES prints nothing, and the file has one main() line to cut
     src = rd(sys.argv[2])
@@ -1298,7 +1298,7 @@ elif mode == "hooks":    # hooks <hooks.json>
     d = json.loads(rd(sys.argv[2]))
     pre = d["hooks"]["PreToolUse"]
     bg = [e for e in pre if any("bash-guard.py" in h["command"] for h in e["hooks"])]
-    bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell"]
+    bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell|Monitor"]   # 0.7.0 F3 (D-YK12): a Monitor command is a shell command to the guard
     pub = [e for e in bg if e.get("matcher") == "mcp__.*(upload|send|publish|post|share|submit).*"]
     others = [(e.get("matcher"), re.search(r"hooks/([a-z-]+)\.py", e["hooks"][0]["command"]).group(1), e["hooks"][0].get("timeout")) for e in pre if e not in bg]
     good = (len(bash) == 1 and len(bash[0]["hooks"]) == 1 and len(pub) == 1 and len(bg) == 2 and len(pub[0]["hooks"]) == 1
@@ -1350,6 +1350,6 @@ mkdir -p "$D/empty"; r=$(py "$D/chk.py" units "$G" "$(wp "$D/empty")" </dev/null
 r=$(py "$D/chk.py" bounded "$G" "$(wp "$D/empty")" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "bounded scan: three 8,000-opener shapes found in under 1 s each; a deadline in the past denies ('source expansion over 4 s')" || ko "bounded scan: $r"
 r=$(py "$D/chk.py" linear "$G" </dev/null 2>&1 | tail -1); [ "$r" = ok ] && ok "linear time: ten shapes of 6,000 and 24,000 words (PowerShell heads, Start-Process, iex, runner and wrapper chains, apostrophe lines), a 12,000-character heredoc delimiter and a state-write argument of 100,000 characters each decided in under 1 s; 16 nested bodies just under the heredoc budget each (125 KB and 250 KB) in under 1.5 s" || ko "linear time: $r"
 r=$(py "$D/chk.py" execsilent "$G" </dev/null); [ "$r" = ok ] && ok "until-done.py's exec of this file without main() prints nothing and yields RULES" || ko "exec without main(): $r"
-r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash|PowerShell entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
+r=$(py "$D/chk.py" hooks "$H/hooks.json" </dev/null); [ "$r" = ok ] && ok "hooks.json: one Bash|PowerShell|Monitor entry, one mcp__ entry (same command, timeout 10), file-guard and heartbeat entries unchanged" || ko "hooks.json: $r"
 
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

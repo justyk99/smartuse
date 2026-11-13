@@ -29,7 +29,15 @@
 # dashes and an escaped quote (PowerShell), a nested shell string. It is decided before RULES and before any scan of the command; with
 # the sources opened it goes on to RULES as any command does. That is an over-deny at worst (open the sources, retry, or simplify).
 # A command over RULES_FIRST_MAX characters has the whole fresh-source block run before RULES (the frozen RULES are slow on long dense text).
-# Test: bash hooks/tests/run.sh and fresh-gate-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
+# Paid calls (0.7.0 F3, docs/notes/paid-guard-plan.md section 8): a call to a per-call billed API (image / LLM hosts, named key variables, SDK imports,
+# in the command, in inline code or in the script file the command runs) is denied until the owner gave a go: a `paid:` line in the adapter. The check
+# runs LAST (after RULES and the fresh-source gate, so a run is counted only when every other check allowed the call), inside the same deadline, on
+# Bash, PowerShell and Monitor commands (a Monitor call carries its command in tool_input.command, as Bash does). Strict: always on. Light: only where
+# the adapter has a paid line (paid:, paid_scripts:, paid_hosts:, paid_free:, paid_guard: on); `paid` can be named in Rules off (light only) and is not
+# on the floor. Every reason ends [rule paid]. A detection error allows in light and denies in strict; once a call is seen as paid, an error while
+# verifying the go denies at both levels. State: the counter paid-runs.json in ~/.claude/smartuse/projects/<key>/ (counts and names, never a command);
+# the floor rule owner-file keeps the shell off it (readers only). The block sits before options(), under its own header.
+# Test: bash hooks/tests/run.sh, fresh-gate-test.sh and paid-guard-test.sh   Rollback: remove the PreToolUse entries in ~/.claude/settings.json
 import base64, datetime, fnmatch, json, os, posixpath, re, stat, sys, threading, time
 
 BUDGET_S = 4.0       # one deadline for the whole fresh-source check (source expansion and transcript pass); past it a matched publish is denied
@@ -111,15 +119,23 @@ RULES = [
     (r"\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])",
      "a Claude Code settings file is read-only from the shell: use the Edit tool, which is checked value by value. "
      "Switching smartuse's guards is the owner's action: /plugin configure or /config"),
+    # owner-file (0.7.0 F3): the paid-run counter paid-runs.json, its lock and the claim markers paid.<id>.done in the state folder record the runs
+    # the owner allowed. Same shape as settings-file: the names alone, read as typed, and the same reader waiver (_settings_waived) frees only
+    # a plain argument of a reader, text, or a text-only heredoc line. A trailing dot or ::$DATA is the file on Windows. receipts.jsonl is not matched. Linear.
+    (r"(?<![\w.-])paid-runs\.(?:json|lock)(?![\w-]|\.\w)|(?<![\w.-])paid\.[\w-][\w.-]*\.done(?![\w-]|\.\w)",
+     "owner-only file (it records the paid runs the owner allowed): the shell may read it, nothing else. Ask the owner."),
 ]
 # One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
 RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
               "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch",
-              "settings-file")
+              "settings-file", "owner-file")
+# 0.7.0 F3: the checks that are not RULES entries, one name each (V4). `paid` runs last in _main(); light can name it in Rules off (it is
+# not on the FLOOR); every reason of it ends [rule paid]. RULE_NAMES keeps the length of RULES.
+GATE_NAMES = ("paid",)
 # The guard level (0.6.1). Strict: every rule. Light (the default): the rules in LIGHT_OFF are off, and so is any rule named in the
 # plugin option rules_off, except the FLOOR, which protects the switches themselves and is always on.
 LIGHT_OFF = frozenset(("force-with-lease", "claude-json"))
-FLOOR = frozenset(("human-only", "trust-pin", "config-switch", "settings-file"))
+FLOOR = frozenset(("human-only", "trust-pin", "config-switch", "settings-file", "owner-file"))
 # 0.6.1 F7: the doctor's canary, a no-op if the guard is down. _main() answers it before the fresh-source gate and RULES; it is compared whole.
 DOCTOR_CANARY = ": smartuse-doctor-canary"
 
@@ -1371,7 +1387,7 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
 #                  waived: an option value or a redirect target, a reader behind sudo, a command or process substitution anywhere in
 #                  the text, a text complexity() tags or that does not split cleanly, and a command that names the path whose output is
 #                  piped into anything but a plain filter (the path would reach it as an argument).
-WAIVABLE = frozenset(("pipe-to-shell", "sudo", "settings-file"))
+WAIVABLE = frozenset(("pipe-to-shell", "sudo", "settings-file", "owner-file"))   # owner-file (0.7.0 F3) has the settings-file waiver: readers only
 PIPE_OK = frozenset(("head", "tail", "wc", "sort", "uniq", "cat", "cut", "tr", "less", "more", "grep", "rg", "nl", "column", "jq"))   # read what is piped in, run nothing
 PY_DATA_MODULES = frozenset(("json.tool",))   # modules `python -m` may run on a download: they read it as data
 PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))   # plain flags: none takes a value or runs code
@@ -1565,9 +1581,10 @@ def _text_opener(line):
     return base_name(v[i]).lower() == "cat" or _text_words(v, i) is not None
 
 
-def _settings_waived(text, ps, pre):
+def _settings_waived(text, ps, pre, name="settings-file"):
     """The settings-file waiver: True when EVERY place a settings path is named is a case of the list above. `text` is what main() runs
     the other rules on (for Bash the data heredoc bodies are stripped from it), `pre` the command as typed (the rule matched on it).
+    `name` is the rule whose pattern says what a "path" is: settings-file, or owner-file (0.7.0 F3, the same waiver for the paid counter).
     Linear: the hits and the words are walked once, side by side."""
     subject = text if ps or pre is None else pre
     if complexity(subject, ps):
@@ -1575,7 +1592,7 @@ def _settings_waived(text, ps, pre):
     t = text.replace("\\", "/") if ps else text
     if "\\\n" in t or words(t) is None or "$(" in t or "`" in t or "<(" in t or ">(" in t:
         return False
-    pat = re.compile(RULES[RULE_NAMES.index("settings-file")][0], re.I | re.S)
+    pat = re.compile(RULES[RULE_NAMES.index(name)][0], re.I | re.S)
     seen = 0
     if not ps and pre is not None:
         if heredoc_substs(pre):   # bash runs the substitutions in an unquoted heredoc body
@@ -1647,8 +1664,8 @@ def waived(name, text, ps, pre=None):
 
 def _waived(name, text, ps, pre=None):
     """The work of waived. Linear in the text: the matches and the words are walked once, side by side."""
-    if name == "settings-file":
-        return _settings_waived(text, ps, pre)
+    if name in ("settings-file", "owner-file"):
+        return _settings_waived(text, ps, pre, name)
     if name not in WAIVABLE or complexity(text, ps):
         return False
     t = text.replace("\\", "/") if ps else text   # PowerShell has no backslash escape: read as a bash text it would hide a command inside a quote
@@ -1722,6 +1739,600 @@ def _waived(name, text, ps, pre=None):
     return True
 
 
+# ---- paid calls: per-call billed APIs need the owner's go ------------------------------------------------------------------------
+PAID_HOSTS = ("api.openai.com", "api.stability.ai", "api.replicate.com", "fal.run", "generativelanguage.googleapis.com",
+              "api.ideogram.ai", "api.anthropic.com")   # whole host names; claude -p / plugin eval / subagents never name them
+PAID_KEYS = ("OPENAI_API_KEY", "STABILITY_API_KEY", "STABILITY_KEY", "REPLICATE_API_TOKEN", "FAL_KEY", "FAL_API_KEY", "GEMINI_API_KEY",
+             "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY", "IDEOGRAM_API_KEY", "ANTHROPIC_API_KEY")   # named, never *_TOKEN / *_API_KEY as a family
+PAID_KEY = re.compile(r"(?<!\w)(?:" + "|".join(PAID_KEYS) + r")(?!\w)")
+_PAID_PKG = "openai|replicate|fal_client|anthropic"   # the SDKs' import names
+PAID_SDK = re.compile(r"\bimport\s+(?:" + _PAID_PKG + r"|google\.generativeai|google\.genai|stability_sdk)\b"
+                 r"|\bfrom\s+(?:" + _PAID_PKG + r"|stability_sdk|google\.genai|google\.generativeai)\b|\bfrom\s+google\s+import\s+genai\b"
+                 r"|(?:require\(|\bfrom\s+|\bimport\(?)\s*[\"'](?:openai|replicate|@fal-ai/client|@google/genai|@google/generative-ai|@anthropic-ai/sdk)[\"']\)?")
+PAID_SDK_WORDS = ("openai", "replicate", "fal_client", "anthropic", "stability_sdk", "genai", "generative", "@fal-ai", "@google/")   # a word every PAID_SDK match holds (lower case): the substring look before the pattern
+PAID_MENTION = frozenset("grep egrep fgrep rg ag cat echo printf head tail less more git wc diff ls type".split())   # a host after these is text, not a call
+PAID_PREP = frozenset("export unset declare typeset readonly set".split())        # a key NAME after these is preparation; the run that follows is scanned
+PAID_INTERP = re.compile(r"python[\d.]*|pythonw|py|node|deno|bun|uv|uvx|npx|tsx|ts-node|bash|sh|zsh|dash|ksh")
+PAID_CALLER = re.compile(r"(?:" + PAID_INTERP.pattern + r")|curl|wget|http|xh")
+PAID_STDIN_INTERP = re.compile(r"python[\d.]*|pythonw|py|node|deno|bun")
+PAID_SCRIPT_EXT = re.compile(r"\.(?:py|pyw|js|mjs|cjs|ts|mts|cts|tsx|jsx|sh|bash)$", re.I)
+# One command segment: split on ; & | ( newline ` outside quotes. LEAD = what may stand before the command word (then / do / exec / VAR=x …; wrappers are WRAP).
+PAID_SEG = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?P<sep>[;&|(\n`])|[^'"\\;&|(\n`]+|.""", re.S)
+PAID_LEAD = re.compile(r"""(?:(?:then|do|else|elif|if|while|until|exec|command|!|\{)\s+|[A-Za-z_]\w*=(?:'[^']*'|"[^"]*"|\S*)\s*)*""")
+# Wrappers that run the next command: name -> (options that take a value as the NEXT word, positional words of their own, the
+# subcommands that precede the command). `timeout 60 python x.py`, `nice -n 10 …`, `poetry run python x.py`, `pnpm exec tsx x.ts`, `yarn node x.js`.
+PAID_WRAP = {"timeout": ("-s -k --signal --kill-after", 1, ""), "nice": ("-n --adjustment", 0, ""), "ionice": ("-c -n -p -P -u --class --classdata", 0, ""),
+        "stdbuf": ("-i -o -e --input --output --error", 0, ""), "xargs": ("-n -I -L -P -d -E -s -a --max-args --replace -i", 0, ""),
+        "env": ("-u -C -S --unset --chdir --split-string", 0, ""), "caffeinate": ("-t -w", 0, ""), "poetry": ("", 0, "run"), "pipenv": ("", 0, "run"),
+        "pnpm": ("-p --package", 0, "exec dlx"), "yarn": ("-p --package", 0, "exec dlx"), "npm": ("-p --package", 0, "exec"), "nohup": ("", 0, ""),
+        "sudo": ("-u -g -h -p -C -D -R -T -U -r -t", 0, ""), "time": ("-f -o --format --output", 0, ""),
+        "parallel": ("-j -n -N -a -S -L -P --jobs", 0, ""), "watch": ("-n --interval", 0, "")}
+PAID_REPEAT = frozenset("xargs parallel watch".split())   # these run the command once per input / tick: more than one run in one call
+PAID_LOOP_OPEN = re.compile(r"(?:(?:then|do|else|elif|if|!|\{)\s+)*(?:for|while|until|select)\b")   # a segment that opens a loop …
+PAID_LOOP_END = re.compile(r"done\b")                                                               # … and the one that closes it
+PAID_ARGS = re.compile(r""""([^"]*)"|'([^']*)'|(\S+)""")   # words with the quotes off and no escape handling: a Windows path keeps its backslashes
+PAID_GO = re.compile(r"(?P<script>[^\s,]+)\s*(?:x|×|\*)\s*(?P<runs>\d+)\b(?P<rest>.*)", re.I | re.S)   # render.py x 10, cap RM5[, count --n | count none][, test ok]
+
+
+PAID_COUNT_FLAGS = ("-n", "-N", "--n", "--count", "--num", "--num-images", "--num_images", "--num-outputs", "--num_outputs", "--images",
+               "--samples", "--batch", "--batch-size", "--runs", "--iterations")   # "how many outputs this run makes"; `--n 1`, `--n=1`, `-n1`
+
+
+class PaidHostHit:
+    """One host match: what re's match object gives paid_code_signal (start and group)."""
+    def __init__(self, s, text):
+        self.s, self.text = s, text
+
+    def start(self):
+        return self.s
+
+    def group(self, i=0):
+        return self.text
+
+
+class PaidHosts:
+    """A whole host name, any subdomain in front (queue.fal.run), nothing glued on either side (fal.runtime.io, notfal.run).
+    The same matches as (?<![\\w-])(?:[\\w-]+\\.)*(?:hosts)(?![\\w-]|\\.\\w), found in linear time (V9): that pattern restarts at every label of
+    a long dotted run (30 s on 28 KB of `a.a.a.`). Here the host itself is searched, then the subdomain labels are taken from the left."""
+    def __init__(self, hosts):
+        self.names = tuple(h.lower() for h in hosts)
+        self.core = re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(h) for h in hosts) + r")(?![\w-]|\.\w)", re.I)
+
+    def finditer(self, src):
+        for m in self.core.finditer(src):
+            s = m.start()
+            while s > 1 and src[s - 1] == ".":
+                k = s - 1
+                while k > 0 and (src[k - 1].isalnum() or src[k - 1] in "_-"):
+                    k -= 1
+                if k == s - 1:
+                    break
+                s = k
+            yield PaidHostHit(s, src[s:m.end()])
+
+
+def paid_host_re(hosts):
+    return PaidHosts(hosts)
+
+
+PAID_HOST = paid_host_re(PAID_HOSTS)
+
+
+# (the block's own native_path and adapter_list are not carried over: the fresh-source gate's (above) are used)
+def paid_project_key(project):
+    """The state-dir name of a project (copy of ledger.py's rule, asserted equal by paid-guard-test.sh): the full resolved path,
+    every character outside [A-Za-z0-9._-] -> "-", a leading "-" dropped. This file imports no other hook."""
+    import pathlib   # inside the paid path only (V9): no new top-level import
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
+
+
+def paid_write_json(path, obj):
+    """Atomic (copy of ledger.py's): tmp file + os.replace, 5 tries 20 ms apart on Windows; True when written. Never raises."""
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return True
+            except OSError:
+                if attempt < 4:
+                    time.sleep(0.02)
+    except Exception:
+        pass
+    try:
+        tmp.unlink()
+    except Exception:
+        pass
+    return False
+
+
+def paid_segments(text, keep=False):
+    """The command's segments (quote-aware), each stripped; empty ones dropped. keep: a segment that ends at a backtick or ( keeps it
+    (the arguments of `x --n 1 $(…)` / `<(…)` / `…` are not what they look like)."""
+    out, cur = [], []
+    for m in PAID_SEG.finditer(text):
+        if m.group("sep"):
+            out.append("".join(cur) + (m.group("sep") if keep and m.group("sep") in "`(" else "")); cur = []
+        else:
+            cur.append(m.group(0))
+    out.append("".join(cur))
+    return [s.strip() for s in out if s.strip()]
+
+
+def paid_basename(p):
+    return re.split(r"[\\/]", p)[-1]
+
+
+def paid_code_signal(src, hosts, caller, keys=True):
+    """The first paid signal in a piece of text as "host api.openai.com" / "OPENAI_API_KEY" / "import openai", else None. A bare
+    host counts only where something that calls (curl, an interpreter, the script itself) holds it, or when it is a URL."""
+    low = src.lower()   # V9: plain substring looks first; a text with no paid word at all (a big script) never reaches the patterns below
+    if not (any(h in low for h in hosts.names) or any(k in src for k in PAID_KEYS) or any(w in low for w in PAID_SDK_WORDS)):
+        return None
+    for m in hosts.finditer(src):
+        if caller or re.search(r"(?:https?|wss?)://$", src[max(0, m.start() - 8):m.start()]):
+            return "host " + m.group(0).lower()
+    m = PAID_KEY.search(src) if keys else None
+    if m:
+        return m.group(0)
+    m = PAID_SDK.search(src) if caller else None
+    return re.sub(r"\s+", " ", m.group(0)) if m else None
+
+
+def paid_script_arg(cmd, toks):
+    """The script file this line runs: the first word with a script extension after an interpreter (none when -c / -m / -e comes
+    first — inline code or a module, nothing to open), or the command word itself (./render.py)."""
+    if not PAID_INTERP.fullmatch(cmd):
+        return toks[0] if PAID_SCRIPT_EXT.search(toks[0]) else None
+    for t in toks[1:]:
+        if t in ("-c", "-m", "-e", "-p", "--eval", "--print"):
+            return None
+        if not t.startswith("-") and PAID_SCRIPT_EXT.search(t):
+            return t
+    return None
+
+
+def paid_read_script(tok, cwd):
+    """The first 256 KB of that script (UTF-8, bad bytes replaced) from the event's cwd, whatever its size, or None: a path the
+    guard cannot see ($f, `…`), a missing file. What lies beyond 256 KB is never read (a stated limit). One stat and one read."""
+    if re.search(r"[$`*?]", tok):
+        return None
+    p = native_path(os.path.expanduser(tok))
+    p = os.path.join(cwd, p)   # an absolute path stays itself
+    try:
+        if not os.path.isfile(p):
+            return None
+        with open(p, "rb") as fh:
+            return fh.read(262144).decode("utf-8", "replace")
+    except OSError:
+        return None
+
+
+def paid_stdin_bodies(cmd):
+    """[(interpreter, body)] for each heredoc an interpreter reads as code (python3 - <<EOF, node - <<EOF, cat <<EOF | python3 -):
+    bodies the data-heredoc strip hides. A shell reading the body is code already and stays in the stripped text."""
+    out = []
+    for m in HEREDOC.finditer(cmd):
+        line = opener_line(cmd, m)
+        toks = words(line)
+        if toks is None or heredoc_is_code(line):
+            continue
+        for i, (kind, w) in enumerate(toks):
+            name = re.sub(r"\.exe$", "", paid_basename(w).lower())
+            if kind != "word" or not PAID_STDIN_INTERP.fullmatch(name):
+                continue
+            args = []
+            for k, a in toks[i + 1:]:
+                if k == "sep":
+                    break
+                args.append(a)
+            if next((a for a in args if a == "-" or not a.startswith("-")), None) in (None, "-"):   # no script: stdin is the code
+                out.append((name, m.group(3)))
+                break
+    return out
+
+
+def paid_unwrap(toks):
+    """(toks with the wrapper commands and their own options / arguments skipped, True when a repeater (xargs, parallel, watch) was
+    among them): `timeout 60 python x.py` -> python x.py. WRAP says what each wrapper takes; an unknown wrapper stays the command."""
+    rep = False
+    while toks:
+        name = re.sub(r"\.exe$", "", paid_basename(toks[0]).lower())
+        if name not in PAID_WRAP:
+            break
+        vopts, npos, subs = PAID_WRAP[name][0].split(), PAID_WRAP[name][1], PAID_WRAP[name][2].split()
+        rep = rep or name in PAID_REPEAT
+        i = 1
+        if subs:
+            if len(toks) > 1 and toks[1] in subs:
+                i = 2
+            elif len(toks) > 1 and PAID_INTERP.fullmatch(toks[1]):   # yarn node x.js: the interpreter stays
+                toks = toks[1:]
+                continue
+            else:
+                break
+        while i < len(toks):
+            t = toks[i]
+            if t == "--":
+                i += 1
+                break
+            if len(t) > 1 and t[0] == "-":
+                i += 2 if t in vopts else 1                       # an attached value (-oL, -n10, --signal=KILL) is one word
+            elif name == "env" and re.match(r"[A-Za-z_]\w*=", t):
+                i += 1
+            elif npos:
+                npos -= 1
+                i += 1
+            else:
+                break
+        toks = toks[i:]
+    return toks, rep
+
+
+def paid_seg_hits(seg, hosts, cwd, names, depth=0, loop=False):
+    """[(signal, script, repeats)] for one command segment: layer 1 (the segment's own text), layer 2 (the script file it runs) unless
+    layer 1 hit, and every hit inside a bash -c string. repeats = it sits in a loop or runs under xargs / parallel / watch."""
+    toks, rep = paid_unwrap([next(g for g in a.groups() if g is not None) for a in PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():])])
+    if not toks:
+        return []
+    cmd = re.sub(r"\.exe$", "", paid_basename(toks[0]).lower())
+    if cmd in PAID_MENTION:
+        return []
+    rep, out = rep or loop, []
+    sig = paid_code_signal(seg, hosts, bool(PAID_CALLER.fullmatch(cmd)), cmd not in PAID_PREP)
+    path = None if sig else paid_script_arg(cmd, toks)
+    if sig:
+        out.append((sig + " on the command line", cmd, rep))
+    if path:
+        name = paid_basename(path)
+        src = paid_read_script(path, cwd)
+        sig = paid_code_signal(src, hosts, True) if src else None
+        if sig:
+            out.append((f"{sig} in {name}", name, rep))
+        elif name.lower() in names:
+            out.append((f"{name} is in paid_scripts", name, rep))
+    if depth < 2 and cmd in ("bash", "sh", "zsh", "dash", "ksh") and "-c" in toks[1:-1]:   # bash -c "python render.py": judge the string too
+        out += paid_scan(paid_segments(toks[toks.index("-c") + 1]), hosts, cwd, names, depth + 1, rep)
+    return out
+
+
+def paid_scan(segs, hosts, cwd, names, depth=0, loop=False):
+    """Every hit of these segments in order, flagged `repeats` when it stands between a for / while / until / select and its `done`."""
+    out, d = [], 0
+    for seg in segs:
+        d += bool(PAID_LOOP_OPEN.match(seg))
+        out += paid_seg_hits(seg, hosts, cwd, names, depth, loop or d > 0)
+        if PAID_LOOP_END.match(seg):
+            d = max(0, d - 1)
+    return out
+
+
+def paid_lines(adapter):
+    """The go lines of the adapter: `paid: <go>` or a list under `paid:` (`  - <go>`)."""
+    out, in_list = [], False
+    for ln in adapter.splitlines():
+        m = re.match(r"paid:[ \t]*(.*?)[ \t]*$", ln)
+        if m:
+            in_list = not m.group(1)
+            if m.group(1):
+                out.append(m.group(1).strip("'\""))
+            continue
+        m = re.match(r"[ \t]+-[ \t]+(.+?)[ \t]*$", ln) if in_list else None
+        if m:
+            out.append(m.group(1).strip("'\""))
+        elif ln.strip():
+            in_list = False
+    return out
+
+
+def paid_parse_go(line):
+    """One go line -> {script, runs, cap, count, test_ok}, or None when it does not parse: `render.py x 10, cap RM5[, count <flag>
+    | count none][, test ok]` (x, × and * all mean times; runs >= 1). cap is free text, echoed and never measured. The one grammar
+    the adapter shares with the owner's typed go (F3)."""
+    m = PAID_GO.fullmatch(line.strip())
+    if not m or int(m.group("runs")) < 1:
+        return None
+    g = {"script": m.group("script"), "runs": int(m.group("runs")), "cap": "", "count": "", "test_ok": False}
+    for part in m.group("rest").split(","):
+        part = part.strip()
+        c = re.fullmatch(r"cap\s+(.+)", part, re.I)
+        n = re.fullmatch(r"count\s+(\S+)", part, re.I)
+        if c:
+            g["cap"] = c.group(1).strip()
+        elif n:
+            g["count"] = n.group(1) if n.group(1).lower() != "none" else "none"
+        elif re.fullmatch(r"test\s+ok", part, re.I):
+            g["test_ok"] = True
+    return g
+
+
+def paid_hit(cmd, text, cwd, adapter, blind=False):
+    """[(signal, script, repeats)] — EVERY paid signal in the command (stdin-heredoc bodies first, then each segment), [] when none.
+    text = the command with data heredocs stripped. blind (V10): the command is one the source check cannot read cleanly (complexity(),
+    or over the heredoc scan cap): the HEREDOC pattern is not run (it rescans the text once per opener), and the whole text is searched
+    for a paid word instead; a hit there has script None (no go can cover a command that was not read)."""
+    extra = [h for h in adapter_list(adapter, "paid_hosts") if re.fullmatch(r"[\w.-]+", h)]
+    hosts = paid_host_re(PAID_HOSTS + tuple(extra)) if extra else PAID_HOST
+    names = {paid_basename(s).lower() for s in adapter_list(adapter, "paid_scripts")}
+    names |= {paid_basename(g["script"]).lower() for g in map(paid_parse_go, paid_lines(adapter)) if g}   # a script with a go is a paid script
+    segs = paid_segments(text)
+    looped = any(PAID_LOOP_OPEN.match(s) for s in segs)   # a body is not tied to a segment: any loop in the command makes it a repeat
+    if blind:
+        sig = paid_code_signal(cmd, hosts, True)
+        return ([(sig + " in a command that is not read cleanly", None, False)] if sig else []) + paid_scan(segs, hosts, cwd, names)
+    out = [(sig + " on the command line", interp, looped) for interp, body in paid_stdin_bodies(cmd) for sig in [paid_code_signal(body, hosts, True)] if sig]
+    return out + paid_scan(segs, hosts, cwd, names)
+
+
+def paid_find_go(data, project, script, adapter):
+    """(go_id, go) of the go that covers this script, else None. go_id = "adapter:" + sha1 of the whitespace-normalised line, so a
+    changed line is a new counter, except that `, test ok` is not part of the id (adding it must not reset the count). Today: the
+    first `paid:` line naming the script (matched by file name, case-insensitive).
+    F5 seam: `paid stop` (typed) is checked BEFORE this, and the typed go (owner-quote check of data["transcript_path"]) AFTER it."""
+    import hashlib   # inside the paid path only (V9): no new top-level import
+    for line in paid_lines(adapter):
+        g = paid_parse_go(line)
+        if g and paid_basename(g["script"]).lower() == script.lower():
+            g["go_from"] = "adapter"
+            norm = re.sub(r"\s*,\s*test\s+ok\b", "", " ".join(line.split()), flags=re.I)
+            return "adapter:" + hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12], g
+    return None
+
+
+def paid_seg_args(text, script, depth=0):
+    """The words after `script` in the command segment that runs it, RAW (quotes kept: unq() takes them off), up to the next && / || /
+    ; / |; a bash -c "…" string is searched the same way. None when no segment holds the script."""
+    for seg in paid_segments(text, True):
+        toks = [a.group(0) for a in PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():])]
+        for i, t in enumerate(toks):
+            if re.sub(r"\.exe$", "", paid_basename(paid_unq(t)).lower()) == script.lower():
+                out = []
+                for a in toks[i + 1:]:
+                    if a in ("&&", "||", ";", "|"):
+                        break
+                    out.append(a)
+                return out
+        if depth < 2 and "-c" in toks[:-1]:
+            r = paid_seg_args(paid_unq(toks[toks.index("-c") + 1]), script, depth + 1)
+            if r is not None:
+                return r
+    return None
+
+
+def paid_unq(t):
+    """A raw word with one pair of outer quotes taken off."""
+    return t[1:-1] if len(t) > 1 and t[0] in "'\"" and t[-1] == t[0] else t
+
+
+def paid_not_plain(t):
+    """True when the shell (or argparse) may turn this raw word into something else: $ ` <( >( in a bare or "double-quoted" word, a
+    glob in a bare word, an @file anywhere. A 'single-quoted' word is literal."""
+    u = paid_unq(t)
+    if u.startswith("@"):
+        return True
+    return False if t[0] == "'" and t[-1] == "'" and len(t) > 1 else bool(re.search(r"[$`]|[<>]\(" + ("" if t[0] == '"' else r"|[*?\[]"), u))
+
+
+def paid_count_flags(args, extra=""):
+    """[(flag, value)] for every count flag in args (`--n 1`, `--n=1`, `-n1`); extra = the flag the go names (`count --pics`)."""
+    flags = PAID_COUNT_FLAGS + ((extra,) if extra and extra != "none" else ())
+    out = []
+    for i, t in enumerate(args):
+        for f in flags:
+            if t == f:
+                out.append((f, args[i + 1] if i + 1 < len(args) else ""))
+            elif t.startswith(f + "="):
+                out.append((f, t[len(f) + 1:]))
+            elif len(f) == 2 and f[1] != "-" and t.startswith(f) and t[2:].isdigit():
+                out.append((f, t[2:]))
+    return out
+
+
+def paid_counter_lock(sdir, deadline=None):
+    """Hold paid-runs.lock (an O_EXCL file) for the read-modify-write of the counter: wait up to ~1 s for another holder (never past
+    `deadline`, a time.monotonic() value: V8, one deadline for the whole hook), take over a lock older than 10 s (its holder died).
+    -> the lock path, or None when busy; OSError when the dir is not writable."""
+    lock = sdir / "paid-runs.lock"
+    for _ in range(50):
+        if deadline is not None and time.monotonic() >= deadline:
+            return None
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return lock
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > 10:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+        except PermissionError:
+            if os.name != "nt":                               # POSIX: the dir is not writable; Windows: the file is mid-delete, wait
+                raise
+        time.sleep(0.02)
+    return None
+
+
+def paid_count(data, sdir, items, text, deadline=None):
+    """The cap rules, then count each allowed run, all under the counter lock (two parallel calls cannot both pass the cap). items =
+    [(go_id, go, script)], one per script the command runs; ALL are checked before ANY is counted. A script already counted (a marker
+    for this tool_use_id and go) is allowed again, not counted twice. Rules: runs used up; run 2+ needs `test ok`; run 1 must make ONE
+    output (plain literal arguments and a count flag at 1 in the segment that runs the script, or the go says `count none`; `test ok`
+    skips it). Counting: claim the tool_use_id (an O_EXCL marker, as ledger.py claims receipt.<agent>.done), used += 1, one atomic write.
+    -> None when allowed, else (True, why the run cannot be counted, item index: the caller says "could not verify the go") or
+    (False, the reason's tail, item index: a rule denies it). A corrupt counter file is never reset silently. F5 seam: `stopped` below."""
+    sdir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock = paid_counter_lock(sdir, deadline)
+    except OSError:
+        return True, "the counter is not writable", 0
+    if not lock:
+        return True, "the counter is busy", 0
+    claimed = []
+    try:
+        f = sdir / "paid-runs.json"
+        try:
+            state = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+        except Exception:
+            state = None
+        if not isinstance(state, dict):
+            return True, "paid-runs.json is unreadable", 0
+        tid = re.sub(r"[^A-Za-z0-9._-]", "-", str(data.get("tool_use_id") or ""))
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        todo = []                                             # (index, go_id, entry, ok, marker) of the runs to count
+        for k, (go_id, go, script) in enumerate(items):
+            marker = sdir / (f"paid.{tid}.done" if k == 0 else f"paid.{tid}.{go_id[-8:]}.done") if tid else None
+            if marker and marker.exists():
+                continue                                      # this call was counted already (the other copy of the hook)
+            e = state.get(go_id)
+            if not isinstance(e, dict):
+                e = {"script": go["script"], "runs": go["runs"], "cap": go["cap"], "count": go["count"], "used": 0, "test_ok": go["test_ok"],
+                     "stopped": False, "go_from": go["go_from"], "first_at": now}
+            used, runs, ok = int(e.get("used") or 0), int(e.get("runs") or go["runs"]), bool(e.get("test_ok") or go["test_ok"])
+            # F5: if e.get("stopped") -> return False, 'the owner said "paid stop".', k
+            if used >= runs:
+                return False, f"the go for {clip(script)} is used up ({runs} of {runs}). Ask the owner for a new go.", k
+            if used and not ok:
+                return False, f"run {used} of {runs} is done; the batch waits for the owner's \"test ok\" (typed in this session). Show the owner the one output first.", k
+            if not ok and go["count"] != "none":
+                raw = paid_seg_args(text, script) or []
+                bad = next((t for t in raw if paid_not_plain(t)), None)
+                if bad:                                       # $X, `…`, a glob, @file: the real arguments are not the ones the guard sees
+                    return False, f"first run after the go must make ONE output: its arguments must be plain literals (seen {clip(bad)}).", k
+                c = paid_count_flags([paid_unq(t) for t in raw], go["count"])
+                if not c or any(v != "1" for _, v in c):
+                    seen = next((f"{n} {v}".strip() for n, v in c if v != "1"), "no count flag")
+                    return False, (f"first run after the go must make ONE output: set the count flag to 1 (seen {clip(seen)}; "
+                                   "the owner can add \"count <flag>\" or \"count none\" to the go)."), k
+            todo.append((k, go_id, e, ok, marker))
+        for k, go_id, e, ok, marker in todo:
+            if marker:
+                try:
+                    os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                except FileExistsError:
+                    continue
+                except Exception:
+                    return True, "the counter is not writable", k
+                claimed.append(marker)
+            e["used"], e["test_ok"], e["last_at"] = int(e.get("used") or 0) + 1, ok, now
+            state[go_id] = e
+        if not todo or (not claimed and any(m for *_, m in todo)):
+            return None                                       # nothing to count, or the other copy of the hook claimed every run
+        if paid_write_json(f, state):
+            claimed = []
+            return None
+        return True, "the counter is not writable", 0
+    finally:
+        for m in claimed:
+            try:
+                m.unlink()                                    # not counted: the retry may claim it again
+            except Exception:
+                pass
+        try:
+            lock.unlink()
+        except Exception:
+            pass
+
+
+# 0.7.0 F3, V9: a linear first look. A command with no interpreter or caller word, no script file word, no URL and no paid word ends the
+# paid path before anything is read (plain alternation of literals: no backtracking). The hosts, key names and SDK names are the
+# lists above; adapter-listed hosts count only beside a caller or in a URL, and both are in this look.
+PAID_FIRST = re.compile(r"\.(?:py|pyw|js|mjs|cjs|ts|mts|cts|tsx|jsx|sh|bash)\b"
+                        r"|\b(?:python[\d.]*|pythonw|py|node|deno|bun|uv|uvx|npx|tsx|ts-node|bash|sh|zsh|dash|ksh|curl|wget|http|xh)\b"
+                        r"|(?:https?|wss?)://|" + "|".join(re.escape(w) for w in PAID_HOSTS + PAID_KEYS) +
+                        r"|openai|replicate|fal_client|anthropic|stability_sdk|genai|generativeai|@fal-ai|@google/", re.I)
+# V5: light is armed by a paid line of the adapter (the fresh-source gate is armed the same way, by `sources:`); strict is always on.
+PAID_ARM = re.compile(r"^(?:paid|paid_scripts|paid_hosts|paid_free):|^paid_guard:[ \t]*(?i:on)[ \t]*$", re.M)
+
+
+def paid_home():
+    """The home folder as the hook sees it: HOME first (on Windows expanduser("~") reads USERPROFILE and ignores HOME, which the
+    tests and users who set HOME need)."""
+    import pathlib   # inside the paid path only (V9): no new top-level import
+    return pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~"))
+
+
+def paid_adapter(project):
+    """(adapter text, why): the human-only adapter, read and never written. A missing file is ("", ""); one that exists and cannot be
+    read is ("", "the adapter is unreadable"): once a call is paid that denies (adapter_text, the fresh-source gate's read, answers ""
+    for both and is not changed)."""
+    try:
+        with open(os.path.join(project, ".claude", "smartuse.local.md"), "rb") as fh:
+            return fh.read(1 << 20).decode("utf-8-sig", "replace").replace("\r\n", "\n").replace("\r", "\n"), ""
+    except FileNotFoundError:
+        return "", ""
+    except Exception:
+        return "", "the adapter is unreadable"
+
+
+def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False):
+    """None (not a paid call, or every go stands) or the deny reason. A detection error RAISES (the caller, paid_gate, allows it in
+    light and denies it in strict); once the call is paid, any error while verifying the go -> deny. EVERY script the command runs
+    needs its go; the first one without it is named. A loop or repeat of a paid script is denied whatever the counter says. strict:
+    always on; light: only where the adapter has a paid line. deadline: the hook's time.monotonic() deadline (V8): past it a call
+    already seen as paid is denied. blind (V10): a command that is not read cleanly is denied when it holds a paid word."""
+    if not PAID_FIRST.search(cmd):
+        return None
+    cwd = native_path(data.get("cwd")) or os.getcwd()
+    project = os.environ.get("CLAUDE_PROJECT_DIR") or cwd   # pathlib is imported only where a paid call needs the state folder (paid_home, paid_project_key)
+    adapter, why = paid_adapter(project)
+    if not strict and not PAID_ARM.search(adapter):
+        return None
+    hits = paid_hit(cmd, text, cwd, adapter, blind)
+    if not hits:
+        return None
+    head = lambda h: f"paid call ({clip(h[0])}) — "
+    tangled = next((h for h in hits if h[1] is None), None)
+    if tangled:
+        return (head(tangled) + "this command is too tangled to read (nested shell strings, many substitutions or heredocs, or over 32 KB), "
+                "so no go can cover it: run the paid script alone, in a command of its own. Nothing was spent.")
+    if not why and deadline is not None and time.monotonic() >= deadline:
+        why = "the hook ran past its deadline"
+    first, rule, miss = hits[0], "", None                    # first = the hit the reason names
+    try:
+        if not why:
+            covered = []                                      # [(hit, go_id, go)] once per script
+            for h in hits:
+                found = paid_find_go(data, project, h[1], adapter)
+                if not found:
+                    miss = miss or h
+                elif found[0] not in [c[1] for c in covered]:
+                    covered.append((h, found[0], found[1]))
+            if not miss:
+                low = [h[1].lower() for h in hits]
+                again = next((h for h in hits if h[2] or low.count(h[1].lower()) > 1), None)
+                if again:
+                    return (head(again) + f"a loop or repeat runs {clip(again[1])} more than once in one call; run it once per call so each run is counted.")
+                r = paid_count(data, paid_home() / ".claude" / "smartuse" / "projects" / paid_project_key(project), [(c[1], c[2], c[0][1]) for c in covered], text, deadline)
+                if r:
+                    first = covered[r[2]][0]
+                    why, rule = (r[1], "") if r[0] else ("", r[1])
+    except Exception:
+        why = "the check failed"
+    if why:
+        return head(first) + f"could not verify the go ({why}); put it in .claude/smartuse.local.md. Nothing was spent."
+    if rule:
+        return head(first) + rule
+    if not miss:
+        return None
+    return (head(miss) + f"no go from the owner for {clip(miss[1])}. The owner types in this session: \"paid go: {clip(miss[1])} x <runs>, cap <amount>\" "
+            f"(or adds \"paid: {clip(miss[1])} x <runs>, cap <amount>\" to .claude/smartuse.local.md). Nothing was spent.")
+
+
+def paid_gate(data, pre, text, tag, ps, strict, off, deadline):
+    """The paid check as _main() runs it, last (V7): the deny reason, or None. `pre` the command as typed, `text` what the rules ran
+    on, `tag` the complexity() tag, `ps` the PowerShell tool. Light with `paid` named in Rules off: not run (strict ignores the name).
+    A detection error allows in light, as every check does, and denies in strict (fails closed)."""
+    if not strict and "paid" in off:
+        return None
+    try:
+        blind = bool(tag) or (not ps and "<<" in pre and many_heredocs(pre))
+        return paid_verdict(data, pre, text, strict, deadline, blind)
+    except Exception:
+        return "the paid check could not run (internal error); strict guards fail closed. Nothing was spent." if strict else None
+
+
 def options():
     """(strict, off) from the plugin options Claude Code exports to the hook (CLAUDE_PLUGIN_OPTION_<KEY>, key upper-cased); the hook
     reads its own environment and nothing else, so nothing a command does can change it. STRICT not set, empty, or off / false / no / 0
@@ -1764,7 +2375,7 @@ def _main():
         return
     deadline = time.monotonic() + BUDGET_S   # the fresh-source check's deadline starts with the hook, before any scan of the command
     tool = data.get("tool_name")
-    if tool not in ("Bash", "PowerShell"):
+    if tool not in ("Bash", "PowerShell", "Monitor"):   # 0.7.0 D-YK12: a Monitor call carries its command in tool_input.command, like Bash; one without (a websocket) has an empty one
         why = fresh_gate(data, None, None, deadline)
         if why:
             deny(why)
@@ -1801,14 +2412,18 @@ def _main():
         if not strict and name not in FLOOR and (name in LIGHT_OFF or name in off):
             continue
         # config-switch reads the command as typed: a heredoc written to a settings file carries the key in its body (stripped from `text`);
-        # settings-file reads it as typed too, and its waiver is given `pre` to tell a data heredoc line from a command
-        if re.search(pat, pre if name in ("config-switch", "settings-file") and not ps else text, re.I | re.S) \
+        # settings-file and owner-file read it as typed too, and their waiver is given `pre` to tell a data heredoc line from a command
+        if re.search(pat, pre if name in ("config-switch", "settings-file", "owner-file") and not ps else text, re.I | re.S) \
                 and not (name in WAIVABLE and not tag and waived(name, text, ps, pre)):
             deny(why, name)
             return
     why = None if early else gate()
     if why:
         deny(why)
+    else:   # 0.7.0 F3, V7: the paid check runs last, so a run is counted only when every other check allowed the call
+        why = paid_gate(data, pre, text, tag, ps, strict, off, deadline)
+        if why:
+            deny(why, "paid")
     leave()
 
 

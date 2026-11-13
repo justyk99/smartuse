@@ -1,0 +1,206 @@
+# Paid-call cases for run.sh (relay-design rule 4). DATA, not code: this file names paid hosts, key variables and SDKs on purpose, and run.sh
+# reads it instead of spelling them, because a script that names one is itself a paid call to the guard — run.sh must stay runnable.
+# Line kinds:  F <file> <content>  a fixture file in the temp project (<NL> = newline)  ·  A <line>  a line of its adapter .claude/smartuse.local.md
+#              D <command>  must be denied  ·  O <command>  must be allowed  ·  D1252 <command>  denied, stdin decoded as cp1252
+# In a command: @W@ = the project dir as the OS spells it, @S@ = its path separator (\ on Windows, / elsewhere).
+# Every case runs in the temp project as the event's cwd; no adapter go exists, so no case writes state.
+
+# --- fixtures: one script per host, per key name, per SDK import; Python and JS forms
+F h1.py import requests<NL>requests.post("https://api.openai.com/v1/images/generations", json={})
+F h2.py import requests<NL>requests.post("https://api.stability.ai/v2beta/stable-image/generate/core", json={})
+F h3.py import requests<NL>requests.post("https://api.replicate.com/v1/predictions", json={})
+F h4.py import requests<NL>requests.post("https://fal.run/fal-ai/flux/dev", json={})
+F h5.py import requests<NL>requests.post("https://generativelanguage.googleapis.com/v1beta/models/imagen:predict", json={})
+F h6.py import requests<NL>requests.post("https://api.ideogram.ai/generate", json={})
+F h7.py import requests<NL>requests.post("https://api.anthropic.com/v1/messages", json={})
+F j1.js const r = await fetch("https://queue.fal.run/fal-ai/flux");
+F j2.js fetch("https://api.openai.com/v1/images", {method: "POST"});
+F k1.py import os<NL>key = os.environ["OPENAI_API_KEY"]
+F k2.py import os<NL>key = os.environ["STABILITY_API_KEY"]
+F k3.py import os<NL>key = os.environ["STABILITY_KEY"]
+F k4.py import os<NL>key = os.environ["REPLICATE_API_TOKEN"]
+F k5.py import os<NL>key = os.environ["FAL_KEY"]
+F k6.py import os<NL>key = os.environ["FAL_API_KEY"]
+F k7.py import os<NL>key = os.environ["GEMINI_API_KEY"]
+F k8.py import os<NL>key = os.environ["GOOGLE_API_KEY"]
+F k9.py import os<NL>key = os.environ["GOOGLE_GENAI_API_KEY"]
+F k10.py import os<NL>key = os.environ["IDEOGRAM_API_KEY"]
+F k11.py import os<NL>key = os.environ["ANTHROPIC_API_KEY"]
+F kj1.js const key = process.env.FAL_KEY;
+F kj2.js const key = process.env.GEMINI_API_KEY;
+F s1.py import openai<NL>print("x")
+F s2.py from openai import OpenAI<NL>print("x")
+F s3.py import replicate<NL>print("x")
+F s4.py import fal_client<NL>print("x")
+F s5.py from google import genai<NL>print("x")
+F s6.py import google.generativeai as genai<NL>print("x")
+F s7.py import anthropic<NL>print("x")
+F s8.py from stability_sdk import client<NL>print("x")
+F sj1.js const OpenAI = require("openai");
+F sj2.js const fal = require('@fal-ai/client');
+F sj3.js import { GoogleGenAI } from "@google/genai";
+F sj4.js const g = require("@google/generative-ai");
+F sj5.js const A = require("@anthropic-ai/sdk");
+F render.py import openai<NL>print("would call")
+F render.js const OpenAI = require("openai");
+F render.ts import OpenAI from "openai";
+F render.sh curl -s https://api.openai.com/v1/images -d @req.json
+F inc/render.py import os<NL>KEY = os.environ["GEMINI_API_KEY"]<NL>print("batch")
+F Á/render.py import openai
+F x.py print("hello")
+F polish.py print("polish")
+F bench/ab.sh echo ab
+F docs/openai-notes.md see the vendor docs
+A paid_scripts: polish.py
+
+# --- must be denied: a host, a key name or an SDK import in the script the command runs
+D python h1.py
+D python h2.py
+D python h3.py
+D python h4.py
+D python h5.py
+D python h6.py
+D python h7.py
+D node j1.js
+D node j2.js
+D python k1.py
+D python k2.py
+D python k3.py
+D python k4.py
+D python k5.py
+D python k6.py
+D python k7.py
+D python k8.py
+D python k9.py
+D python k10.py
+D python k11.py
+D node kj1.js
+D node kj2.js
+D python s1.py
+D python s2.py
+D python s3.py
+D python s4.py
+D python s5.py
+D python s6.py
+D python s7.py
+D python s8.py
+D node sj1.js
+D node sj2.js
+D node sj3.js
+D node sj4.js
+D node sj5.js
+# --- the ways a script is run
+D python render.py
+D python3 render.py --images 6
+D py -3 render.py
+D node render.js
+D npx tsx render.ts
+D bash render.sh
+D uv run render.py
+D ./render.py
+D cd @W@ && python render.py
+D bash -c "python render.py"
+D python @W@@S@render.py
+D python "@W@@S@render.py"
+D python polish.py
+D1252 python Á/render.py
+# --- ... and in the command itself
+D curl https://api.openai.com/v1/images/generations -d @req.json
+D curl -s -X POST https://queue.fal.run/fal-ai/flux
+D wget -qO- https://api.replicate.com/v1/predictions
+D OPENAI_API_KEY=sk-x python x.py
+D env GEMINI_API_KEY=x node x.py
+D python3 -c "import openai; print(1)"
+D node -e "require('openai')"
+D python3 - <<'EOF'<NL>import openai<NL>EOF
+D cat <<'EOF' | python3 -<NL>import replicate<NL>EOF
+# --- incident replay 1: the batch command, the fixture's Gemini key in its source, no go anywhere
+D python inc/render.py --images 6
+
+# --- must be allowed: a mention is not a call; claude -p / plugin eval / npm test are not paid; no paid name, no script, a look-alike host
+O grep -rn api.openai.com src/
+O grep -rn "https://api.openai.com" src/
+O cat docs/openai-notes.md
+O echo "see api.openai.com"
+O echo "see https://api.openai.com/docs"
+O git commit -m "uses api.openai.com"
+O git commit -m "call api.openai.com later"
+O export OPENAI_API_KEY=x
+O unset OPENAI_API_KEY
+O echo $GH_TOKEN
+O curl -s https://api.github.com/repos/x/y
+O claude -p "hi"
+O claude plugin eval plugins/smartuse
+O bash bench/ab.sh
+O npm test
+O python x.py
+O python nope.py
+O curl https://fal.runtime.example/
+O python -m py_compile render.py
+O cat > render.py <<'EOF'<NL>import openai<NL>EOF
+O python3 - <<'EOF'<NL>print('curl x')<NL>EOF
+O python x.py <<'EOF'<NL>import openai<NL>EOF
+# --- a big script is read up to 256 KB whatever its size: 1.5 MB with the import in its first lines is denied; the import only after 300 KB is the stated limit (allowed)
+D python big.py
+D node big.py
+O python late.py
+# --- every paid script in a command is judged, not the first one only (no go exists here, so each is denied; the stateful cases are in paid-guard-test.sh)
+F batch.py import openai<NL>print("batch")
+D python x.py && python batch.py
+D python batch.py; python x.py
+D python x.py | python batch.py
+D python x.py<NL>python batch.py
+D bash -c "python x.py; python batch.py"
+# --- wrappers do not hide the script (no go: denied) ...
+D timeout 60 python render.py
+D timeout -s KILL 60 python render.py
+D nice -n 10 python render.py
+D nice python render.py
+D ionice -c3 python render.py
+D ionice -c 2 -n 7 python render.py
+D stdbuf -oL python render.py
+D stdbuf -o L python render.py
+D xargs python render.py
+D echo x | xargs -n 1 python render.py
+D poetry run python render.py
+D pipenv run python render.py
+D pnpm exec tsx render.ts
+D pnpm dlx tsx render.ts
+D yarn node render.js
+D npm exec -- tsx render.ts
+D caffeinate python render.py
+D caffeinate -t 60 -i python render.py
+D env -i python render.py
+D env -i FOO=1 python render.py
+D env -u FOO python render.py
+D nohup timeout 5 python render.py
+D timeout 5 nohup python render.py
+D time python render.py
+D timeout 5 curl -s https://api.openai.com/v1/images
+D timeout 5 bash render.sh
+# --- ... and a wrapper with no script, or around something that is not paid, is allowed
+O timeout 5 sleep 1
+O timeout 60
+O env -i
+O nice -n 5 python x.py
+O ionice -c3 npm test
+O xargs echo
+O poetry run pytest
+O pnpm exec tsc
+O yarn node x.js
+O caffeinate -i sleep 1
+O timeout 5 grep -rn api.openai.com src/
+# --- a loop or repeat of a paid script is denied; a loop with no paid script is allowed
+D for i in 1 2 3; do python render.py --n 1; done
+D while true; do python render.py --n 1; done
+D until python render.py --n 1; do sleep 1; done
+D select x in a b; do python render.py --n 1; done
+D python render.py --n 1; python render.py --n 1
+D parallel python render.py ::: a b
+D watch -n 5 python render.py
+D bash -c "for i in 1 2; do python render.py --n 1; done"
+O for i in 1 2 3; do python x.py --n 1; done
+O for i in 1 2 3; do echo $i; done
+O while read l; do echo $l; done < /dev/null
+O until true; do sleep 1; done
+O for i in 1 2; do echo $i; done; python x.py

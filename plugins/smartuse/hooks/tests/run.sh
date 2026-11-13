@@ -191,9 +191,10 @@ ns = {}
 exec(compile(src.replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
 names = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
          "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch",
-         "settings-file")
+         "settings-file", "owner-file")
 ok = tuple(ns["RULE_NAMES"]) == names and len(ns["RULE_NAMES"]) == len(ns["RULES"])
-ok = ok and ns["LIGHT_OFF"] == {"force-with-lease", "claude-json"} and ns["FLOOR"] == {"human-only", "trust-pin", "config-switch", "settings-file"}
+ok = ok and ns["LIGHT_OFF"] == {"force-with-lease", "claude-json"} and ns["FLOOR"] == {"human-only", "trust-pin", "config-switch", "settings-file", "owner-file"}
+ok = ok and tuple(ns["GATE_NAMES"]) == ("paid",) and "paid" not in ns["RULE_NAMES"] and "paid" not in ns["FLOOR"]   # 0.7.0 F3: paid is a named gate beside the rules, never one of them
 print("ok" if ok else "bad")
 PY
 )
@@ -665,6 +666,70 @@ PY
 )
   case "$r" in ok*) echo "PASS $shape: settings-file decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL settings-file waiver timing: $shape -> '${r:0:120}'"; fail=1;; esac
 done
+# --- 0.7.0 F3: owner-file. The paid-run counter paid-runs.json, its lock paid-runs.lock and the claim markers paid.<id>.done record the runs
+#     the owner allowed. Like a settings file they are read-only from the shell: the rule owner-file (the floor) matches the names as typed
+#     and denies every command that names one, except where the same waiver as settings-file sees a plain argument of a reader, text, or a
+#     text-only heredoc line. A state file that is not the counter (receipts.jsonl) is not matched.
+SD='~/.claude/smartuse/projects/x'
+check deny  "rm $SD/paid-runs.json"
+check deny  "rm -f /home/u/.claude/smartuse/projects/x/paid-runs.json"
+check deny  "echo x > $SD/paid-runs.json"
+check deny  "printf '{}' | tee $SD/paid-runs.json"
+check deny  "cp /tmp/x.json $SD/paid-runs.json"
+check deny  "mv /tmp/x.json $SD/paid-runs.json"
+check deny  "sed -i s/10/0/ $SD/paid-runs.json"
+check deny  $'python3 -c "open(\'paid-runs.json\',\'w\').write(\'{}\')"'
+check deny  $'python3 - <<\'EOF\'\nopen(\'paid-runs.json\',\'w\').write(\'{}\')\nEOF'
+check deny  'rm C:\Users\x\.claude\smartuse\projects\x\paid-runs.json'
+check deny  "rm $SD/paid-runs.lock"
+check deny  "rm $SD/paid.toolu_01ABC.done"
+check deny  "dd if=/tmp/x.json of=$SD/paid-runs.json"
+check deny  'git diff --output=paid-runs.json HEAD'
+check deny  'echo "$(cat paid-runs.json)"'
+pcheck deny 'Remove-Item $HOME\.claude\smartuse\projects\x\paid-runs.json'
+pcheck deny 'Set-Content paid-runs.json "{}"'
+check allow "cat $SD/paid-runs.json"
+check allow "jq . $SD/paid-runs.json"
+check allow "grep used $SD/paid-runs.json"
+check allow "ls -la $SD/paid-runs.lock"
+check allow "cp $SD/paid-runs.json /tmp/backup.json"
+check allow 'git commit -m "note: paid-runs.json is owner-only"'
+check allow 'echo "the counter is paid-runs.json"'
+check allow $'cat > notes.md <<\'EOF\'\nthe counter lives in paid-runs.json\nEOF'
+check allow "echo x > $SD/receipts.jsonl"
+check allow "rm $SD/paid-notes.json"
+pcheck allow 'Get-Content $HOME\.claude\smartuse\projects\x\paid-runs.json'
+for v in true -; do
+  ocheck deny:'[rule owner-file, always on]' "$v" 'owner-file' "rm $SD/paid-runs.json"
+  ocheck deny:'[rule owner-file, always on]' "$v" - "sed -i s/10/0/ $SD/paid-runs.json"
+done
+ocheck deny:'owner-only file' - 'owner-file,sudo' "rm $SD/paid-runs.json"
+ocheck allow - 'owner-file' "cat $SD/paid-runs.json"
+# decided within a second inside the process: 1,000 reader commands that name the counter then one that is not a reader, the same text with a harmless last command
+for shape in readers-then-writer readers-clean; do
+  r=$(py - "$G" "$shape" <<'PY'
+import contextlib, io, json, sys, time, types
+src = open(sys.argv[1], encoding="utf-8").read()
+cmd = "cat paid-runs.json; " * 1000 + ("dd of=paid-runs.json" if sys.argv[2] == "readers-then-writer" else "ls")
+sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
+out = io.StringIO()
+t0 = time.monotonic()
+with contextlib.redirect_stdout(out):
+    exec(compile(src, "bash-guard", "exec"), {"__name__": "timing"})
+dt = time.monotonic() - t0
+hit = "[rule owner-file, always on]" in out.getvalue()
+print(("ok %.2f" % dt) if hit == (sys.argv[2] == "readers-then-writer") and dt < 1.0 else "bad %.2f %s" % (dt, out.getvalue()[-90:]))
+PY
+)
+  case "$r" in ok*) echo "PASS $shape: owner-file decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL owner-file waiver timing: $shape -> '${r:0:120}'"; fail=1;; esac
+done
+# --- 0.7.0 F3, D-YK12: a command started through the Monitor tool reaches the guard as a Bash one (the field is tool_input.command, as the tool's
+#     own input names it): the same rules, the floor and the fresh-source gate. A Monitor call that carries no command (a websocket) has nothing to check.
+ocheck deny:'bash-guard: sudo' true - 'sudo ls' Monitor
+ocheck deny:'[rule force-push]' - - 'git push --force origin x' Monitor
+ocheck deny:'[rule settings-file, always on]' - - 'dd if=a of=.claude/settings.json' Monitor
+ocheck allow true - 'ls -la' Monitor
+ocheck allow - - 'tail -f app.log | grep --line-buffered ERROR' Monitor
 # --- a long command of ordinary text is decided well within the hook's timeout (10 s in hooks.json): no rule may rescan the text
 #     from every position. 16 KB took 12 s on the author's laptop before the SQL rule was anchored; 64 KB is 4x the length, so ~16x the time.
 BIG=$(mktemp)
@@ -733,7 +798,7 @@ printf 'x' > "$FP/with/jobs/demo/plan.pdf"
 printf 'publish: python send.py\n' > "$FP/none/.claude/smartuse.local.md"
 fcheck() { # $1 = deny|allow, $2 = command (a tool name when $4 is "tool"), $3 = project (with|none)
   out=$(py - "$2" "${4:-Bash}" <<'PY' | env CLAUDE_PROJECT_DIR="$(fwp "$FP/$3")" bash "$H/py.sh" "$G"
-import json,sys; sh = sys.argv[2] in ("Bash", "PowerShell"); ti = {"command": sys.argv[1]} if sh else {}
+import json,sys; sh = sys.argv[2] in ("Bash", "PowerShell", "Monitor"); ti = {"command": sys.argv[1]} if sh else {}
 print(json.dumps({"tool_name": sys.argv[2] if sh else sys.argv[1], "tool_input": ti, "cwd": "."}))
 PY
 )
@@ -752,6 +817,10 @@ fcheck allow $'cat > notes.txt <<\'EOF\'\npython send.py\nEOF' with
 fcheck allow 'python send.pyc' with
 fcheck allow 'git status' with
 fcheck allow 'mcp__demo__list_files' with tool
+fcheck deny  'python send.py' with Monitor   # 0.7.0 D-YK12: a Monitor command is a Bash command to the fresh-source gate
+fcheck deny  'cd out && git push origin main' with Monitor
+fcheck allow 'git status' with Monitor
+fcheck allow 'python send.py' none Monitor
 fcheck allow 'python send.py' none
 fcheck deny  'Python send.py' with
 fcheck deny  'uv run python send.py' with
@@ -814,4 +883,34 @@ PY
 )
 case "$out" in *"bash-guard: sudo"*) echo "PASS deny  fresh: a RULES match is decided before the publish gate";; *) echo "FAIL a RULES match must keep its own reason -> ${out:0:100}"; fail=1;; esac
 case "$FP" in */smartuse-fresh-run.*) rm -rf "$FP";; esac
+# --- paid calls (relay-design rule 4): a call to a per-call billed API is denied without the owner's go. The cases are DATA in
+#     paid-cases.txt (fixture scripts, adapter lines, commands), not spelled here: a script that names a paid host or key is itself a
+#     paid call to the guard, and this file must stay runnable through it. Each runs in a temp project as the event's cwd, with a
+#     temp HOME; no case has a go, so none writes state. Strict (exported at the top): paid is always on. The stateful half is paid-guard-test.sh.
+unset CLAUDE_PROJECT_DIR
+PD=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-paid.XXXXXX") && [ -d "$PD" ] || { echo "FAIL could not create a temp dir under ${TMPDIR:-/tmp}"; exit 1; }
+trap 'case "$PD" in */smartuse-paid.*) rm -rf "$PD" 2>/dev/null;; esac' EXIT   # removes this run's own dir and nothing else
+export HOME="$PD/home"; mkdir -p "$HOME/.claude/smartuse" "$PD/proj"           # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per case
+if command -v cygpath >/dev/null 2>&1; then PJ=$(cygpath -m "$PD/proj"); PWIN=$(cygpath -w "$PD/proj"); SEP='\'; else PJ="$PD/proj"; PWIN="$PD/proj"; SEP='/'; fi
+jstr() { local s=$1; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\t'/\\t}; printf '%s' "$s"; }   # a JSON string body, non-ASCII bytes kept raw
+paidcheck() { # $1 = expected (deny|allow), $2 = command, $3 = code page the guard's stdin is decoded in (optional)
+  out=$(printf '{"tool_name":"Bash","cwd":"%s","tool_use_id":"toolu_run","tool_input":{"command":"%s"}}' "$PJ" "$(jstr "$2")" | env ${3:+PYTHONIOENCODING=$3} bash "$H/py.sh" "$G")
+  if [ "$1" = deny ]; then got=$([ -n "$out" ] && echo deny || echo allow); else got=$([ -z "$out" ] && echo allow || echo deny); fi
+  lbl=${2//$'\n'/ }; lbl=${lbl:0:60}   # one line per case
+  if [ "$got" = "$1" ]; then echo "PASS $1  paid: $lbl"; else echo "FAIL expected $1 got $got  paid: $lbl"; fail=1; fi
+}
+{ printf 'import %s\n' openai; head -c 1500000 /dev/zero | tr '\0' '#'; } > "$PD/proj/big.py"   # 1.5 MB, the import in its first lines: the guard reads the first 256 KB whatever the size
+{ head -c 300000 /dev/zero | tr '\0' '#'; printf '\nimport %s\n' openai; head -c 1200000 /dev/zero | tr '\0' '#'; } > "$PD/proj/late.py"   # the import only after 300 KB: beyond the 256 KB read (a stated limit)
+while IFS= read -r line || [ -n "$line" ]; do
+  kind=${line%% *}; rest=${line#* }
+  case "$kind" in ''|'#'*) continue;; esac
+  rest=${rest//<NL>/$'\n'}; rest=${rest//@W@/$PWIN}; rest=${rest//@S@/$SEP}
+  case "$kind" in
+    F) name=${rest%% *}; mkdir -p "$PD/proj/$(dirname "$name")"; printf '%s\n' "${rest#* }" > "$PD/proj/$name";;
+    A) mkdir -p "$PD/proj/.claude"; printf '%s\n' "$rest" >> "$PD/proj/.claude/smartuse.local.md";;
+    D) paidcheck deny "$rest";;
+    O) paidcheck allow "$rest";;
+    D1252) paidcheck deny "$rest" cp1252;;
+  esac
+done < "$H/tests/paid-cases.txt"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

@@ -47,6 +47,8 @@ jobs:
         run: bash plugins/smartuse/hooks/tests/fresh-gate-test.sh
       - name: recall regression
         run: bash plugins/smartuse/hooks/tests/recall-test.sh
+      - name: paid-call gate regression
+        run: bash plugins/smartuse/hooks/tests/paid-guard-test.sh
       - name: A/B runner dry run (fake claude, spends nothing)
         run: bash bench/tests/ab-test.sh
       - name: term scan (generic patterns; the private list is never in the repo)

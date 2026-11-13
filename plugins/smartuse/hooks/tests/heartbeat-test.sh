@@ -589,10 +589,10 @@ for ev, ents in h.items():
                     bad.append("unexpected --guard: %s %r" % (ev, hd))
             elif ("bash-guard.py" in c or "file-guard.py" in c):
                 bad.append("a guard command without --guard: %s" % c)
-bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell"]
+bash = [e for e in pre if e.get("matcher") == "Bash|PowerShell|Monitor"]   # 0.7.0 F3 (D-YK12): a Monitor command is a shell command to the guard
 mcp = [e for e in pre if str(e.get("matcher", "")).startswith("mcp__")]
 if len(bash) != 1 or len(mcp) != 1 or bash[0]["hooks"] != mcp[0]["hooks"]:
-    bad.append("the Bash|PowerShell entry and the mcp tool entry must keep identical commands")
+    bad.append("the Bash|PowerShell|Monitor entry and the mcp tool entry must keep identical commands")
 if n != 3:
     bad.append("%d --guard commands, expected 3" % n)
 print("BAD " + "; ".join(bad) if bad else "OK")
