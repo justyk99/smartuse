@@ -27,7 +27,7 @@ Built on Claude Code **output styles** (official: `~/.claude/output-styles/<name
 3. **`try <name>`** → read `styles/<name>.md` and follow it for the rest of this conversation. No files written. Say so in one line.
 4. **Install + switch** (default, or `<name>` given):
    - copy `styles/<name>.md` → `~/.claude/output-styles/<name>.md` (`--project` → `.claude/output-styles/<name>.md`, create the folder). Never edit the user's other style files.
-   - set `"outputStyle": "<name>"` in `~/.claude/settings.json` (`--project` → `.claude/settings.local.json`), touching only that key — a 5-line Python read-modify-write, JSON validated after.
+   - set `"outputStyle": "<name>"` in `~/.claude/settings.json` (`--project` → `.claude/settings.local.json`), touching only that key — Read the file, then change that one key with the Edit tool (Write only when the file does not exist, with that single key). A settings file is read-only from the shell: the guard denies any shell command that writes one.
    - if the live context shows a hand-written reply section in CLAUDE.md: say "your CLAUDE.md has its own reply rules; when they conflict, those win — keep them or remove that section", and continue.
 5. **`--claude-md`** (output styles disabled by an org, or the user prefers one file) → wrap the style's instructions in `<!-- REPLY-STYLE: <name> -->` … `<!-- /REPLY-STYLE -->` and insert it at the top of `~/.claude/CLAUDE.md` (`--project` → `./CLAUDE.md`), replacing an existing marked block. Takes effect after `/clear` or a restart.
 6. **`off`** → set `outputStyle` to `Default` (or remove the marked block). Style files stay installed.

@@ -75,8 +75,9 @@ DONE_KEEP = 32   # finished tool_use_ids kept in status.json (`done`)
 # The rule names bash-guard.py knows (its RULE_NAMES), copied here because hooks never import each other. This copy MUST match
 # bash-guard.py's RULE_NAMES; heartbeat-test.sh reads both files as text and compares them. FLOOR_RULES are on whatever the owner types.
 KNOWN_RULES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "claude-json", "secrets-dir",
-               "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
-FLOOR_RULES = ("human-only", "trust-pin", "config-switch")
+               "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch",
+               "settings-file")
+FLOOR_RULES = ("human-only", "trust-pin", "config-switch", "settings-file")
 STALE_AGENT_S = 3 * 3600
 PREFIX = "smartuse · "
 

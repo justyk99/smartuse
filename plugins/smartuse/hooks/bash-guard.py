@@ -104,14 +104,22 @@ RULES = [
      r"(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])"
      r"|(?<![\w.-])(?:cp|copy|copy-item|xcopy|robocopy)(?![\w-])(?:\s+[^\s;&|]+){0,8}?\s+[^\s;&|]*\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])[\"']?(?=\s*(?:$|[;&|)\n]))",
      "switching smartuse's guards is the owner's action: /plugin configure or /config"),
+    # settings-file (0.7.0): a Claude Code settings file is read-only from the shell. config-switch above lists the commands that write
+    # one; other writers exist (download-to-file, copy and sync, block copy, in-place editors, link makers, interpreters) and a list of
+    # them is never complete. So the pattern is the settings path alone, read as typed like config-switch, and the waiver (see
+    # _settings_waived) frees only what it can read as a plain argument of a reader, text, or a text-only heredoc line. Linear.
+    (r"\.claude[\\/]+settings(?:\.local)?\.json(?![\w.-])",
+     "a Claude Code settings file is read-only from the shell: use the Edit tool, which is checked value by value. "
+     "Switching smartuse's guards is the owner's action: /plugin configure or /config"),
 ]
 # One name per rule, same length and same order as RULES (a test pins it). A rule is changed by its name, never by its position.
 RULE_NAMES = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
-              "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
+              "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch",
+              "settings-file")
 # The guard level (0.6.1). Strict: every rule. Light (the default): the rules in LIGHT_OFF are off, and so is any rule named in the
 # plugin option rules_off, except the FLOOR, which protects the switches themselves and is always on.
 LIGHT_OFF = frozenset(("force-with-lease", "claude-json"))
-FLOOR = frozenset(("human-only", "trust-pin", "config-switch"))
+FLOOR = frozenset(("human-only", "trust-pin", "config-switch", "settings-file"))
 # 0.6.1 F7: the doctor's canary, a no-op if the guard is down. _main() answers it before the fresh-source gate and RULES; it is compared whole.
 DOCTOR_CANARY = ": smartuse-doctor-canary"
 
@@ -1356,11 +1364,43 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
 #                  notes, echo, printf, grep, rg, the title and body of gh pr / issue / release). Not waived when the text holds a
 #                  command substitution or process substitution anywhere, when any segment has sudo or doas before its command, or
 #                  when a pipe feeds anything but a plain filter.
-WAIVABLE = frozenset(("pipe-to-shell", "sudo"))
+#   settings-file: (0.7.0) a command that names a Claude Code settings file is denied unless EVERY place the path is named is (1) a plain
+#                  argument of a reader (READERS; GIT_READERS for git; a copy command with the path as a source; `python -m json.tool`
+#                  given that one file and flags only), (2) text carried by a text-only command (_text_words), or (3) a line of a data
+#                  heredoc whose opener only carries text (cat, or a text-only command), with nothing else on the opener line. Never
+#                  waived: an option value or a redirect target, a reader behind sudo, a command or process substitution anywhere in
+#                  the text, a text complexity() tags or that does not split cleanly, and a command that names the path whose output is
+#                  piped into anything but a plain filter (the path would reach it as an argument).
+WAIVABLE = frozenset(("pipe-to-shell", "sudo", "settings-file"))
 PIPE_OK = frozenset(("head", "tail", "wc", "sort", "uniq", "cat", "cut", "tr", "less", "more", "grep", "rg", "nl", "column", "jq"))   # read what is piped in, run nothing
 PY_DATA_MODULES = frozenset(("json.tool",))   # modules `python -m` may run on a download: they read it as data
 PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))   # plain flags: none takes a value or runs code
 JSON_TOOL_FLAGS = frozenset(("-h", "--help", "--sort-keys", "--no-ensure-ascii", "--json-lines", "--tab", "--no-indent", "--compact"))   # json.tool's own options that take no value (--indent takes a number, handled beside it); its file words are never waived
+# 0.7.0 settings-file: the commands whose plain arguments are only READ (an allow list: a list of writers is never complete). Bash and PowerShell names, lower case.
+READERS = frozenset(("cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "wc", "ls", "stat", "file", "jq", "diff", "cmp", "test", "[",
+                     "md5sum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum", "b2sum", "cksum", "sum", "shasum", "md5", "sha256",
+                     "get-content", "gc", "type", "select-string", "sls", "test-path", "get-item", "get-childitem", "dir", "get-filehash"))
+GIT_READERS = frozenset(("add", "diff", "status", "log", "show", "blame", "ls-files", "check-ignore", "commit"))   # git subcommands that only read a path argument
+GIT_GLOBAL_OK = frozenset(("--no-pager", "-P", "--no-optional-locks", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs"))   # git options before the subcommand (-C and its value too); any other (-c, --git-dir, --exec-path) is not a reader
+COPIERS = frozenset(("cp", "copy", "copy-item", "cpi"))   # the path may be a source (never the last word) with only plain flags
+COPY_FLAGS = re.compile(r"-[rRapfivnuPLHdx]+|-(?:force|recurse|verbose|confirm|whatif|passthru)", re.I)   # no -l / -s (links) and no -t / -T / -Destination / -b
+SETTINGS_PIPE_OK = PIPE_OK | frozenset(("convertfrom-json", "select-object", "measure-object", "sort-object", "out-string", "out-host", "format-list", "format-table"))
+FLAG_LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+# a reader's options that take a value: (short letters, long names). A hit that is such a value is never waived (less -o and --log-file WRITE the file named).
+READER_VALUE_OPTS = {
+    "grep": ("efmABCdD", ("--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--directories", "--devices",
+                          "--include", "--exclude", "--exclude-from", "--exclude-dir", "--label", "--binary-files")),
+    "head": ("nc", ("--lines", "--bytes")), "tail": ("ncs", ("--lines", "--bytes", "--pid", "--sleep-interval", "--max-unchanged-stats")),
+    "less": ("oOpPtTxyzbhjkDU", ("--log-file", "--LOG-FILE", "--pattern", "--prompt", "--tag", "--tag-file", "--tabs", "--shift", "--jump-target",
+                                 "--lesskey-file", "--lesskey-src", "--lesskey-content", "--max-back-scroll", "--max-forw-scroll", "--window", "--buffers")),
+    "ls": ("IwT", ("--ignore", "--width", "--tabsize", "--format", "--sort", "--time", "--time-style", "--block-size", "--hide", "--color", "--indicator-style", "--quoting-style")),
+    "stat": ("c", ("--format", "--printf")), "file": ("fmeFP", ("--files-from", "--magic-file", "--exclude", "--separator", "--parameter")),
+    "jq": ("fL", ("--from-file", "--arg", "--argjson", "--slurpfile", "--rawfile", "--argfile", "--indent")),
+    "diff": ("IULCDxXFW", ("--ignore-matching-lines", "--label", "--unified", "--context", "--ifdef", "--exclude", "--exclude-from",
+                           "--show-function-line", "--width", "--starting-file", "--from-file", "--to-file")),
+    "cmp": ("in", ("--ignore-initial", "--bytes", "--skip-initial")), "shasum": ("a", ("--algorithm",)),
+}
+READER_VALUE_OPTS["egrep"] = READER_VALUE_OPTS["fgrep"] = READER_VALUE_OPTS["grep"]
 
 
 def _shell_tokens(t):
@@ -1451,21 +1491,164 @@ def _python_data_module(a):
     return True
 
 
+def _json_tool_file(a):
+    """The index in `a` (the words after a Python's name) of the ONE file word of `-m json.tool` given plain flags (PY_FLAGS) before
+    the -m, and after the module only JSON_TOOL_FLAGS, a number after --indent and exactly one other word; None for anything else (no
+    file word, two or more, a lone `-` counts as one: the module's second positional is the file it writes)."""
+    i = 0
+    while i < len(a) and a[i] in PY_FLAGS:
+        i += 1
+    if not (i + 1 < len(a) and a[i] == "-m" and a[i + 1] in PY_DATA_MODULES):
+        return None
+    files, j = [], i + 2
+    while j < len(a):
+        if a[j] == "--indent":
+            j += 1
+            if j >= len(a) or not (a[j].isascii() and a[j].isdigit()):
+                return None
+        elif a[j] not in JSON_TOOL_FLAGS:
+            files.append(j)
+        j += 1
+    return files[0] if len(files) == 1 else None
+
+
+def _settings_reader_arg(v, i, wi):
+    """Is word v[wi] (it names a settings file) a plain argument that only READS it, of the command whose name is v[i]? A reader of
+    READERS (not as the value of one of its options, READER_VALUE_OPTS), a git subcommand of GIT_READERS (no --output, no external
+    diff), a copy command with the path as a source (not the last word, plain flags only), `python -m json.tool` given that one file."""
+    w = v[wi]
+    if w.startswith("-"):
+        return False   # an option, or an option's value spelled --opt=path
+    cmd = base_name(v[i]).lower()
+    if cmd == "git":
+        k = i + 1
+        while k < len(v) and v[k].startswith("-"):
+            if v[k] == "-C":
+                k += 2
+            elif v[k] in GIT_GLOBAL_OK:
+                k += 1
+            else:
+                return False
+        # git takes an unambiguous abbreviation of a long option: --ou… is --output (writes the file it is given)
+        return k < wi and k < len(v) and v[k] in GIT_READERS and not any(a.startswith(("--ou", "--ext")) for a in v[k + 1:])
+    if cmd in COPIERS:
+        pos, ended = [], False
+        for j in range(i + 1, len(v)):
+            a = v[j]
+            if not ended and a == "--":
+                ended = True
+            elif not ended and a.startswith("-") and len(a) > 1:
+                if not COPY_FLAGS.fullmatch(a):
+                    return False
+            else:
+                pos.append(j)
+        return len(pos) >= 2 and wi in pos and wi != pos[-1]
+    if PYFAM.fullmatch(cmd):
+        return _json_tool_file(v[i + 1:]) == wi - (i + 1)
+    if cmd in READERS:
+        if cmd == "rg" and any(a == "--pre" or a.startswith("--pre=") for a in v[i + 1:]):
+            return False   # rg runs the program --pre names on each file
+        letters, longs = READER_VALUE_OPTS.get(cmd, ("", ()))
+        return wi not in _option_values(v, i + 1, letters, "".join(c for c in FLAG_LETTERS if c not in letters), longs)
+    return False
+
+
+def _text_opener(line):
+    """Does the opener line of a data heredoc only carry text: one command, `cat` or a text-only command (_text_words), not behind sudo?"""
+    toks = _shell_tokens(line)
+    if not toks or any(k == "sep" for k, *_ in toks):
+        return False
+    v = [x[1] for x in toks]
+    i = command_start(v)
+    if i >= len(v) or any(base_name(w).lower() in ("sudo", "doas") for w in v[:i]):
+        return False
+    return base_name(v[i]).lower() == "cat" or _text_words(v, i) is not None
+
+
+def _settings_waived(text, ps, pre):
+    """The settings-file waiver: True when EVERY place a settings path is named is a case of the list above. `text` is what main() runs
+    the other rules on (for Bash the data heredoc bodies are stripped from it), `pre` the command as typed (the rule matched on it).
+    Linear: the hits and the words are walked once, side by side."""
+    subject = text if ps or pre is None else pre
+    if complexity(subject, ps):
+        return False
+    t = text.replace("\\", "/") if ps else text
+    if "\\\n" in t or words(t) is None or "$(" in t or "`" in t or "<(" in t or ">(" in t:
+        return False
+    pat = re.compile(RULES[RULE_NAMES.index("settings-file")][0], re.I | re.S)
+    seen = 0
+    if not ps and pre is not None:
+        if heredoc_substs(pre):   # bash runs the substitutions in an unquoted heredoc body
+            return False
+        for m in HEREDOC.finditer(pre):   # the bodies strip_heredocs cut out of `text`: text, when the opener only carries text
+            line = opener_line(pre, m)
+            if not heredoc_is_code(line) and pat.search(m.group(3)):
+                if not _text_opener(line):
+                    return False
+                seen += 1
+    toks = _shell_tokens(t)
+    if toks is None:
+        return False
+    segs, ends = [[]], []
+    for kind, val, s, e in toks:
+        if kind == "word":
+            segs[-1].append((val, s, e))
+        else:
+            ends.append(val)
+            segs.append([])
+    ends.append("")
+    vals = [[w[0] for w in seg] for seg in segs]
+    first = [command_start(v) for v in vals]
+    flat = [(w[1], w[2], si, wi) for si, seg in enumerate(segs) for wi, w in enumerate(seg)]
+    ptr = [0]
+    def token_at(pos):   # (segment, word) of the word that holds position pos, or None; positions come in ascending order
+        p = ptr[0]
+        while p < len(flat) and flat[p][1] <= pos:
+            p += 1
+        ptr[0] = p
+        return (flat[p][2], flat[p][3]) if p < len(flat) and flat[p][0] <= pos else None
+    memo, fed = {}, set()
+    for m in pat.finditer(t):
+        seen += 1
+        tk = token_at(m.start())   # None: the path is in a redirect (its target leaves no word) or a place the words do not hold
+        if tk is None:
+            return False
+        si, wi = tk
+        v, i = vals[si], first[si]
+        if wi <= i or i >= len(v) or any(base_name(w).lower() in ("sudo", "doas") for w in v[:i]):
+            return False
+        if si not in memo:
+            memo[si] = _text_words(v, i)
+        tw = memo[si]
+        if not (tw is True or (tw is not None and wi in tw)) and not _settings_reader_arg(v, i, wi):
+            return False
+        if si not in fed:   # what the command prints (the path may be in it) must not be piped on into anything but a plain filter
+            fed.add(si)
+            k = si
+            while ends[k] in ("|", "|&"):
+                k += 1
+                if first[k] >= len(vals[k]) or base_name(vals[k][first[k]]).lower() not in SETTINGS_PIPE_OK:
+                    return False
+    return seen > 0
+
+
 WAIVER_ERRORS = []   # what a waiver raised, if anything (a test reads it); a waiver that raises waives nothing
 
 
-def waived(name, text, ps):
+def waived(name, text, ps, pre=None):
     """True when `name` is a waivable rule and every match of it in `text` (the text main() runs RULES on; `ps` for the PowerShell
-    tool) is an honest command of its class (see above). An error is a no."""
+    tool; `pre` the command as typed, which settings-file reads) is an honest command of its class (see above). An error is a no."""
     try:
-        return _waived(name, text, ps)
+        return _waived(name, text, ps, pre)
     except Exception as e:
         WAIVER_ERRORS.append(repr(e))
         return False
 
 
-def _waived(name, text, ps):
+def _waived(name, text, ps, pre=None):
     """The work of waived. Linear in the text: the matches and the words are walked once, side by side."""
+    if name == "settings-file":
+        return _settings_waived(text, ps, pre)
     if name not in WAIVABLE or complexity(text, ps):
         return False
     t = text.replace("\\", "/") if ps else text   # PowerShell has no backslash escape: read as a bash text it would hide a command inside a quote
@@ -1617,8 +1800,10 @@ def _main():
     for (pat, why), name in zip(RULES, RULE_NAMES):
         if not strict and name not in FLOOR and (name in LIGHT_OFF or name in off):
             continue
-        # config-switch reads the command as typed: a heredoc written to a settings file carries the key in its body (stripped from `text`)
-        if re.search(pat, pre if name == "config-switch" and not ps else text, re.I | re.S) and not (name in WAIVABLE and not tag and waived(name, text, ps)):
+        # config-switch reads the command as typed: a heredoc written to a settings file carries the key in its body (stripped from `text`);
+        # settings-file reads it as typed too, and its waiver is given `pre` to tell a data heredoc line from a command
+        if re.search(pat, pre if name in ("config-switch", "settings-file") and not ps else text, re.I | re.S) \
+                and not (name in WAIVABLE and not tag and waived(name, text, ps, pre)):
             deny(why, name)
             return
     why = None if early else gate()

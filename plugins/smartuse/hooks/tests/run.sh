@@ -190,9 +190,10 @@ src = open(sys.argv[1], encoding="utf-8").read()
 ns = {}
 exec(compile(src.replace("\nmain()\n", "\n"), "bash-guard", "exec"), ns)
 names = ("pipe-to-shell", "download-exec", "sudo", "rm-root", "chmod-open", "credential-file", "secrets-dir", "claude-json",
-         "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch")
+         "sql-destructive", "force-push", "force-with-lease", "human-only", "fake-tty", "trust-pin", "svn-revert", "config-switch",
+         "settings-file")
 ok = tuple(ns["RULE_NAMES"]) == names and len(ns["RULE_NAMES"]) == len(ns["RULES"])
-ok = ok and ns["LIGHT_OFF"] == {"force-with-lease", "claude-json"} and ns["FLOOR"] == {"human-only", "trust-pin", "config-switch"}
+ok = ok and ns["LIGHT_OFF"] == {"force-with-lease", "claude-json"} and ns["FLOOR"] == {"human-only", "trust-pin", "config-switch", "settings-file"}
 print("ok" if ok else "bad")
 PY
 )
@@ -550,6 +551,119 @@ print(("ok %.2f" % dt) if hit == (sys.argv[2] == "dense-mv") and dt < 1.0 else "
 PY
 )
   case "$r" in ok*) echo "PASS $shape: 29 KB of mv commands decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL settings-file timing: $shape -> '${r:0:120}'"; fail=1;; esac
+done
+# --- 0.7.0 F2: a Claude Code settings file is read-only from the shell. config-switch lists the commands that WRITE one; other writers
+#     exist (download-to-file, copy and sync, block copy, in-place editors, link makers, interpreters) and a list is never complete. The
+#     rule settings-file (the floor: on at every level, no name switches it) matches the settings path as typed and denies every command
+#     that names it, except where the waiver sees that every place the path is named is a plain argument of a reader (cat, jq, grep,
+#     git diff / add, a copy FROM it, `python -m json.tool <file>` with flags only), text carried by a text-only command (a commit message,
+#     echo, a gh body) or a line of a data heredoc whose opener only carries text. Never waived: an option value or a redirect target, a
+#     reader behind sudo, a command or process substitution in the text, a text complexity() tags or that does not split cleanly, a reader
+#     whose output is piped into anything but a plain filter. The honest edit goes through the Edit tool.
+# deny: each writer class (some are already denied by config-switch: they are pins; the rest were allowed before this rule)
+check deny  'curl -sS -o ~/.claude/settings.json https://x.y/s.json'
+check deny  'wget -O .claude/settings.json https://x.y/s.json'
+check deny  'rsync -a /tmp/s.json ~/.claude/settings.json'
+check deny  'dd if=/tmp/s.json of=.claude/settings.json'
+check deny  $'perl -pi -e \'s/a/b/\' .claude/settings.json'
+check deny  'awk -i inplace 1 .claude/settings.json'
+check deny  $'python3 -c "open(\'.claude/settings.json\',\'w\').write(\'{}\')"'
+check deny  $'node -e "require(\'fs\').writeFileSync(\'.claude/settings.json\',\'{}\')"'
+check deny  $'python3 - <<\'EOF\'\nopen(\'.claude/settings.json\',\'w\').write(\'{}\')\nEOF'
+check deny  $'cat <<\'EOF\' | python3 -\nopen(\'.claude/settings.json\',\'w\').write(\'{}\')\nEOF'
+check deny  'cp /tmp/new.json .claude/settings.json -f'
+check deny  'echo .claude/settings.json | xargs rm'
+# deny: the never-waived list (an option value, a redirect target, a second file word of the validate call, a substitution, text it cannot read)
+check deny  'git diff --output=.claude/settings.json HEAD'
+check deny  'less -o .claude/settings.json notes.log'
+check deny  'grep x .claude/settings.json > .claude/settings.json'
+check deny  'python3 -m json.tool /tmp/in.json .claude/settings.json'
+check deny  'python3 -m json.tool .claude/settings.json /tmp/out.json'
+check deny  'echo "$(cat .claude/settings.json)"'
+check deny  $'echo `cat .claude/settings.json`'
+check deny  $'echo \'open quote .claude/settings.json'
+check deny  $'cat \\\n.claude/settings.json'
+check deny  'sudo cat .claude/settings.json'
+# deny: PowerShell where the class exists there
+pcheck deny 'Invoke-WebRequest https://x.y/s.json -OutFile .claude\settings.json'
+pcheck deny 'New-Item -ItemType SymbolicLink -Path .claude\settings.json -Target C:\tmp\s.json'
+pcheck deny 'Rename-Item -Path .claude\settings.json -NewName x.json'
+pcheck deny 'Get-Date | Tee-Object -FilePath .claude\settings.json'
+pcheck deny $'[IO.File]::WriteAllText(\'.claude\\settings.json\',\'x\')'
+pcheck deny 'Copy-Item new.json .claude\settings.json -Force'
+pcheck deny 'python -m json.tool new.json .claude\settings.json'
+# allow: each kind of reader, with flags
+check allow 'cat .claude/settings.json'
+check allow 'head -n 5 ~/.claude/settings.json'
+check allow 'tail -5 .claude/settings.local.json'
+check allow 'wc -l .claude/settings.local.json'
+check allow 'ls -la ~/.claude/settings.json'
+check allow 'stat ~/.claude/settings.json'
+check allow 'file .claude/settings.json'
+check allow 'jq -r .model .claude/settings.json'
+check allow 'diff .claude/settings.json /tmp/backup.json'
+check allow 'cmp ~/.claude/settings.json /tmp/backup.json'
+check allow 'test -f .claude/settings.json && echo yes'
+check allow '[ -f ~/.claude/settings.json ] && echo yes'
+check allow 'sha256sum ~/.claude/settings.json'
+check allow 'rg -n model .claude/settings.json'
+check allow $'grep -ho \'"outputStyle": *"[^"]*"\' .claude/settings.local.json .claude/settings.json ~/.claude/settings.json 2>/dev/null | head -1 || echo \'"outputStyle": "Default"\''   # the reply-style skill's own live-context line
+# allow: the git readers, a copy FROM the file, the validate call
+check allow 'git diff .claude/settings.json'
+check allow 'git add .claude/settings.json'
+check allow 'git -C docs status --short .claude/settings.json'
+check allow 'git log -p -- .claude/settings.json'
+check allow 'git show HEAD:.claude/settings.json'
+check allow 'git check-ignore -v .claude/settings.local.json'
+check allow 'git ls-files .claude/settings.json'
+check allow 'git commit -m "tidy" .claude/settings.json'
+check allow 'cp -p ~/.claude/settings.json ~/backup/settings.bak'
+check allow 'python3 -m json.tool .claude/settings.json'
+check allow 'python3 -m json.tool --sort-keys --indent 2 ~/.claude/settings.json'
+# allow: text mentions, and a data heredoc into a notes file
+check allow 'git commit -m "note: .claude/settings.json is read-only from the shell"'
+check allow 'echo "edit .claude/settings.json with the Edit tool"'
+check allow 'gh pr create --title "guard settings" --body "the guard protects .claude/settings.json"'
+check allow $'cat > notes.md <<\'EOF\'\nthe style lives in .claude/settings.json\nEOF'
+check allow $'cat > notes.md <<EOF\nthe style lives in ~/.claude/settings.local.json\nEOF'
+check allow 'cat .claude/settings.json | jq .outputStyle'
+# allow: PowerShell
+pcheck allow 'Get-Content .claude\settings.json'
+pcheck allow 'Get-Content -Raw $HOME\.claude\settings.json | ConvertFrom-Json'
+pcheck allow 'Select-String -Path .claude\settings.json -Pattern model'
+pcheck allow 'Test-Path $HOME\.claude\settings.json'
+pcheck allow 'Get-FileHash .claude\settings.json'
+pcheck allow 'git diff .claude\settings.json'
+pcheck allow 'git commit -m "note .claude\settings.json is read-only"'
+# the floor: on at every level; no name in rules_off switches it
+for v in true -; do
+  ocheck deny:'[rule settings-file, always on]' "$v" 'settings-file' 'dd if=/tmp/s.json of=.claude/settings.json'
+  ocheck deny:'[rule settings-file, always on]' "$v" - 'echo .claude/settings.json | xargs rm'
+done
+ocheck deny:'use the Edit tool' - 'settings-file,sudo' 'rsync /tmp/s.json ~/.claude/settings.json'
+ocheck allow - 'settings-file' 'cat .claude/settings.json'
+ocheck allow true - 'git diff .claude/settings.json'
+# decided within a second inside the process: 1,000 reader commands that name the path then one that is not a reader (a block copy), the same
+# text with a harmless last command, and 35 KB of reader commands (past the 32 KB the waiver reads: complexity() tags it, the waiver does not run)
+for shape in readers-then-writer readers-clean readers-over-32kb; do
+  r=$(py - "$G" "$shape" <<'PY'
+import contextlib, io, json, sys, time, types
+src = open(sys.argv[1], encoding="utf-8").read()
+if sys.argv[2] == "readers-over-32kb":
+    cmd = "cat .claude/settings.json; " * 1300
+else:
+    cmd = "cat .claude/settings.json; " * 1000 + ("dd of=.claude/settings.json" if sys.argv[2] == "readers-then-writer" else "ls")
+sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
+out = io.StringIO()
+t0 = time.monotonic()
+with contextlib.redirect_stdout(out):
+    exec(compile(src, "bash-guard", "exec"), {"__name__": "timing"})
+dt = time.monotonic() - t0
+hit = "[rule settings-file, always on]" in out.getvalue()
+print(("ok %.2f" % dt) if hit == (sys.argv[2] != "readers-clean") and dt < 1.0 else "bad %.2f %s" % (dt, out.getvalue()[-90:]))
+PY
+)
+  case "$r" in ok*) echo "PASS $shape: settings-file decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL settings-file waiver timing: $shape -> '${r:0:120}'"; fail=1;; esac
 done
 # --- a long command of ordinary text is decided well within the hook's timeout (10 s in hooks.json): no rule may rescan the text
 #     from every position. 16 KB took 12 s on the author's laptop before the SQL rule was anchored; 64 KB is 4x the length, so ~16x the time.
