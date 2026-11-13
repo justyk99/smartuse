@@ -13,7 +13,7 @@ The spec is `paid-guard-plan.md` §8.4 F3, with §8.2 (V1–V10), §8.6 (constra
 - F1 and F2 method D tools: `.claude/worktrees/pg7-scratch/f1/` and `f2/` (`replay.py`, `events.jsonl`, `rec/`).
 
 ## Open before F3 starts
-- **D-YK12 (Monitor):** a Monitor call reaches PreToolUse as `Monitor`, and the guard's matcher is `Bash|PowerShell`. Yes → F3 also changes `hooks.json:6` to `Bash|PowerShell|Monitor`, `_main()` reads a Monitor command as Bash, plus cases. No → `hooks.json` stays identical; the gap goes to SECURITY.md in F10.
+- **D-YK12 (Monitor): decided yes, 2026-11-13.** F3 also changes `hooks.json:6` to `Bash|PowerShell|Monitor` (that one word; the rest of `hooks.json` stays byte-identical), `_main()` reads a Monitor command as a Bash one, with cases red first: a rule deny, a fresh-source deny and a paid deny through Monitor, plus an allowed one. heartbeat-test's `hooks.json` checks (F1, F6) are re-read for the new matcher. Grep first how a Monitor event names its command field (E5 recorded only `tool_name`).
 - E1, E2 (phone prompt records): needed by F5, not F3.
 
 ## Lessons from F1–F2 for the builder brief
