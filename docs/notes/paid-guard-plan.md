@@ -415,6 +415,7 @@ One fresh review of the merged code before any push, on Opus at xhigh, over the 
 - E3: a headless `-p` prompt has no `origin` object; `turnOrigin=sdk`, `entrypoint=sdk-cli`. `userType` is `external` for both, so it is never the test. F5 can ship. Not run: the stream-json input form.
 - E4: a subagent's PreToolUse carries `agent_id` and `agent_type`, and its `transcript_path` is the main session's file. F5 refuses a typed go when `agent_id` is present; subagents need the adapter go.
 - E5: a Monitor call reaches PreToolUse as `tool_name` `Monitor`, not as Bash. The guard's matcher (`hooks.json:6`, `Bash|PowerShell`) does not fire for it: the §8.1 assumption was wrong. Decision for the owner: D-YK12 (§8.9).
+- T2 after the F1 merge (`5601dbb`): 11 of 11 green; `run.sh` 555 PASS, `fresh-gate-test.sh` 710 PASS. `ledger-test.sh` failed once and passed on a rerun. Its check (`ledger-test.sh:52`) prints "duplicate line" for any count other than 1, so 0 lines (both claims failed) fits as well as 2. Likely class: on Windows, two renames of the same file at the same instant can both fail, and `on_stop` (`ledger.py:264–267`) then drops the receipt. Not touched by F1; pre-existing; not fixed here → an unknown for the owner (ROADMAP 0.6.2 candidate).
 
 Assumed, not tested: a prompt the owner pastes is his typing; an older Claude Code that lacks the origin fields makes the typed go fail closed (the reason says to use the adapter).
 
