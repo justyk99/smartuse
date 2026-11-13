@@ -396,6 +396,7 @@ One fresh review of the merged code before any push, on Opus at xhigh, over the 
 - **D-YK9. `onFailure: "block"` on the guards.** Recommend no. It is one static setting for every user; in light an internal error would then block the call, against the 1.0 bar; and a machine that cannot start the hook command would have every Bash and PowerShell call blocked. The paid check denies on its own errors once a call is paid (D5, V8).
 - **D-YK10. One release or two.** Recommend: build in this order and decide after F4. 0.7.0 can ship there; the typed go, PowerShell parity and the comment fix follow as 0.7.1.
 - **D-YK11. The repo's `CLAUDE.md` test lines** (add `paid-guard-test.sh` to T1; T2 one suite at a time on a small machine). The owner's edit or his yes.
+- **D-YK12. Monitor (from E5, open).** Recommend: the guard matcher becomes `Bash|PowerShell|Monitor` and `_main()` reads a Monitor command as a Bash one, with cases, in F3. This breaks V15's "`hooks.json` byte-identical" by one word; V15's reason (no new hook, no new process) still holds. The other choice: `hooks.json` stays as it is, and SECURITY.md says a command started through Monitor is not checked.
 
 ### 8.10 Unknowns, each an experiment (results are written here)
 | # | Unknown | Experiment (field names only, never content) | If it goes the other way |
@@ -406,6 +407,15 @@ One fresh review of the merged code before any push, on Opus at xhigh, over the 
 | E4 | Which `transcript_path` and ids a subagent's PreToolUse gets | one Bash call inside a subagent, event keys recorded by a scratch hook | the typed go covers the main session only; subagents need the adapter go |
 | E5 | The `tool_name` of a command started through Monitor | one Monitor call, event keys recorded | Monitor's name joins the shell tools in `_main()`, with a case |
 | R | The verdict for each class of real command in the owner's repo | F4 part 1 | F4 part 2 is sized by the table |
+**F0 results (2026-11-13, Claude Code 2.1.323; field names only).**
+- T2 floor on `a68b32c`: 11 of 11 suites ALL PASS (`paid-guard-test.sh` not on the base yet). Slowest: `fresh-gate-test.sh` 521 s, `run.sh` 254 s.
+- Reference on `19c7e45`: `paid-guard-test.sh` 328 PASS, 0 FAIL; `run.sh` 290 PASS, 0 FAIL.
+- Method M "before" (base loaded with `--plugin-dir`, user settings left out so the installed copy did not also run): Bash 0.417 s, Read 0.000, Edit 0.632, Stop 0.390 (slower of two runs). The two runs differ by 0.036 s on Bash, more than the 0.03 s margin: the "after" columns take 3 or more runs each.
+- E1, E2: open (the owner's phone prompts). An interactive CLI prompt records `origin.kind=human`, `turnOrigin=human`, `entrypoint=cli`.
+- E3: a headless `-p` prompt has no `origin` object; `turnOrigin=sdk`, `entrypoint=sdk-cli`. `userType` is `external` for both, so it is never the test. F5 can ship. Not run: the stream-json input form.
+- E4: a subagent's PreToolUse carries `agent_id` and `agent_type`, and its `transcript_path` is the main session's file. F5 refuses a typed go when `agent_id` is present; subagents need the adapter go.
+- E5: a Monitor call reaches PreToolUse as `tool_name` `Monitor`, not as Bash. The guard's matcher (`hooks.json:6`, `Bash|PowerShell`) does not fire for it: the §8.1 assumption was wrong. Decision for the owner: D-YK12 (§8.9).
+
 Assumed, not tested: a prompt the owner pastes is his typing; an older Claude Code that lacks the origin fields makes the typed go fail closed (the reason says to use the adapter).
 
 ### 8.11 Risks
