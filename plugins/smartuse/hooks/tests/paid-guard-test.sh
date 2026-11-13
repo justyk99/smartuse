@@ -1306,4 +1306,31 @@ PGTOOL=Bash
 mkdir -p "$D/fx"
 r=$(py "$CW" fxtime "$(wp "$G")" "$(wp "$D/fx")" </dev/null 2>&1)
 [ "$r" = ok ] && ok "F4b fix timing: each 30 KB text (cd lists, glued quoted words, substitutions in mentions, nested substitutions, assignment chains, Start-Process parameters, script blocks after pipes) is decided in under 1 s with the verdict the cases above show" || ko "F4b fix timing: $r"
+
+# ===== 31. 0.7.0 F8: a quote in a # comment no longer hides the lines after it (strip_comments reads the text the paid scan reads)
+# a paid run between two comments that hold an apostrophe each: the two quotes used to pair up and the run between them was read as text
+fresh; mkpaid
+deny "31 a paid run between two comments with an apostrophe each, no go -> denied" $'# it\'s ready\npython render.py --n 1\n# check the PR\'s status' 'no go from the owner for render.py' toolu_f8a
+[ ! -e "$P" ] && ok "... and a deny writes nothing" || ko "31: state was written: $(ls "$P" 2>&1)"
+deny "31 the comment starts after a semicolon" $'echo a; # it\'s ready\npython render.py --n 1\n# check the PR\'s status' 'no go from the owner for render.py' toolu_f8b
+deny "31 the comment starts after &&" $'echo a && # it\'s ready\npython render.py --n 1\n# check the PR\'s status' 'no go from the owner for render.py' toolu_f8c
+deny "31 the comment starts after a pipe" $'echo a | # it\'s ready\npython render.py --n 1\n# check the PR\'s status' 'no go from the owner for render.py' toolu_f8d
+deny "31 the comment starts after a parenthesis" $'( # it\'s ready\npython render.py --n 1\n# check the PR\'s status\n)' 'no go from the owner for render.py' toolu_f8e
+deny "31 the comment follows a command on its line" $'echo a # it\'s ready\npython render.py --n 1\n# check the PR\'s status' 'no go from the owner for render.py' toolu_f8f
+deny "31 a # that is text (single quotes) hides nothing" "echo 'a # b'; python render.py --n 1" 'no go from the owner for render.py' toolu_f8g
+deny "31 a # that is text (double quotes) hides nothing" 'echo "a # b"; python render.py --n 1' 'no go from the owner for render.py' toolu_f8h
+deny "31 a # that is text (\$#, a#b, a URL fragment) hides nothing" 'echo $# a#b https://h/p#frag; python render.py --n 1' 'no go from the owner for render.py' toolu_f8i
+deny "31 a # inside a substitution in double quotes hides nothing" 'echo "$(echo "a #b")"; python render.py --n 1' 'no go from the owner for render.py' toolu_f8j
+adapter 'paid: render.py x 10, cap RM5, test ok\n'
+allow "31 the same run between comments, with a go, passes" $'# it\'s ready\npython render.py --n 1\n# check the PR\'s status' toolu_f8k
+[ "$(used)" = 1 ] && ok "... and is counted: used 1" || ko "31 used after a run between comments: $(used) $(cat "$R" 2>&1)"
+# a comment that names the script is text, and a script with no paid signal is free between comments
+fresh; mkpaid; mkplain polish
+allow "31 a comment that names the paid script is no run" $'# it\'s ready: python render.py --n 1 later\npython polish.py\n# check the PR\'s status' toolu_f8l
+allow "31 a free script between comments is free" $'# it\'s ready\npython polish.py\n# check the PR\'s status' toolu_f8m
+nostate "31 ... and touches no state"
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, test ok\n'
+allow "31 pin: a multi-line commit message with a # line and an apostrophe still runs" $'git commit -m "fix the parser\n# it\'s a heading\nmore text"' toolu_f8n
+allow "31 pin: a paid word inside such a message is text, not a run" $'git commit -m "a\n# it\'s\npython render.py --n 1\n# don\'t\nb"' toolu_f8o
+nostate "31 ... and touches no state"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

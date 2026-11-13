@@ -889,6 +889,116 @@ def _heredoc_end(t, i):
     return e.end() if e else i + 2
 
 
+COMMENT_STOP = re.compile(r"[#'\"\\`$()}<\n]")           # the characters strip_comments has to look at; the rest of the text is jumped over
+COMMENT_CASE = re.compile(r"\bcase\b[^\n]{0,200}?\bin\b")   # a case statement: its `a)` is no end of a substitution, so strip_comments leaves the text alone
+
+
+def strip_comments(s):
+    """0.7.0 F8. A Bash command with its # comments blanked, each to the end of its line (the line break stays), for the two readers that
+    cut a command into words and would pair a quote in a comment with one in a later comment, hiding the lines between: the fresh-source
+    gate and the paid scan. A # starts a comment only where a word can start (the start of the text, or after a blank, a line break or
+    one of ; & | ( that is not escaped) and only at the top level: outside every quote and every $( ), ${ } and backtick pair. A # that is
+    text (in single, double or $'…' quotes, $#, ${#x}, a#b, a URL fragment) is never read as a comment. A heredoc body is skipped
+    untouched. One left-to-right pass, linear in the text; a text without # costs one `in` test. A text this pass cannot read to its end
+    (a quote or $( that never closes, a case statement, =~) comes back as it was, so the readers then see what they saw before."""
+    if "#" not in s or "=~" in s or COMMENT_CASE.search(s):
+        return s
+    out, last, i, n = [], 0, 0, len(s)
+    st = [["c", 0, False]]   # a stack of [kind, open parentheses, arithmetic]; kind: c the top level or a $( ), b backticks, d double quotes, p ${ }
+    esc = pend = pdepth = -1   # esc: the index after the last backslash pair; pend: the end of a heredoc opened on this line (its body is skipped at the next line break of that depth)
+    find = COMMENT_STOP.search
+    while True:
+        m = find(s, i)
+        if not m:
+            break
+        i = m.start()
+        ch = s[i]
+        top = st[-1]
+        k = top[0]
+        if ch == "\\":
+            i += 2
+            esc = i
+        elif ch == "$" and k != "d" and s[i + 1:i + 2] == "'":   # $'…': a backslash escapes inside it
+            j = i + 2
+            while j < n and s[j] != "'":
+                j += 2 if s[j] == "\\" else 1
+            if j >= n:
+                return s
+            i = j + 1
+        elif ch == "$":
+            nx = s[i + 1:i + 2]
+            if nx == "(":
+                st.append(["c", 0, s.startswith("$((", i)])
+                i += 2
+            elif nx == "{":
+                st.append(["p", 0, False])
+                i += 2
+            elif nx == '"' and k != "d":
+                st.append(["d", 0, False])
+                i += 2
+            else:
+                i += 1
+        elif ch == "`":
+            if k == "b":
+                st.pop()
+            else:
+                st.append(["b", 0, False])
+            i += 1
+        elif k == "d":
+            if ch == '"':
+                st.pop()
+            i += 1
+        elif ch == '"':
+            st.append(["d", 0, False])
+            i += 1
+        elif ch == "'":
+            if k == "p" and len(st) > 1 and st[-2][0] == "d":
+                i += 1   # a single quote inside "${ … }" is a plain character
+            else:
+                j = s.find("'", i + 1)
+                if j < 0:
+                    return s
+                i = j + 1
+        elif k == "p":
+            if ch == "}":
+                st.pop()
+            i += 1
+        elif ch == "(":
+            top[1] += 1
+            i += 1
+        elif ch == ")":
+            if top[1]:
+                top[1] -= 1
+            elif k == "c" and len(st) > 1:
+                st.pop()
+            i += 1
+        elif ch == "#":
+            if len(st) == 1 and i != esc and (i == 0 or s[i - 1] in " \t\n;&|("):
+                out.append(s[last:i])
+                j = s.find("\n", i)
+                last = i = n if j < 0 else j
+            else:
+                i += 1
+        elif ch == "<":
+            if s.startswith("<<<", i):
+                i += 3
+            elif s.startswith("<<", i) and not top[2]:
+                e = _heredoc_end(s, i)
+                if e > i + 2:
+                    pend, pdepth = e, len(st)
+                i += 2
+            else:
+                i += 1
+        elif ch == "\n" and pend > i and pdepth == len(st):
+            i, pend = pend, -1
+        else:
+            i += 1
+    if len(st) != 1 or not out:
+        return s
+    out.append(s[last:])
+    return "".join(out)
+
+
 def _sub_end(t, i, depth=0, many=False):
     """t[i:] starts just after "$(": the index of its matching ")", or len(t). Quotes, backticks and nested $( ) are respected.
     With many True (see HEREDOC_CAP) a heredoc is not looked for: its lines are read as code."""
@@ -2703,6 +2813,8 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         return None
     if ps:
         text = paid_ps_text(ps_text(paid_ps_blocks(cmd)) if "{" in cmd else text)   # a script block after a pipe or a switch is marked as a loop first
+    elif not blind:
+        text = strip_comments(text)   # 0.7.0 F8: Bash only, at or under the heredoc cap (blind is the command that was not read cleanly): a quote in a # comment must not hide a paid run
     hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps)
     if not hits:
         return None
@@ -2815,7 +2927,7 @@ def _main():
         if ps:
             return fresh_gate(data, ps_text(pre).replace("\\", "/"), None, deadline, True)
         many = many_heredocs(pre)
-        return fresh_gate(data, pre if many else gate_strip(pre), None if many else pre, deadline)
+        return fresh_gate(data, pre if many else strip_comments(gate_strip(pre)), None if many else pre, deadline)   # 0.7.0 F8: publish_hit uses `raw` (here `pre`) only for the heredoc budget and the substitutions in unquoted heredocs, never as text to read, so only `text` loses its comments
     # Order. A command the source check cannot read cleanly (see complexity) counts as a send while the sources are unopened, decided
     # before any scan of it, RULES included; with the sources opened (or none listed) it goes on to RULES as any command does, but its
     # text is not scanned for a publish. A long command (over RULES_FIRST_MAX characters) has the fresh-source block run before RULES
