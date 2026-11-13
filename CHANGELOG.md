@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.1 — unreleased, "lighter, faster, switchable"
+## 0.6.1 — 2026-11-11, "lighter, faster, switchable"
 Claude now waits on fewer hooks, two classes of honest command run, a missing Python is said aloud, and the owner has a switch that Claude cannot flip. Plan and decisions: `docs/notes/light-fast-plan.md`.
 - **Changed defaults.** Light is the default level, also when no option is set; Strict is one switch (`/plugin configure smartuse@smartuse`).
   - The wait gate is off unless Strict guards or the Wait gate option is on. The adapter's `wait_gate: off` still wins per repo.

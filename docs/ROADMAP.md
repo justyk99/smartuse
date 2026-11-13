@@ -57,7 +57,7 @@ Claude waits on fewer hooks, honest commands stop being denied, and the owner ge
 - [x] F4 a guard level and a switch per rule (Strict guards, Rules off, Wait gate; every deny ends `[rule <name>]`) · F5 the switch is human-only · F6 strict means on
 - [x] F7 `/smartuse:doctor` · [x] F8 docs, counts, version
 - [x] Review 11 (Opus, xhigh): F1–F6 pass; two majors (a whole settings file deleted or replaced; the `env` block setting the option variables) fixed in one round; the minors are recorded as limits in SECURITY.md
-- [ ] The live pass: experiments E1–E5 (plan §8), the five acceptance steps of F1, method M "after" · [ ] push the dev branch, then merge to main on the owner's word
+- [x] The live pass (E3 and E4 not exercised), the five acceptance steps of F1, method M "after" · [x] merged to main 2026-11-11 (f1f4ea5), CI green on five jobs
 - Not built: F9 (`onFailure: "block"` on the guards; nobody asked for it, see 0.7.0) and the optional `-S` start option
 
 ## 0.6.2 — parked follow-ups (were on 0.6.1)
