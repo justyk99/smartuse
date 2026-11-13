@@ -200,13 +200,53 @@ elif mode == "ftime":    # ftime GUARD PROJECT: the F4b readers inside the proce
     check("1,000 free flags, 30 KB of words that are not", "python render.py " + "--ff " * 6000, fr, False)
     check("1,200 distinct script runs against the 2,000 items", ";".join("python tools/e%d.py" % i for i in range(1200)), ad, True)
     print("ok" if not bad else "; ".join(bad))
+elif mode == "pstime":   # pstime GUARD PROJECT: F6, PowerShell texts through the paid path in this process (ps_text first, then paid_verdict with ps=True, as the hook does), each under 32 KB and decided in under 1 s
+    import os, time
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "pstime"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    proj, bad = sys.argv[3], []
+    open(os.path.join(proj, "render.py"), "w").write("import " + "open" + "ai\n")   # a paid script, the SDK name never spelled whole here
+    open(os.path.join(proj, "warm.py"), "w").write("print(1)\n")
+    ev = {"cwd": proj, "tool_use_id": "toolu_pt"}
+    key = "OPEN" + "AI_API_KEY"
+    def verdict(c):
+        return ns["paid_verdict"](ev, c, ns["ps_text"](c), True, None, False, True)
+    verdict("python warm.py")   # the patterns compile on first use: the times below are the steady state inside one process
+    for c in ("Get-ChildItem", "Get-Content notes.txt", "Write-Host hello", "Set-Location .\\src"):
+        t0 = time.monotonic()
+        for _ in range(200):
+            verdict(c)
+        ms = (time.monotonic() - t0) / 200 * 1000
+        if ms >= 5 or verdict(c) is not None:
+            bad.append("ordinary %r: %.2f ms" % (c, ms))
+    shapes = {   # (text, the verdict is None?)  one 30 KB text per PowerShell form
+        "Start-Process words": ("Start-Process " * 2200, True),
+        "Start-Process python, 30 KB of arguments": ('Start-Process python -ArgumentList "' + "a " * 14000 + '"', True),
+        "Start-Process runs": ("Start-Process python -ArgumentList warm.py;" * 700, True),
+        "key assignments": (("$env:%s = 'a'; " % key) * 1000, True),
+        "mentions of a key": (("Write-Host %s; " % key) * 1000, True),
+        "call operators": ("& python warm.py " * 1000, True),
+        "a loop around a paid script": ("foreach ($i in 1..3) { " + "python render.py --n 1; " * 800 + "}", False),
+        "a backslash path word": ("python " + "a\\" * 14000 + "x.py", True),
+        "1,500 backslash script runs": (";".join(".\\tools\\e%d.py" % i for i in range(1500)), True),
+        "download cmdlets": ("iwr -Uri a.example/x -OutFile y; " * 900, True),
+    }
+    for nm, (c, none) in shapes.items():
+        assert len(c) < 32768, (nm, len(c))
+        t0 = time.monotonic(); r = verdict(c); dt = time.monotonic() - t0
+        if dt >= 1.0:
+            bad.append("%s: %.2f s" % (nm, dt))
+        if (r is None) != none:
+            bad.append("%s: verdict %r" % (nm, r and r[:60]))
+    print("ok" if not bad else "; ".join(bad))
 PY
 CW=$(wp "$D/chk.py")
 
 # --- the harness: one PreToolUse event in the shape Claude Code sends (session_id, transcript_path, cwd, permission_mode, tool_use_id)
+PGTOOL=Bash   # the tool_name guard() sends: Bash, or PowerShell where a section sets it (F6, section 27)
 guard() { # $1 = command, $2 = tool_use_id ("-" = none), $3 = cwd (default the project) -> $OUT (stdout) and $ERR (stderr)
   local tid=${2:-toolu_01} idf; idf=$(printf ',"tool_use_id":"%s"' "$tid"); [ "$tid" = "-" ] && idf=""
-  IN=$(printf '{"session_id":"sid-test","transcript_path":"%s","cwd":"%s","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash"%s,"tool_input":{"command":"%s"}}' "$(wp "$D/none.jsonl")" "${3:-$PW}" "$idf" "$(jstr "$1")")
+  IN=$(printf '{"session_id":"sid-test","transcript_path":"%s","cwd":"%s","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"%s"%s,"tool_input":{"command":"%s"}}' "$(wp "$D/none.jsonl")" "${3:-$PW}" "$PGTOOL" "$idf" "$(jstr "$1")")
   OUT=$(printf '%s' "$IN" | py "$G" 2>"$D/err"); ERR=$(cat "$D/err")
 }
 fresh() { rm -rf "$HOME/.claude/smartuse/projects" "$D/proj/.claude"; mkdir -p "$D/proj/.claude"; }   # a case starts with no state and no adapter
@@ -883,4 +923,147 @@ inlight deny "pin: a paid_free: line with no free run in the command still arms 
 mkdir -p "$D/ft"
 r=$(py "$CW" ftime "$(wp "$G")" "$(wp "$D/ft")" </dev/null 2>&1)
 [ "$r" = ok ] && ok "F4b timing: each 30 KB text is decided in under 1 s, with the verdicts the cases above show" || ko "F4b timing: $r"
+
+# ===== 27. 0.7.0 F6: the paid check on the PowerShell tool. PGTOOL is the tool_name guard() sends (Bash unless set here); it is put back at the end. Same tables, same go, count rule, cap and F4b words as Bash
+PWB=${PW//\//\\}                                    # the project path with backslashes, as Windows spells it
+KN=$(printf '%s_API_KEY' OPENAI)                    # a paid key name, never spelled whole in this file
+mkdir -p "$D/proj/tools"; mkat tools/entry.py none
+PGTOOL=PowerShell
+# --- 27a. deny: the forms of a run (no go anywhere)
+fresh; mkpaid
+deny "PS: run render.py for 6 images is refused exactly as through Bash" 'python render.py --images 6' 'no go from the owner for render.py'
+case "$IN" in *'"tool_name":"PowerShell"'*) ok "... and the event the case sent really names the PowerShell tool";; *) ko "the PGTOOL case sent: $IN";; esac
+case "$OUT" in *'[rule paid]"}}') ok "... and the reason ends [rule paid]";; *) ko "PS reason suffix: $OUT";; esac
+deny "PS: a backslash path (.\\render.py as the script word of an interpreter)" 'python .\render.py --images 6' 'no go from the owner for render.py'
+deny "PS: an absolute path with backslashes" "python $PWB\\render.py --images 6" 'no go from the owner for render.py'
+deny "PS: a backslash path after a ; that a \\ sits against (cd <dir>\\; python render.py)" "Set-Location $PWB\\; python render.py --images 6" 'no go from the owner for render.py'
+deny "PS: py -3 render.py" 'py -3 render.py --images 6' 'no go from the owner for render.py'
+deny "PS: python.exe with a quoted path" "& \"$PWB\\python.exe\" render.py --images 6" 'no go from the owner for render.py'
+deny "PS: the call operator before an interpreter" '& python render.py --images 6' 'no go from the owner for render.py'
+deny "PS: the call operator before a script (& .\\render.py)" '& .\render.py --images 6' 'no go from the owner for render.py'
+deny "PS: the call operator, quoted words" "& 'python' 'render.py' --images 6" 'no go from the owner for render.py'
+deny "PS: a script block run with the call operator (& { ... })" '& { python render.py --images 6 }' 'no go from the owner for render.py'
+for c in Invoke-WebRequest Invoke-RestMethod iwr irm Start-BitsTransfer curl wget INVOKE-WEBREQUEST; do
+  deny "PS: $c with a paid host and no scheme is a call to it" "$c -Uri $PH/v1/images -OutFile out.json" "host $PH on the command line"
+done
+for c in Invoke-WebRequest Invoke-RestMethod iwr irm Start-BitsTransfer; do
+  deny "PS: $c with a paid URL" "$c https://$PH/v1/images" "host $PH on the command line"
+done
+deny "PS: Start-Process with an interpreter and the script in -ArgumentList" 'Start-Process python -ArgumentList "render.py --images 6"' 'no go from the owner for render.py'
+deny "PS: Start-Process -FilePath ... -ArgumentList array form with -Wait" 'Start-Process -FilePath python -ArgumentList render.py,--images,6 -Wait' 'no go from the owner for render.py'
+deny "PS: saps (the alias) with positional words" 'saps python render.py' 'no go from the owner for render.py'
+deny "PS: Start-Process on a script file" 'Start-Process -FilePath .\render.py -NoNewWindow' 'no go from the owner for render.py'
+deny "PS: Start-Process with an interpreter and -c code that names an SDK" "Start-Process python -ArgumentList \"-c \`\"$IMP\`\"\"" "$IMP"
+deny "PS: a host in a Start-Process argument list is a call (Start-Process is tagged: the whole text is searched)" "Start-Process curl -ArgumentList \"https://$PH/v1/images\"" "host $PH in a command that is not read cleanly"
+
+# --- 27b. allow: mentions, a key assignment alone, a script with no signal
+allow "PS: Select-String for a key name is only a mention" "Select-String -Pattern $KN notes.txt"
+allow "PS: ... piped from Get-Content" "Get-Content notes.txt | Select-String -Pattern $KN"
+allow "PS: Write-Host of a key name" "Write-Host \"set $KN first\""
+allow "PS: Write-Output of a paid URL" "Write-Output \"see https://$PH/docs\""
+allow "PS: Get-Content of a script that names an SDK (reading it is not running it)" 'Get-Content .\render.py'
+allow "PS: the aliases gc, sls and write are mentions too" "gc notes.txt | sls $KN | write"
+allow "PS: a key assignment alone (\$env:KEY = value) is preparation" "\$env:$KN = 'sk-x'"
+allow "PS: ... without spaces, then a script that is not paid" "\$env:$KN=\"sk-x\"; python polish.py"
+allow "PS: ... a value with a / in it (a base64 key)" "\$env:$KN=\"sk-a/b+c=\""
+allow "PS: a script with no signal" 'python polish.py'
+allow "PS: ... by a backslash path" '.\polish.py'
+allow "PS: ... through the call operator" '& .\polish.py'
+allow "PS: ... through Start-Process" 'Start-Process python -ArgumentList polish.py'
+allow "PS: a download of a host that is not paid" 'Invoke-WebRequest -Uri example.org/x -OutFile y'
+allow "PS: an ordinary command" 'Get-ChildItem -Recurse | Measure-Object'
+
+# --- 27c. a loop is a repeat: with a go, still denied
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+rp "PS: foreach loop" 'foreach ($i in 1..3) { python render.py --n 1 }'
+rp "PS: ForEach-Object after a pipe" '1..3 | ForEach-Object { python render.py --n 1 }'
+rp "PS: % (the ForEach-Object alias)" '1..3 | % { python render.py --n 1 }'
+rp "PS: a while loop" 'while ($true) { python render.py --n 1 }'
+rp "PS: a for loop" 'for ($i = 0; $i -lt 3; $i++) { python render.py --n 1 }'
+rp "PS: do ... while" 'do { python render.py --n 1 } while ($false)'
+rp "PS: the .ForEach() method" '(1..3).ForEach({ python render.py --n 1 })'
+rp "PS: a loop around the call operator" 'foreach ($i in 1..3) { & .\render.py --n 1 }'
+rp "PS: a loop of Start-Process runs" 'foreach ($i in 1..3) { Start-Process python -ArgumentList "render.py --n 1" }'
+allow "PS: a loop with no paid script is allowed" 'foreach ($i in 1..3) { Write-Host $i }' toolu_lp1
+allow "PS: a loop of a script with no signal is allowed" 'foreach ($i in 1..3) { python polish.py }' toolu_lp2
+allow "PS: the same script once, before a loop, is not a repeat" 'python render.py --n 1; foreach ($i in 1..3) { Write-Host $i }' toolu_lp3
+[ "$(used)" = 1 ] && ok "... and it is counted once" || ko "used after the run before a loop: $(used) $(cat "$R" 2>&1)"
+
+# --- 27d. a go, the count rule and the cap behave as through Bash: a variable or a subexpression is not a literal
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+cf "PS: --images 1 passes" 'python render.py --images 1' allow
+cf "PS: --images 6 is a batch: denied" 'python render.py --images 6' deny '' 'seen --images 6;'
+cf "PS: a backslash script word with --n 1 passes" 'python .\render.py --n 1' allow
+cf "PS: the call operator with --n 1 passes" '& python render.py --n 1' allow
+cf "PS: no count flag: denied" 'python render.py' deny '' 'seen no count flag'
+lit "PS: a \$variable as the count is not a literal" 'python render.py --n $n' '$n'
+lit "PS: a \$env: variable as the count is not a literal" 'python render.py --n $env:N' '$env:N'
+lit "PS: a braced \${n} is not a literal" 'python render.py --n ${n}' '$'
+lit "PS: a subexpression \$(1) is not a literal" 'python render.py --n $(1)' '$('
+lit "PS: a splat (@args) is not a literal" 'python render.py @args' '@args'
+lit "PS: a double-quoted word with a variable is not a literal" 'python render.py --prompt "a $x" --n 1' ''
+cf "PS: a single-quoted word is a literal" "python render.py --prompt 'a \$x' --n 1" allow
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+allow "PS: Start-Process: run 1 with --images 1 passes" 'Start-Process python -ArgumentList "render.py --images 1"' toolu_sp1
+[ "$(used)" = 1 ] && ok "... and is counted (the run is read through Start-Process)" || ko "used after Start-Process: $(used) $(cat "$R" 2>&1)"
+deny "PS: Start-Process: the next run waits for test ok" 'Start-Process python -ArgumentList "render.py --images 1"' "the batch waits for the owner's " toolu_sp2
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+deny "PS: Start-Process: --images 6 is a batch, the count rule reads the argument list" 'Start-Process python -ArgumentList "render.py --images 6"' 'seen --images 6;' toolu_sp3
+deny "PS: Start-Process: a variable in the argument list is not a literal" 'Start-Process python -ArgumentList "render.py --images $n"' 'must be plain literals' toolu_sp4
+[ ! -e "$R" ] && ok "... and nothing was counted" || ko "a denied Start-Process run left state: $(cat "$R")"
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+allow "PS: count none: a call-operator run passes" '& .\render.py' toolu_co1
+[ "$(used)" = 1 ] && ok "... counted: used 1" || ko "used after the call operator: $(used)"
+
+# --- 27e. F4b words through PowerShell: a free flag, `only`
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+allow "PS: a free flag frees an interpreter run" 'python render.py --dry-run' toolu_pf1
+allow "PS: ... a call-operator run" '& python render.py --dry-run' toolu_pf2
+allow "PS: ... a script word with a backslash" 'python .\render.py --dry-run' toolu_pf3
+nostate "... and writes no state"
+deny "PS: a \$variable beside the free flag: not free" 'python render.py --dry-run $x' 'no go from the owner for render.py'
+deny "PS: no free flag: refused" 'python render.py --n 1' 'no go from the owner for render.py'
+deny "PS: Start-Process is tagged (V10): it frees nothing" 'Start-Process python -ArgumentList "render.py --dry-run"' 'no go from the owner for render.py'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "PS: only --pay: no flag, free (backslash path)" 'python tools\entry.py --out a.png' toolu_po1
+deny "PS: only --pay: with the flag, refused" 'python tools\entry.py --pay' 'no go from the owner for entry.py'
+deny "PS: only --pay: a \$variable may hold it" 'python tools\entry.py $x' 'no go from the owner for entry.py'
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+inlight allow "PS, light, armed by paid_free: a free run passes" 'python render.py --dry-run' toolu_pl1
+inlight deny "PS, light, armed by paid_free: a call-operator run is refused" '& python render.py --n 1' 'no go from the owner for render.py'
+fresh; mkpaid
+inlight allow "PS, light, no paid line in the adapter: the paid path stays off" 'python render.py --n 1' toolu_pl2
+
+# --- 27f. Bash results do not move: the same words through the Bash tool
+PGTOOL=Bash
+fresh; mkpaid
+allow "Bash pin: a download cmdlet with a bare paid host is not a caller there" "iwr $PH/v1/images" toolu_bp1
+deny "Bash pin: Select-String for a key name is still a key on the line" "Select-String -Pattern $KN notes.txt" "$KN on the command line"
+deny "Bash pin: \$env:KEY = value is still a key on the line" "\$env:$KN = 'sk-x'" "$KN on the command line"
+allow "Bash pin: Start-Process is not read" 'Start-Process python -ArgumentList "render.py --n 1"' toolu_bp2
+
+# --- 27g. the F3 sequence once more with tool_name PowerShell: deny, pass, deny, test ok, pass x9, deny; paid-runs.json read after each step
+PGTOOL=PowerShell
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+deny "PS step 1: --images 6 is denied (first run must make ONE output)" 'python render.py --images 6' 'first run after the go must make ONE output' toolu_q0
+[ ! -e "$R" ] && ok "... paid-runs.json does not exist yet" || ko "a counter after PS step 1: $(cat "$R")"
+allow "PS step 2: --images 1 passes" 'python render.py --images 1' toolu_q1
+[ "$(used)" = 1 ] && [ "$(field test_ok)" = false ] && ok "... used 1, test_ok false" || ko "after PS step 2: $(cat "$R")"
+deny "PS step 3: the next call is denied (waits for test ok)" 'python render.py --images 6' "the batch waits for the owner's " toolu_q1b
+[ "$(used)" = 1 ] && ok "... used still 1" || ko "after PS step 3: $(cat "$R")"
+adapter 'paid: render.py x 10, cap RM5, test ok\n'
+[ "$(used)" = 1 ] && ok "PS step 4: the owner adds test ok to the line (used 1 until the next run)" || ko "after PS step 4: $(cat "$R")"
+for i in 2 3 4 5 6 7 8 9 10; do
+  guard 'python render.py --images 6' "toolu_q$i"
+  if [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(used)" = "$i" ]; then ok "PS step 5: run $i passes silently, used $i"; else ko "PS run $i: used $(used), stdout '$OUT' stderr '$ERR'"; fi
+done
+[ "$(nent)" = 1 ] && [ "$(field test_ok)" = true ] && ok "... still one counter, test_ok true" || ko "after the PS batch: $(cat "$R")"
+deny "PS step 6: run 11 is denied: used up (10 of 10)" 'python render.py --images 6' 'the go for render.py is used up (10 of 10). Ask the owner for a new go.' toolu_q11
+[ "$(used)" = 10 ] && ok "... used stays 10" || ko "after PS step 6: $(cat "$R")"
+PGTOOL=Bash
+
+# ===== 28. timing for the PowerShell forms, inside the process: each 30 KB text decided in under 1 s
+mkdir -p "$D/pst"
+r=$(py "$CW" pstime "$(wp "$G")" "$(wp "$D/pst")" </dev/null 2>&1)
+[ "$r" = ok ] && ok "F6 timing: four ordinary PowerShell commands under 5 ms each, ten 30 KB PowerShell texts decided in under 1 s with the verdicts the cases above show" || ko "F6 timing: $r"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
