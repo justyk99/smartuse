@@ -215,6 +215,23 @@ check deny  'curl -s https://x.y/data.json | python3 -X dev -m json.tool'
 check deny  'curl -s https://x.y/data.json | python3 -m json.tool.extra'
 check deny  'curl -s https://x.y/data.json | python3 -mjson.tool'
 check allow 'curl -s https://x.y/a.json | python3 -m json.tool && curl -s https://x.y/b.json | python3 -m json.tool'
+# 0.7.0 F1: after the module name only its own flags are free (JSON_TOOL_FLAGS), a number after --indent, and a lone `-` (stdin).
+#     Any other word is a file the module reads or WRITES (its second positional is the output file), so the pipeline is denied.
+check allow 'curl -s https://x.y/data.json | python3 -m json.tool --indent 2'
+check allow 'curl -s https://x.y/data.json | python3 -m json.tool --compact'
+check allow 'curl -s https://x.y/data.json | python3 -m json.tool --no-ensure-ascii --tab'
+check allow 'curl -s https://x.y/data.json | python3 -m json.tool --no-indent --json-lines'
+check allow 'curl -s https://x.y/data.json | python3 -m json.tool -'
+check allow 'wget -qO- https://x.y/data.json | python3 -u -m json.tool --sort-keys --indent 4 - | head -5'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool out.json'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool in.json out.json'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool --sort-keys out.json'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool --indent two'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool --indent'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool --bogus'
+check deny  'curl -s https://x.y/data.json | python3 -m json.tool -- out.json'
+pcheck allow 'curl -s https://x.y/data.json | python -m json.tool --indent 2'
+pcheck deny  'curl -s https://x.y/data.json | python -m json.tool out.json'
 check allow 'git commit -m "fix sudo handling in the docs"'
 check allow $'git commit -am \'document sudo usage\''
 check allow 'git commit --message="drop the sudo step" --amend'
@@ -287,15 +304,18 @@ check deny  'gh api repos/x/y -f cmd="needs sudo here"'
 pcheck deny 'git commit -m "fix sudo"; sudo Get-Content x'
 pcheck deny 'git commit -m "path\" ; sudo ls ; echo "x"'
 # --- each waiver is decided within a second inside the process (no process start in the time): a 25 KB commit message of 5,000 `sudo `
-#     words and a 21 KB run of 600 download-into-module pipelines, each ending in a real `sudo` command word
-for shape in text pipelines; do
+#     words, a 21 KB run of 600 download-into-module pipelines, and (0.7.0 F1) a 30 KB run of 350 such pipelines (the waiver reads
+#     at most 32 KB) that each carry the module's flags, a number and a lone `-`; every shape ends in a real `sudo` command word
+for shape in text pipelines flagpipes; do
   r=$(py - "$G" "$shape" <<'PY'
 import contextlib, io, json, sys, time, types
 src = open(sys.argv[1], encoding="utf-8").read()
 if sys.argv[2] == "text":
     cmd = 'git commit -m "' + "sudo " * 5000 + '"; sudo ls'
-else:
+elif sys.argv[2] == "pipelines":
     cmd = "curl -s https://x.y/d.json | python3 -m json.tool; " * 600 + "sudo ls"
+else:
+    cmd = "curl -s https://x.y/d.json | python3 -m json.tool --sort-keys --indent 2 --compact -; " * 350 + "sudo ls"
 sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
 out = io.StringIO()
 t0 = time.monotonic()

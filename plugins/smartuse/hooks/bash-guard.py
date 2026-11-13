@@ -1348,7 +1348,8 @@ def fresh_gate(data, text, raw=None, deadline=None, ps=False, tag=""):
 # A match of a rule named in WAIVABLE can be waived, and only when EVERY match of that rule in the text is such a case. Anything the
 # waiver cannot read cleanly stays denied: a text complexity() tags, a text words() or flex_split cannot split, a line continuation.
 #   pipe-to-shell: a download piped into Python run as `-m <module>` for a module on the allow list PY_DATA_MODULES (json.tool: it
-#                  reads JSON as data and prints it), with only plain flags before -m. Everything else stays denied: a shell, a bare
+#                  reads JSON as data and prints it), with only plain flags before -m and only json.tool's own flags, a number after
+#                  --indent and a lone `-` after it (a file word is a file it reads or writes). Everything else stays denied: a shell, a bare
 #                  interpreter, a program text, a script file, Node, Perl, any other module, an interpreter behind sudo or other
 #                  wrapper. An allow list, because a deny list of risky programs is never complete.
 #   sudo:          the word carried as text, in an argument of a command that only carries text (the message of git commit / tag /
@@ -1359,6 +1360,7 @@ WAIVABLE = frozenset(("pipe-to-shell", "sudo"))
 PIPE_OK = frozenset(("head", "tail", "wc", "sort", "uniq", "cat", "cut", "tr", "less", "more", "grep", "rg", "nl", "column", "jq"))   # read what is piped in, run nothing
 PY_DATA_MODULES = frozenset(("json.tool",))   # modules `python -m` may run on a download: they read it as data
 PY_FLAGS = frozenset(("-u", "-B", "-I", "-S", "-E", "-s", "-O", "-OO", "-q", "-v", "-b", "-bb", "-d", "-R", "-P"))   # plain flags: none takes a value or runs code
+JSON_TOOL_FLAGS = frozenset(("-h", "--help", "--sort-keys", "--no-ensure-ascii", "--json-lines", "--tab", "--no-indent", "--compact"))   # json.tool's own options that take no value (--indent takes a number, handled beside it); its file words are never waived
 
 
 def _shell_tokens(t):
@@ -1429,11 +1431,24 @@ def _text_words(v, i):
 
 def _python_data_module(a):
     """Is this Python, given the words `a` after its name, run as `-m <module>` for a module of PY_DATA_MODULES, with only plain
-    flags (PY_FLAGS) before the -m? The words after the module are its own arguments."""
+    flags (PY_FLAGS) before the -m, and after the module only its own flags (JSON_TOOL_FLAGS), a number after --indent and a lone
+    `-` (stdin)? Any other word after the module is a file it reads or writes, and a pipeline that carries one is not waived."""
     i = 0
     while i < len(a) and a[i] in PY_FLAGS:
         i += 1
-    return i + 1 < len(a) and a[i] == "-m" and a[i + 1] in PY_DATA_MODULES
+    if not (i + 1 < len(a) and a[i] == "-m" and a[i + 1] in PY_DATA_MODULES):
+        return False
+    j = i + 2
+    while j < len(a):
+        w = a[j]
+        if w == "--indent":
+            j += 1
+            if j >= len(a) or not (a[j].isascii() and a[j].isdigit()):
+                return False
+        elif w not in JSON_TOOL_FLAGS and w != "-":
+            return False
+        j += 1
+    return True
 
 
 WAIVER_ERRORS = []   # what a waiver raised, if anything (a test reads it); a waiver that raises waives nothing
