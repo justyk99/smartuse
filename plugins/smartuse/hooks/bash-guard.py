@@ -1772,6 +1772,15 @@ PAID_LOOP_OPEN = re.compile(r"(?:(?:then|do|else|elif|if|!|\{)\s+)*(?:for|while|
 PAID_LOOP_END = re.compile(r"done\b")                                                               # … and the one that closes it
 PAID_ARGS = re.compile(r""""([^"]*)"|'([^']*)'|(\S+)""")   # words with the quotes off and no escape handling: a Windows path keeps its backslashes
 PAID_GO = re.compile(r"(?P<script>[^\s,]+)\s*(?:x|×|\*)\s*(?P<runs>\d+)\b(?P<rest>.*)", re.I | re.S)   # render.py x 10, cap RM5[, count --n | count none][, test ok]
+# 0.7.0 F6, the PowerShell tool. These tables are read only when the event's tool is PowerShell (ps True); a Bash call never sees them. The
+# call operator & is a segment separator already (PAID_SEG), so `& python render.py` is the segment `python render.py`.
+PAID_PS_CALLER = frozenset("invoke-webrequest invoke-restmethod iwr irm start-bitstransfer".split())   # download cmdlets and their aliases (curl, wget are callers already); a bare paid host beside them is a call
+PAID_PS_MENTION = frozenset("get-content gc select-string sls write-host write-output write".split())   # a paid word after these is text, not a call
+PAID_PS_LOOP = re.compile(r"(?:foreach|for|while|until|do|foreach-object|%)(?![\w-])", re.I)            # a segment that opens a loop: there is no `done` in PowerShell, so a hit after it repeats
+PAID_PS_METHOD = re.compile(r"\.foreach\b", re.I)                                                         # (1..3).ForEach({ ... })
+PAID_PS_SP_VAL = ("filepath", "argumentlist", "workingdirectory", "redirectstandardinput", "redirectstandardoutput", "redirectstandarderror",
+                  "verb", "windowstyle", "credential", "environment")   # the parameters of Start-Process that take a value ...
+PAID_PS_SP_SW = ("wait", "nonewwindow", "passthru", "usenewenvironment", "loaduserprofile")   # ... and the switches
 
 
 PAID_COUNT_FLAGS = ("-n", "-N", "--n", "--count", "--num", "--num-images", "--num_images", "--num-outputs", "--num_outputs", "--images",
@@ -2144,20 +2153,86 @@ def paid_unwrap(toks):
     return toks, rep
 
 
-def paid_seg_hits(seg, hosts, cwd, cfg, depth=0, loop=False):
+def paid_ps_opt(w):
+    """(parameter, takes a value) when the bare word w names a Start-Process parameter (any case, a prefix of three letters or more,
+    -name:value, the alias -Args), else None. A quoted word, a -- word and a shorter prefix are not parameters."""
+    if w[:1] != "-" or w[:2] == "--":
+        return None
+    name = w[1:].partition(":")[0].lower()
+    name = {"args": "argumentlist", "path": "filepath", "pspath": "filepath"}.get(name, name)
+    if len(name) < 3:
+        return None
+    for full in PAID_PS_SP_VAL + PAID_PS_SP_SW:
+        if full.startswith(name):
+            return full, full in PAID_PS_SP_VAL
+    return None
+
+
+def paid_ps_start(seg):
+    """A Start-Process statement as the command it runs: `Start-Process python -ArgumentList "render.py --n 1"` -> `python render.py --n 1`
+    (a statement whose first word is Start-Process, saps or start; any other segment comes back as it was). The program is -FilePath or the
+    first plain word; the arguments are -ArgumentList's words (to the next parameter) and any later plain word; the other parameters and
+    their values are dropped. An ArgumentList string with blanks in it is split into words again, so the count rule and the free flags
+    read what the program is given. With no program the segment is returned unchanged."""
+    ws = [m.group(0) for m in PAID_ARGS.finditer(seg)]
+    if not ws or ws[0].lower() not in START_PROCESS:
+        return seg
+    fp, al, cur = None, [], None
+    for w in ws[1:]:
+        o = paid_ps_opt(w)
+        ctx, val = cur, w
+        if o:
+            ctx, val = o[0], w[1:].partition(":")[2]
+            cur = o[0] if o[1] and not val else None
+            if not val:
+                continue
+        if ctx == "filepath":
+            fp, cur = val, None
+        elif ctx == "argumentlist":
+            al.append(val)                        # stays open: the commas of an array are blanks by now
+        elif ctx is None:
+            if fp is None:
+                fp = val
+            else:
+                al.append(val)
+        else:
+            cur = None                            # the value of another parameter
+    if fp is None:
+        return seg
+    words = [fp]
+    for a in al:
+        u = paid_unq(a)
+        words += [m.group(0) for m in PAID_ARGS.finditer(u)] if re.search(r"\s", u) else [a]
+    return " ".join(words)
+
+
+def paid_ps_text(text):
+    """The text of a PowerShell call as the paid scan reads it (F6). A backslash is a path separator there, not an escape: left in, the
+    segment splitter would take \\; and \\& as escaped and join two commands, and a script word would not name its file off Windows. A
+    Start-Process statement is then rewritten as the command it runs (paid_ps_start), so the run, its count rule and its loop are read as
+    for Bash. Linear; a text with no Start-Process word is only the one replace (V9)."""
+    text = text.replace("\\", "/")
+    if not PS_START_WORD.search(text):
+        return text
+    return ";".join(paid_ps_start(s) for s in paid_segments(text, True))
+
+
+def paid_seg_hits(seg, hosts, cwd, cfg, depth=0, loop=False, ps=False):
     """[(signal, script, repeats)] for one command segment: layer 1 (the segment's own text), layer 2 (the script file it runs) unless
     layer 1 hit, and every hit inside a bash -c string. repeats = it sits in a loop or runs under xargs / parallel / watch. A run of a
-    paid script that is free (cfg, F4b) is no hit: it comes back as (None, script, False, its raw arguments) for paid_finish."""
+    paid script that is free (cfg, F4b) is no hit: it comes back as (None, script, False, its raw arguments) for paid_finish. ps: the
+    PowerShell tool (F6): the cmdlets that call (PAID_PS_CALLER), the mentions (PAID_PS_MENTION) and `$env:KEY = …` as preparation."""
     ms = list(PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():]))
     toks, rep = paid_unwrap([next(g for g in a.groups() if g is not None) for a in ms])
     if not toks:
         return []
     raws = [a.group(0) for a in ms][len(ms) - len(toks):]   # the same words with their quotes, aligned with toks
     cmd = re.sub(r"\.exe$", "", paid_basename(toks[0]).lower())
-    if cmd in PAID_MENTION:
+    if cmd in PAID_MENTION or (ps and cmd in PAID_PS_MENTION):
         return []
     rep, out = rep or loop, []
-    sig = paid_code_signal(seg, hosts, bool(PAID_CALLER.fullmatch(cmd)), cmd not in PAID_PREP)
+    sig = paid_code_signal(seg, hosts, bool(PAID_CALLER.fullmatch(cmd)) or (ps and cmd in PAID_PS_CALLER),
+                           cmd not in PAID_PREP and not (ps and toks[0][:5].lower() == "$env:"))   # not cmd: its base name stops at a / in the value
     path = None if sig else paid_script_arg(cmd, toks)
     if sig:
         out.append((sig + " on the command line", cmd, rep))
@@ -2179,17 +2254,22 @@ def paid_seg_hits(seg, hosts, cwd, cfg, depth=0, loop=False):
             else:
                 out.append((f"{sig} in {name}" if sig else f"{name} is in paid_scripts", name, rep))
     if depth < 2 and cmd in ("bash", "sh", "zsh", "dash", "ksh") and "-c" in toks[1:-1]:   # bash -c "python render.py": judge the string too
-        out += paid_scan(paid_segments(toks[toks.index("-c") + 1], True), hosts, cwd, cfg, depth + 1, rep)
+        out += paid_scan(paid_segments(toks[toks.index("-c") + 1], True), hosts, cwd, cfg, depth + 1, rep, ps)
     return out
 
 
-def paid_scan(segs, hosts, cwd, cfg, depth=0, loop=False):
-    """Every hit of these segments in order, flagged `repeats` when it stands between a for / while / until / select and its `done`."""
+def paid_scan(segs, hosts, cwd, cfg, depth=0, loop=False, ps=False):
+    """Every hit of these segments in order, flagged `repeats` when it stands between a for / while / until / select and its `done`. ps
+    (F6): PowerShell has no `done` (its braces are `;` by now), so a hit after a loop word (foreach, for, while, do, ForEach-Object, %,
+    .ForEach) repeats, to the end of the command."""
     out, d = [], 0
     for seg in segs:
-        d += bool(PAID_LOOP_OPEN.match(seg))
-        out += paid_seg_hits(seg, hosts, cwd, cfg, depth, loop or d > 0)
-        if PAID_LOOP_END.match(seg):
+        if ps:
+            d = d or bool(PAID_PS_LOOP.match(seg) or PAID_PS_METHOD.search(seg))
+        else:
+            d += bool(PAID_LOOP_OPEN.match(seg))
+        out += paid_seg_hits(seg, hosts, cwd, cfg, depth, loop or d > 0, ps)
+        if not ps and PAID_LOOP_END.match(seg):
             d = max(0, d - 1)
     return out
 
@@ -2241,7 +2321,7 @@ def paid_finish(raw):
     return [(h[0], h[1], h[2], tuple(f[3] for f in free if h[1] and f[1].lower() == h[1].lower())) for h in raw if h[0] is not None]
 
 
-def paid_hit(cmd, text, cwd, adapter, blind=False, project=None):
+def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False):
     """[(signal, script, repeats, skip)] — EVERY paid signal in the command (stdin-heredoc bodies first, then each segment), [] when none.
     text = the command with data heredocs stripped. blind (V10): the command is one the source check cannot read cleanly (complexity(),
     or over the heredoc scan cap): the HEREDOC pattern is not run (it rescans the text once per opener), and the whole text is searched
@@ -2253,9 +2333,9 @@ def paid_hit(cmd, text, cwd, adapter, blind=False, project=None):
     looped = any(PAID_LOOP_OPEN.match(s) for s in segs)   # a body is not tied to a segment: any loop in the command makes it a repeat
     if blind:
         sig = paid_code_signal(cmd, hosts, True)
-        return paid_finish(([(sig + " in a command that is not read cleanly", None, False)] if sig else []) + paid_scan(segs, hosts, cwd, cfg))
+        return paid_finish(([(sig + " in a command that is not read cleanly", None, False)] if sig else []) + paid_scan(segs, hosts, cwd, cfg, 0, False, ps))
     out = [(sig + " on the command line", interp, looped) for interp, body in paid_stdin_bodies(cmd) for sig in [paid_code_signal(body, hosts, True)] if sig]
-    return paid_finish(out + paid_scan(segs, hosts, cwd, cfg))
+    return paid_finish(out + paid_scan(segs, hosts, cwd, cfg, 0, False, ps))
 
 
 def paid_find_go(data, project, script, adapter):
@@ -2462,12 +2542,13 @@ def paid_adapter(project):
         return "", "the adapter is unreadable"
 
 
-def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False):
+def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=False):
     """None (not a paid call, or every go stands) or the deny reason. A detection error RAISES (the caller, paid_gate, allows it in
     light and denies it in strict); once the call is paid, any error while verifying the go -> deny. EVERY script the command runs
     needs its go; the first one without it is named. A loop or repeat of a paid script is denied whatever the counter says. strict:
     always on; light: only where the adapter has a paid line. deadline: the hook's time.monotonic() deadline (V8): past it a call
-    already seen as paid is denied. blind (V10): a command that is not read cleanly is denied when it holds a paid word."""
+    already seen as paid is denied. blind (V10): a command that is not read cleanly is denied when it holds a paid word. ps (F6): the
+    PowerShell tool; `text` is then ps_text of the command, and the scan reads it through paid_ps_text (the count rule reads the same text)."""
     if not PAID_FIRST.search(cmd):
         return None
     cwd = native_path(data.get("cwd")) or os.getcwd()
@@ -2475,7 +2556,9 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False):
     adapter, why = paid_adapter(project)
     if not strict and not PAID_ARM.search(adapter):
         return None
-    hits = paid_hit(cmd, text, cwd, adapter, blind, project)
+    if ps:
+        text = paid_ps_text(text)
+    hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps)
     if not hits:
         return None
     head = lambda h: f"paid call ({clip(h[0])}) — "
@@ -2524,7 +2607,7 @@ def paid_gate(data, pre, text, tag, ps, strict, off, deadline):
         return None
     try:
         blind = bool(tag) or (not ps and "<<" in pre and many_heredocs(pre))
-        return paid_verdict(data, pre, text, strict, deadline, blind)
+        return paid_verdict(data, pre, text, strict, deadline, blind, ps)
     except Exception:
         return "the paid check could not run (internal error); strict guards fail closed. Nothing was spent." if strict else None
 
