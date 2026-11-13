@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""file-guard.py — PreToolUse guard for Write / Edit / MultiEdit / NotebookEdit: three files are human-only.
+"""file-guard.py — PreToolUse guard for Write / Edit / MultiEdit / NotebookEdit: these files are human-only.
 `.claude/smartuse.local.md` (the adapter: it names the check command the until-done gate will run) and
 `/etc/smartuse/trusted-checks.json` (the human's hash pins, root-owned: until-done.py TRUSTED), plus `~/.claude/smartuse/interpreter`
 (the launcher's remembered Python name). The model may read them, never write them.
+0.7.0 F9: also the paid counter `~/.claude/smartuse/projects/<key>/paid-runs.json`, its lock `paid-runs.lock` and its claim markers
+`paid.<tool_use_id>.done` (they say how many paid runs are left), and the session transcripts `~/.claude/projects/**/*.jsonl`, subagent
+transcripts included (the paid check reads the owner's "go" and "test ok" there). `receipts.jsonl` and a memory `.md` are not matched.
 The path is normalised before the match (backslashes, `x/..`, case): APFS and NTFS are case-insensitive, so
 `.claude/SmartUse.Local.MD` is the adapter too. stdin is read as bytes and decoded as UTF-8 here: on Windows a piped stdin
 is decoded in the ANSI code page, where a non-ASCII path makes json.load raise — and a guard that raises fails OPEN.
@@ -19,7 +22,9 @@ F7: a write to `~/.claude/smartuse/doctor-canary` (the path ends in `/.claude/sm
 reason that says the guard is live and the level: /smartuse:doctor has Claude try it to prove this hook answers.
 """
 import json, os, re, sys, threading
-HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter[. ]*(:.*)?$)", re.I)
+HUMAN_ONLY = re.compile(r"(smartuse\.local\.md|smartuse/trusted-checks\.json|/etc/smartuse(/|$)|\.claude/smartuse/interpreter[. ]*(:.*)?$"
+                        r"|\.claude/smartuse/projects/[^/]+/(paid-runs\.(json|lock)|paid\.[^/]+\.done)[. ]*(:.*)?$"   # 0.7.0 F9: the paid counter, its lock and claim markers
+                        r"|\.claude/projects/.+\.jsonl[. ]*(:.*)?$)", re.I)   # 0.7.0 F9: a session transcript (a subagent's too); a memory .md beside it is not matched
 
 def win_part(p):   # one path part as Windows reads it
     return p.split(":")[0].rstrip(". ") or p
@@ -183,7 +188,8 @@ def run():
         return
     deny = human_only(path) or human_only("/".join(win_part(p) for p in path.split("/"))) \
         or (re.search("smartuse", path, re.I) and any(odd_part(p) for p in path.split("/")))   # as written, as Windows reads it, odd parts
-    why = "file-guard: this file is human-only (it decides what the until-done gate may execute, or which Python runs the hooks). Ask the user to edit it."
+    why = ("file-guard: this file is human-only (it decides what the until-done gate may execute, which Python runs the hooks, how many paid runs "
+           "are left, or is a session transcript). Ask the user to edit it.")
     stuck = False
     r = None
     if not deny and path:   # then as the OS resolves it (links, junctions, 8.3 names of what exists), for at most 3 s
