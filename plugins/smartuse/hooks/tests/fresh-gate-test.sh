@@ -848,10 +848,59 @@ make("d_n1_encoded", ex(DENY, has=["3 of 3 sources not opened"]), tr=lambda P: b
 make("d_n1_single_quoted_backtick_no_publish_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS(N1A.replace("git push", "git status")))
 make("d_n1_double_quoted_escaped_quote_is_data_complex", ex(DENY, has=cx("an escaped quote")), tr=lambda P: base(P), **PS('Write-Host "say `"git push`" now"; git status'))
 make("a_n1_single_quoted_publish_text_is_data", ex(ALLOW), tr=lambda P: base(P), **PS("git commit -m 'run `git push` later'"))
-# (c) known limit, pinned: on Bash at or under the heredoc cap a quoted word that spans lines is read whole (see ROADMAP). Allowed today; the
-# day the limit is lifted the case flips.
-make("a_m2c_known_limit_bash_multiline_quote_pinned", ex(ALLOW), cmd="# it's ready\ngit push origin main\n# check the PR's status", tr=lambda P: base(P))
+# (c) was a known limit, pinned as an allow until 0.7.0 F8: on Bash at or under the heredoc cap a quote in a # comment paired with one in a
+# later comment and the lines between were read as one quoted word. strip_comments (F8) blanks a comment before the lines are read, so the
+# case flipped to a deny; its neighbour (no publish) stays allowed. A quote that spans lines OUTSIDE a comment is still read whole.
+make("d_m2c_bash_comment_apostrophes_publish_f8", ex(DENY, has=["3 of 3 sources not opened"]), cmd="# it's ready\ngit push origin main\n# check the PR's status", tr=lambda P: base(P))
 make("a_m2c_bash_comment_apostrophes_no_publish", ex(ALLOW), cmd="# it's ready\ngit status\n# check the PR's status", tr=lambda P: base(P))
+# F8: a # that starts a word, outside quotes, begins a comment to the end of its line: after ; && | ( and a blank, at a line start, after a tab
+for nm, cm in (("line_start_indented", "  # it's ready\ngit push origin main\n  # check the PR's status"),
+               ("after_semicolon", "git status; # it's ready\ngit push origin main\n# check the PR's status"),
+               ("after_and", "git status && # it's ready\ngit push origin main\n# check the PR's status"),
+               ("after_pipe", "git status | # it's ready\ngit push origin main\n# check the PR's status"),
+               ("after_paren", "( # it's ready\ngit push origin main\n# check the PR's status\n)"),
+               ("paren_then_hash", "(# it's ready\ngit push origin main\n# check the PR's status\n)"),
+               ("after_blank_on_a_command_line", "git status # it's ready\ngit push origin main\n# check the PR's status"),
+               ("after_tab", "git status\t# it's ready\ngit push origin main\n# check the PR's status"),
+               ("semicolon_no_blank", "git status;# it's ready\ngit push origin main\n# check the PR's status"),
+               ("three_comments", "# it's\n# one\ngit push origin main\n# it's"),
+               ("publish_between_comments_on_one_line", "git status; # it's\ngit push origin main # it's")):
+    make("d_f8_comment_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), cmd=cm, tr=lambda P: base(P))
+for nm, cm in (("no_publish_line_start", "# it's ready\ngit status\n# check the PR's status"), ("no_publish_after_semicolon", "git status; # it's ready\ngit log\n# check the PR's status"),
+               ("publish_word_inside_the_comment", "# it's ready: git push later\ngit status\n# check the PR's status"),
+               ("only_comments", "# it's one\n# it's two\n# it's three")):
+    make("a_f8_comment_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+# F8: a # that is text blanks nothing: the publish after it stays seen (single, double and $'…' quotes, $#, ${#x}, a#b, a URL fragment, an escaped
+# blank or #, a # inside ${…}, inside a $( … ) that sits in double quotes with quotes of its own, in a backtick pair)
+for nm, cm in (("single_quotes", "echo 'x # y'; git push"), ("double_quotes", 'echo "x # y"; git push'), ("ansi_c_quotes", "echo $'x # y'; git push"),
+               ("ansi_c_escaped_quote", "echo $'it\\'s # y'; git push"), ("dollar_hash", "echo $#; git push"), ("brace_hash", "echo ${#x}; git push"),
+               ("mid_word", "echo a#b; git push"), ("url_fragment", "echo https://h/p#frag; git push"), ("escaped_hash", "echo \\#x; git push"),
+               ("escaped_blank_then_hash", "echo a\\ #b; git push"), ("inside_param_expansion", "echo ${x:-a #b}; git push"),
+               ("inside_nested_quotes", 'echo "$(echo "a #b")"; git push'), ("inside_dquote_substitution", 'echo "$(echo a #b\n)"; git push'),
+               ("single_quote_inside_dquotes", 'echo "it\'s # y"; git push'), ("after_a_closing_quote", "echo 'a'#b; git push"),
+               ("param_in_dquotes_with_apostrophe", 'echo "${x:-it\'s #b}"; git push'), ("arithmetic", "echo $((1 + 2)) #c\ngit push\necho 'x # y'")):
+    make("d_f8_hash_is_text_" + nm, ex(DENY, has=["3 of 3 sources not opened"]), cmd=cm, tr=lambda P: base(P))
+# F8: a message that spans lines inside quotes keeps its # lines and its apostrophes: nothing in it is a comment, and the commands around it are read
+MSG = 'git commit -m "%s"'
+for nm, cm in (("dquoted_hash_line_apostrophe", MSG % "fix the parser\n# it's a heading\nmore text"),
+               ("dquoted_publish_text_between_hash_lines", MSG % "a\n# it's\ngit push\n# don't\nb"),
+               ("squoted_hash_line", "git commit -m 'fix\n# it'\"'\"'s a heading\nmore'"),
+               ("heredoc_commit_hash_line_apostrophe", COMMIT % "# it's a heading\ngit push\n# don't"),
+               ("heredoc_pr_body_hash_lines", PRBODY % "# it's a heading\ngit push\n# don't"),
+               ("heredoc_unquoted_commit_hash_lines", COMMITU % "# it's a heading\ngit push\n# don't"),
+               ("heredoc_commit_after_a_comment", "# it's the plan\n" + COMMIT % "# don't\nfix the parser" + "\n# it's all"),
+               ("heredoc_code_body_untouched", "bash <<'EOF'\n# it's\ngit push\n# it's\nEOF")):
+    make("a_f8_message_" + nm, ex(ALLOW), cmd=cm, tr=lambda P: base(P))
+make("d_f8_message_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), cmd=MSG % "a\n# it's\nb" + "\ngit push", tr=lambda P: base(P))
+make("d_f8_message_heredoc_then_publish", ex(DENY, has=["3 of 3 sources not opened"]), cmd=COMMIT % "# it's a heading\nfix" + "\n# it's\ngit push\n# it's", tr=lambda P: base(P))
+make("d_f8_comment_on_a_heredoc_opener_line", ex(DENY, has=["3 of 3 sources not opened"]), cmd="cat <<'EOF' > f # it's\nbody # it's\nEOF\ngit push\n# it's", tr=lambda P: base(P))
+# F8: a quote outside a comment is read as before: one that spans lines is one word (bash reads it so), one that never closes leaves the text as it was
+make("a_f8_quote_outside_a_comment_spans_lines", ex(ALLOW), cmd="echo it's\ngit push\n# it's", tr=lambda P: base(P))
+make("d_f8_quote_outside_a_comment_never_closes", ex(DENY, has=["3 of 3 sources not opened"]), cmd="echo it's\ngit push\n# a comment", tr=lambda P: base(P))
+make("d_f8_case_pattern_is_not_a_comment_start", ex(DENY, has=["3 of 3 sources not opened"]), cmd='case $x in a) echo "# it\'s";; esac\ngit push', tr=lambda P: base(P))
+# F8: 31 KB of comment lines (an apostrophe in each) and a publish at the end: decided in under 9 s of the hook's 10
+make("d_f8_30kb_of_comment_lines", ex(DENY, has=["3 of 3 sources not opened"], max=9), cmd="# it's ready\n" * 2401 + "git push\n# it's", tr=lambda P: base(P))
+make("a_f8_30kb_of_comment_lines_no_publish", ex(ALLOW, max=9), cmd="# it's ready\n" * 2401 + "git status\n# it's", tr=lambda P: base(P))
 # M4 (a): one heredoc opener with a 12,000-character delimiter and 6,000 body lines before a publish (the opener scan backtracked once per
 # delimiter character); (b) a state write whose plain argument cannot be split in a hurry
 make("d_m4a_long_delimiter", ex(DENY, has=["3 of 3 sources not opened"], max=9), cmd="cat <<" + "a" * 12000 + "\n" + "x\n" * 6000 + "git push", tr=lambda P: base(P))
@@ -1231,6 +1280,9 @@ elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-
 
     def sh(t, pats):
         return ns["publish_hit"](t, pats, 0)
+
+    def shc(t, pats):   # the Bash path of the gate (0.7.0 F8): the comments are blanked, then the text is read
+        return ns["publish_hit"](ns["strip_comments"](t), pats, 0)
     # (label, function, wanted): each family is run at 24 KB and at 96 KB; a family that is already slow at 24 KB is not run at 96 KB
     for label, mk in (
             ("PowerShell: heads then a publish", lambda n: (lambda: ps("Write-Output " + "git " * n + "; git push", ["git push"]), True)),
@@ -1243,11 +1295,24 @@ elif mode == "linear":   # linear <bash-guard.py>: the pattern match, the state-
             ("Bash: a chain of wrappers", lambda n: (lambda: sh("env " * n + "uv publish", ["uv publish"]), True)),
             ("Bash: a chain of runners", lambda n: (lambda: sh("uv " * n + "x", ["uv publish"]), False)),
             ("PowerShell: many lines, an apostrophe in each", lambda n: (lambda: ps("# it's\n" * (n // 2) + "git push\n# it's", ["git push"]), True)),
-            ("Bash: 17 heredocs read as code, many lines", lambda n: (lambda: sh("x <<a\n" * 17 + "# it's\n" * (n // 2) + "git push\n# it's", ["git push"]), True))):
+            ("Bash: 17 heredocs read as code, many lines", lambda n: (lambda: sh("x <<a\n" * 17 + "# it's\n" * (n // 2) + "git push\n# it's", ["git push"]), True)),
+            ("Bash: many comment lines, an apostrophe in each, then a publish", lambda n: (lambda: shc("# it's\n" * (n // 2) + "git push\n# it's", ["git push"]), True)),
+            ("Bash: many comment lines, an apostrophe in each, no publish", lambda n: (lambda: shc("# it's\n" * (n // 2) + "git status\n# it's", ["git push"]), False)),
+            ("Bash: a comment after every separator, then a publish", lambda n: (lambda: shc("git status; # it's\n" * (n // 4) + "git push\n# it's", ["git push"]), True)),
+            ("Bash: many quoted words that hold a #", lambda n: (lambda: shc("echo 'a # b' \"c # d\" $'e # f' $# ${#x}; " * (n // 8) + "git push", ["git push"]), True)),
+            ("strip_comments: substitutions and quotes opened and never closed", lambda n: (lambda: bool(ns["strip_comments"]("$(\"" * (n // 2) + "# it's\ngit push")), True)),
+            ("strip_comments: substitutions and quotes nested and closed", lambda n: (lambda: bool(ns["strip_comments"]("echo \"$(" * (n // 8) + "# c\n" + ")\"" * (n // 8) + "\ngit push")), True)),
+            ("strip_comments: heredocs under the cap, comment lines between", lambda n: (lambda: bool(ns["strip_comments"]("cat <<E\nx\nE\n# it's\n" * 8 + "# it's\n" * (n // 2) + "git push\n# it's")), True)),
+            ("strip_comments: backticks, parentheses and braces", lambda n: (lambda: bool(ns["strip_comments"]("`(${" * (n // 4) + "# it's\ngit push")), True)),
+            ("strip_comments: backslashes and quotes", lambda n: (lambda: bool(ns["strip_comments"]("\\' \"\\\"' # \\\n" * (n // 8) + "git push")), True))):
         for size, n in (("24 KB", 6000), ("96 KB", 24000)):
             f, want = mk(n)
             if not timed("%s, %s" % (label, size), f, want):
                 break
+    # 0.7.0 F8: 30 KB of comment lines, an apostrophe in each, decided in under 1 s; and the quote in a comment hides nothing
+    timed("strip_comments: 30 KB of comment lines then a publish", lambda: shc("# it's ready\n" * 2401 + "git push\n# it's", ["git push"]), True)
+    timed("strip_comments: 30 KB of comment lines, no publish", lambda: shc("# it's ready\n" * 2401 + "git status\n# it's", ["git push"]), False)
+    timed("strip_comments: the text an ordinary command has (no #) is returned as it is", lambda: ns["strip_comments"]("git status") == "git status", True)
     # the heredoc opener with a very long delimiter: read as code, not scanned; found at 96 KB too
     for body in (6000, 24000):
         cmd = "cat <<" + "a" * 12000 + "\n" + "x\n" * body + "git push"

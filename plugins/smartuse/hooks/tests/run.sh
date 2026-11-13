@@ -1030,8 +1030,32 @@ fcheck deny  'poetry -C sub run python send.py' with
 fcheck deny  'pdm -p sub run python send.py' with
 fcheck allow 'poetry run pytest' with
 fcheck allow 'uv run --package app python other.py' with
-fcheck allow $'# it\'s ready\ngit push origin main\n# check the PR\'s status' with   # known limit, pinned: on Bash at or under the heredoc cap a quoted word that spans lines is read whole (see ROADMAP)
+fcheck deny  $'# it\'s ready\ngit push origin main\n# check the PR\'s status' with   # 0.7.0 F8: was the pinned limit (allowed): a quote in a # comment no longer hides the lines after it
 fcheck allow $'# it\'s ready\ngit status\n# check the PR\'s status' with
+# --- 0.7.0 F8 (strip_comments): a # that starts a word, outside quotes, is a comment to the end of its line; a # that is text is not
+fcheck deny  $'git status; # it\'s ready\ngit push origin main\n# check the PR\'s status' with
+fcheck deny  $'git status && # it\'s ready\ngit push origin main\n# check the PR\'s status' with
+fcheck deny  $'git status | # it\'s ready\ngit push origin main\n# check the PR\'s status' with
+fcheck deny  $'( # it\'s ready\ngit push origin main\n# check the PR\'s status\n)' with
+fcheck deny  $'git status # it\'s ready\ngit push origin main\n# check the PR\'s status' with
+fcheck deny  $'echo \'x # y\'; git push origin main' with
+fcheck deny  $'echo "x # y"; git push origin main' with
+fcheck deny  $'echo $\'x # y\'; git push origin main' with
+fcheck deny  'echo $#; git push origin main' with
+fcheck deny  'echo ${#x}; git push origin main' with
+fcheck deny  'echo a#b; git push origin main' with
+fcheck deny  'echo https://h/p#frag; git push origin main' with
+fcheck deny  $'echo "$(echo "a #b")"; git push origin main' with
+fcheck allow $'git commit -m "fix the parser\n# it\'s a heading\nmore text"' with
+fcheck allow $'git commit -m "a\n# it\'s\ngit push\n# don\'t\nb"' with
+fcheck allow $'git commit -m "$(cat <<\'EOF\'\n# it\'s a heading\ngit push\n# don\'t\n\nCo-Authored-By: Test <t@example.com>\nEOF\n)"' with
+fcheck allow $'gh pr create --title "demo" --body "$(cat <<\'EOF\'\n## Summary\n# it\'s\ngit push\n# don\'t\n\n## Test plan\n- ran it\nEOF\n)"' with
+fcheck deny  $'git commit -m "a\n# it\'s\nb"\ngit push origin main' with
+fcheck allow $'echo it\'s\ngit push origin main\n# it\'s' with   # a quote outside a comment that spans lines is one word, as bash reads it
+fcheck deny  $'echo it\'s\ngit push origin main\n# a comment' with   # one that never closes leaves the text as it was
+# the rules read the text as they always did: a comment is not blanked for them (sudo in a comment line is still found by a line of its own)
+check deny  $'# it\'s\nsudo ls\n# it\'s'
+check deny  $'echo a\n# it\'s\nsudo ls'
 fcheck deny  $'cat > a.md <<EOF\nit\'s data\nEOF\ngit push\ncat > b.md <<EOF\ndon\'t\nEOF' with
 # --- the same gate through the PowerShell tool (hooks.json matcher Bash|PowerShell): the text is normalised (here-string fences and
 #     braces are statement breaks, backticks and commas go) and the publish pattern's first word may be any word of a statement,
