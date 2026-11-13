@@ -1756,8 +1756,15 @@ PAID_INTERP = re.compile(r"python[\d.]*|pythonw|py|node|deno|bun|uv|uvx|npx|tsx|
 PAID_CALLER = re.compile(r"(?:" + PAID_INTERP.pattern + r")|curl|wget|http|xh")
 PAID_STDIN_INTERP = re.compile(r"python[\d.]*|pythonw|py|node|deno|bun")
 PAID_SCRIPT_EXT = re.compile(r"\.(?:py|pyw|js|mjs|cjs|ts|mts|cts|tsx|jsx|sh|bash)$", re.I)
-# One command segment: split on ; & | ( newline ` outside quotes. LEAD = what may stand before the command word (then / do / exec / VAR=x …; wrappers are WRAP).
-PAID_SEG = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?P<sep>[;&|(\n`])|[^'"\\;&|(\n`]+|.""", re.S)
+# One command segment: split on ; & | ( ) newline ` outside quotes (0.7.0 F4b fix: `)` too, so `(python render.py)` and `$(python render.py)`
+# name the script, not `render.py)`). LEAD = what may stand before the command word (then / do / exec / VAR=x …; wrappers are WRAP).
+PAID_SEG = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?P<sep>[;&|()\n`])|[^'"\\;&|()\n`]+|.""", re.S)
+# A command substitution outside single quotes: $( @( <( >( or a backtick. A segment that holds one has its text after the first scanned as segments too.
+PAID_SUBST = re.compile(r"[$@<>]\(|`")
+# A command that changes the folder (the words only; env -C / --chdir are read in paid_unwrap): the run after it is not the file the guard found.
+PAID_CD = re.compile(r"(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location)(?:\.\.|[/\\]|$)", re.I)
+PAID_CD_WORD = re.compile(r"(?<![\w.-])(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location)(?![\w-])", re.I)   # the same words anywhere in the text (a loop may run the cd first)
+PAID_ENV_CD = re.compile(r"-[A-Za-z]*C.*|--c(?:h(?:d(?:i(?:r)?)?)?)?(?:=.*)?")                  # env -C dir, -Cdir, --chdir[=dir] and its shortened spellings
 PAID_LEAD = re.compile(r"""(?:(?:then|do|else|elif|if|while|until|exec|command|!|\{)\s+|[A-Za-z_]\w*=(?:'[^']*'|"[^"]*"|\S*)\s*)*""")
 # Wrappers that run the next command: name -> (options that take a value as the NEXT word, positional words of their own, the
 # subcommands that precede the command). `timeout 60 python x.py`, `nice -n 10 …`, `poetry run python x.py`, `pnpm exec tsx x.ts`, `yarn node x.js`.
@@ -1776,11 +1783,25 @@ PAID_GO = re.compile(r"(?P<script>[^\s,]+)\s*(?:x|×|\*)\s*(?P<runs>\d+)\b(?P<re
 # call operator & is a segment separator already (PAID_SEG), so `& python render.py` is the segment `python render.py`.
 PAID_PS_CALLER = frozenset("invoke-webrequest invoke-restmethod iwr irm start-bitstransfer".split())   # download cmdlets and their aliases (curl, wget are callers already); a bare paid host beside them is a call
 PAID_PS_MENTION = frozenset("get-content gc select-string sls write-host write-output write".split())   # a paid word after these is text, not a call
-PAID_PS_LOOP = re.compile(r"(?:foreach|for|while|until|do|foreach-object|%)(?![\w-])", re.I)            # a segment that opens a loop: there is no `done` in PowerShell, so a hit after it repeats
-PAID_PS_METHOD = re.compile(r"\.foreach\b", re.I)                                                         # (1..3).ForEach({ ... })
+# a segment that opens a loop: there is no `done` in PowerShell, so a hit after it repeats. F4b fix: the cmdlets that run a script block once per
+# item or per event (where-object, switch, jobs, remoting, event actions) join the loops; a script block after a pipe is marked in paid_ps_blocks
+PAID_PS_LOOP = re.compile(r"(?:foreach|for|while|until|do|foreach-object|%|where-object|where|\?|switch|invoke-command|icm|start-job|sajb|start-threadjob"
+                          r"|register-objectevent|register-engineevent|register-wmievent|register-cimindicationevent)(?![\w.-])", re.I)
+PAID_PS_METHOD = re.compile(r"\.(?:foreach|where)\b", re.I)                                               # (1..3).ForEach({ ... }), (1..3).Where({ ... })
+PAID_PS_BRACE = re.compile(r"[|;\n{}]")                                                                    # what ends a statement, or opens or closes a script block
+PAID_PS_SWITCH = re.compile(r"\s*(?:\$[\w:]+\s*=\s*)?switch(?![\w-])", re.I)                               # a statement that is a switch
 PAID_PS_SP_VAL = ("filepath", "argumentlist", "workingdirectory", "redirectstandardinput", "redirectstandardoutput", "redirectstandarderror",
                   "verb", "windowstyle", "credential", "environment")   # the parameters of Start-Process that take a value ...
 PAID_PS_SP_SW = ("wait", "nonewwindow", "passthru", "usenewenvironment", "loaduserprofile")   # ... and the switches
+PAID_PS_COMMON_VAL = ("erroraction", "warningaction", "informationaction", "progressaction", "errorvariable", "warningvariable", "informationvariable",
+                      "outvariable", "outbuffer", "pipelinevariable")   # the common parameters that take a value ...
+PAID_PS_COMMON_SW = ("verbose", "debug", "whatif", "confirm")           # ... and the common switches
+PAID_PS_ALIAS = {"args": "argumentlist", "path": "filepath", "pspath": "filepath", "ea": "erroraction", "wa": "warningaction", "infa": "informationaction",
+                 "proga": "progressaction", "ev": "errorvariable", "wv": "warningvariable", "iv": "informationvariable", "ov": "outvariable",
+                 "ob": "outbuffer", "pv": "pipelinevariable", "vb": "verbose", "db": "debug", "wi": "whatif", "cf": "confirm"}
+PAID_PS_ALL = PAID_PS_SP_VAL + PAID_PS_SP_SW + PAID_PS_COMMON_VAL + PAID_PS_COMMON_SW
+PAID_PS_LIT = re.compile(r"""(?:'[^']*'|"[^"$`()@]*"|[^\s'"$`()@;|&<>]+)""")   # one literal word: quoted, or plain with nothing that expands
+PAID_PS_ASSIGN = re.compile(r"(?:\[[^\]]*\]\s*)*\$[\w:.?{}-]+\s*[-+*/%]?=\s*")   # `$x = `, `[int]$x = `, `$env:X = `, `$x += ` at the start of a statement
 
 
 PAID_COUNT_FLAGS = ("-n", "-N", "--n", "--count", "--num", "--num-images", "--num_images", "--num-outputs", "--num_outputs", "--images",
@@ -1893,11 +1914,11 @@ def paid_script_arg(cmd, toks):
     """The script file this line runs: the first word with a script extension after an interpreter (none when -c / -m / -e comes
     first — inline code or a module, nothing to open), or the command word itself (./render.py)."""
     if not PAID_INTERP.fullmatch(cmd):
-        return toks[0] if PAID_SCRIPT_EXT.search(toks[0]) else None
+        return toks[0] if PAID_SCRIPT_EXT.search(toks[0].rstrip("`")) else None   # a closing backtick of `python x.py` stays on the segment's last word (paid_segments keep)
     for t in toks[1:]:
         if t in ("-c", "-m", "-e", "-p", "--eval", "--print"):
             return None
-        if not t.startswith("-") and PAID_SCRIPT_EXT.search(t):
+        if not t.startswith("-") and PAID_SCRIPT_EXT.search(t.rstrip("`")):
             return t
     return None
 
@@ -1983,6 +2004,7 @@ class PaidCfg:
     cover. blind (V10): the command is not read cleanly, so no run is free."""
     def __init__(self, adapter, project, blind=False):
         self.project, self.blind, self.base = project, blind, None
+        self.moved, self.cd_any = False, False                  # a folder change was seen before this run (paid_seg_hits sets it); a cd word is anywhere in the command (paid_hit sets it)
         self.ci = os.name == "nt" or sys.platform == "darwin"   # the file system's case rule, for the paid_free: paths
         self.names, self.paths, self.pnames = {}, {}, {}        # literal items: file name / project-relative path / file name of a path item -> [flags or None]
         self.gnames, self.gpaths = [], []                       # items with * or ?: paid_gentry
@@ -2063,12 +2085,13 @@ class PaidCfg:
         return True
 
 
-def paid_flag_present(args, flags):
+def paid_flag_present(args, flags, odd=()):
     """True when the pay flag of an `only` item may be on the command line: a plain argument equal to a flag, the flag with =value, or
-    a shortened start of it that a parser accepts (--pa for --pay); or any argument that is not a plain literal."""
+    a shortened start of it that a parser accepts (--pa for --pay); or any argument that is not a plain literal (F4b fix: a backslash,
+    a quote that is not the one outer pair, or quoted text glued to other text is not plain either; `odd` marks the glued ones)."""
     starts = {f[:k] for f in flags for k in range(3, len(f) + 1)}
-    for t in args:
-        if paid_not_plain(t):
+    for i, t in enumerate(args):
+        if paid_not_plain(t) or paid_quirky(t) or (i < len(odd) and odd[i]):
             return True
         u = paid_unq(t)
         if u.startswith("--") and len(u) > 2 and u.split("=", 1)[0] in starts:
@@ -2076,20 +2099,30 @@ def paid_flag_present(args, flags):
     return False
 
 
-def paid_run_free(cfg, args, items, files, golisted):
+PAID_FREE_VALUES = ("1", "true", "yes")   # the only values that keep a free flag free: --dry-run=1, =true, =yes (any case)
+
+
+def paid_run_free(cfg, args, items, files, golisted, odd=(), ext=False, moved=False):
     """True when this one run of a paid script is free (the order of paid-guard-plan 8.4 F4b): a free flag among plain literal
-    arguments, before any bare --; else `only` (every matching item has it: free when no flag is there); else a free path (never for a
-    script that a paid_scripts: item lists or a go names). args: the raw words after the script word."""
+    arguments, before any bare --, as the bare word or with =1 / =true / =yes; else `only` (every matching item has it: free when no
+    flag is there, and the arguments come from this command line: under xargs / parallel / watch, `ext`, the run is paid); else a free
+    path (never for a script that a paid_scripts: item lists or a go names, and never after a folder change, `moved`: the file the guard
+    found is then not the file that runs). args: the raw words after the script word; odd: which of them are glued to other text."""
     if cfg.free_flags and not any(paid_not_plain(t) for t in args):
-        for t in args:
+        for i, t in enumerate(args):
             u = paid_unq(t)
             if u == "--":
                 break
-            if u.split("=", 1)[0] in cfg.free_flags:
+            if paid_quirky(t) or (i < len(odd) and odd[i]):   # not a plain word: never a flag; one that reads as a bare -- ends the look
+                if re.sub(r"[\\'\"]", "", t) == "--":
+                    break
+                continue
+            name, eq, val = u.partition("=")
+            if name in cfg.free_flags and (not eq or val.lower() in PAID_FREE_VALUES):
                 return True
     if items:
-        return all(fl is not None for fl in items) and not paid_flag_present(args, {f for fl in items for f in fl})
-    return bool(files) and not golisted and bool(cfg.free_paths) and all(cfg.free_file(p) for p in files)
+        return not ext and all(fl is not None for fl in items) and not paid_flag_present(args, {f for fl in items for f in fl}, odd)
+    return bool(files) and not golisted and not moved and bool(cfg.free_paths) and all(cfg.free_file(p) for p in files)
 
 
 def paid_stdin_bodies(cmd):
@@ -2118,8 +2151,9 @@ def paid_stdin_bodies(cmd):
 
 def paid_unwrap(toks):
     """(toks with the wrapper commands and their own options / arguments skipped, True when a repeater (xargs, parallel, watch) was
-    among them): `timeout 60 python x.py` -> python x.py. WRAP says what each wrapper takes; an unknown wrapper stays the command."""
-    rep = False
+    among them, True when env changed the folder (-C / --chdir)): `timeout 60 python x.py` -> python x.py. WRAP says what each wrapper
+    takes; an unknown wrapper stays the command."""
+    rep, cd = False, False
     while toks:
         name = re.sub(r"\.exe$", "", paid_basename(toks[0]).lower())
         if name not in PAID_WRAP:
@@ -2141,6 +2175,7 @@ def paid_unwrap(toks):
                 i += 1
                 break
             if len(t) > 1 and t[0] == "-":
+                cd = cd or (name == "env" and bool(PAID_ENV_CD.fullmatch(t)))
                 i += 2 if t in vopts else 1                       # an attached value (-oL, -n10, --signal=KILL) is one word
             elif name == "env" and re.match(r"[A-Za-z_]\w*=", t):
                 i += 1
@@ -2150,22 +2185,22 @@ def paid_unwrap(toks):
             else:
                 break
         toks = toks[i:]
-    return toks, rep
+    return toks, rep, cd
 
 
 def paid_ps_opt(w):
-    """(parameter, takes a value) when the bare word w names a Start-Process parameter (any case, a prefix of three letters or more,
-    -name:value, the alias -Args), else None. A quoted word, a -- word and a shorter prefix are not parameters."""
-    if w[:1] != "-" or w[:2] == "--":
+    """(parameter, takes a value) when the bare word w names a Start-Process parameter or a common parameter (any case, -name:value, an
+    alias, or a start of the name of any length that only one parameter has: PowerShell binds the same way), (None, False) for a word
+    that starts like a parameter and names none (unknown or ambiguous: the caller fails closed), None for a word that is not one (a
+    quoted word, a -- word, a number such as -1)."""
+    if w[:1] != "-" or w[:2] == "--" or w[1:2].isdigit():
         return None
     name = w[1:].partition(":")[0].lower()
-    name = {"args": "argumentlist", "path": "filepath", "pspath": "filepath"}.get(name, name)
-    if len(name) < 3:
-        return None
-    for full in PAID_PS_SP_VAL + PAID_PS_SP_SW:
-        if full.startswith(name):
-            return full, full in PAID_PS_SP_VAL
-    return None
+    full = PAID_PS_ALIAS.get(name)
+    if full is None and name:
+        hit = [f for f in PAID_PS_ALL if f.startswith(name)] if name not in PAID_PS_ALL else [name]
+        full = hit[0] if len(hit) == 1 else None
+    return (full, full in PAID_PS_SP_VAL + PAID_PS_COMMON_VAL) if full else (None, False)
 
 
 def paid_ps_start(seg):
@@ -2173,13 +2208,16 @@ def paid_ps_start(seg):
     (a statement whose first word is Start-Process, saps or start; any other segment comes back as it was). The program is -FilePath or the
     first plain word; the arguments are -ArgumentList's words (to the next parameter) and any later plain word; the other parameters and
     their values are dropped. An ArgumentList string with blanks in it is split into words again, so the count rule and the free flags
-    read what the program is given. With no program the segment is returned unchanged."""
+    read what the program is given. With no program, a parameter the guard does not know, or a program that starts with - the segment is
+    returned unchanged (paid_seg_hits then fails closed on it when it holds an interpreter or a script word)."""
     ws = [m.group(0) for m in PAID_ARGS.finditer(seg)]
     if not ws or ws[0].lower() not in START_PROCESS:
         return seg
     fp, al, cur = None, [], None
     for w in ws[1:]:
         o = paid_ps_opt(w)
+        if o and o[0] is None:
+            return seg
         ctx, val = cur, w
         if o:
             ctx, val = o[0], w[1:].partition(":")[2]
@@ -2197,7 +2235,7 @@ def paid_ps_start(seg):
                 al.append(val)
         else:
             cur = None                            # the value of another parameter
-    if fp is None:
+    if fp is None or fp[:1] == "-":
         return seg
     words = [fp]
     for a in al:
@@ -2217,48 +2255,118 @@ def paid_ps_text(text):
     return ";".join(paid_ps_start(s) for s in paid_segments(text, True))
 
 
-def paid_seg_hits(seg, hosts, cwd, cfg, depth=0, loop=False, ps=False):
-    """[(signal, script, repeats)] for one command segment: layer 1 (the segment's own text), layer 2 (the script file it runs) unless
+def paid_ps_blocks(raw):
+    """The raw PowerShell command with a `foreach` statement put after each `{` that follows a pipe, or a switch, in its statement
+    (`1..3 | Sort-Object { python render.py }`, `switch (1) { 1 { ... } }`): a script block there runs once per item or per match,
+    whatever the cmdlet is, and ps_text turns the marker into the loop word the scan already knows. Linear; the caller looks only at
+    a command that holds a {."""
+    out, last, start, piped = [], 0, 0, False
+    for m in PAID_PS_BRACE.finditer(raw):
+        c, i = m.group(0), m.start()
+        if c == "|":
+            piped = True
+            continue
+        if c == "{" and (piped or PAID_PS_SWITCH.match(raw, start, i)):
+            out.append(raw[last:i + 1])
+            out.append(" foreach ; ")
+            last = i + 1
+        start, piped = i + 1, False
+    out.append(raw[last:])
+    return "".join(out)
+
+
+def paid_subst_body(seg):
+    """The text after the first command substitution of a segment that is not inside 'single quotes' ($( @( <( >( or a backtick, in
+    a bare or "double-quoted" word), else None: bash and PowerShell run what is in it, and the segment splitter keeps a double-quoted
+    word whole, so the body is scanned as segments of its own."""
+    for m in PAID_SEG.finditer(seg):
+        t = m.group(0)
+        if t[0] != "'":
+            k = PAID_SUBST.search(t)
+            if k:
+                return seg[m.start() + k.end():]
+    return None
+
+
+def paid_inner(text, hosts, cwd, cfg, depth, loop, ps, ext):
+    """The hits of a text that sits inside a segment (a substitution body, what an assignment gives a variable): scanned as segments of
+    their own, three levels deep. Deeper, a text that holds a paid word is a hit no go can cover (script None)."""
+    if depth < 3:
+        return paid_scan(paid_segments(text, True), hosts, cwd, cfg, depth + 1, loop, ps, ext)
+    return [("a paid word nested too deep in a command that is not read cleanly", None, False)] if PAID_FIRST.search(text) else []
+
+
+def paid_seg_hits(seg, hosts, cwd, cfg, depth=0, loop=False, ps=False, ext=False):
+    """[(signal, script, repeats)] for one command segment: the segment itself (paid_seg_run), then the text inside its command
+    substitutions (a mention or a double-quoted word does not hide them), then, in PowerShell, what a `$x = …` gives the variable
+    unless it is one literal word (`$env:KEY = 'x'` is the one preparation)."""
+    out = paid_seg_run(seg, hosts, cwd, cfg, depth, loop, ps, ext)
+    if PAID_SUBST.search(seg):
+        sub = paid_subst_body(seg)
+        if sub:
+            out = out + paid_inner(sub, hosts, cwd, cfg, depth, loop, ps, ext)
+    if ps and "=" in seg:
+        body = seg[PAID_LEAD.match(seg).end():]
+        m = PAID_PS_ASSIGN.match(body)
+        rest = body[m.end():].strip() if m else ""
+        if rest and not PAID_PS_LIT.fullmatch(rest):
+            out = out + paid_inner(paid_ps_start(rest), hosts, cwd, cfg, depth, loop, ps, ext)
+    return out
+
+
+def paid_seg_run(seg, hosts, cwd, cfg, depth, loop, ps, ext):
+    """The hits of one command segment alone: layer 1 (the segment's own text), layer 2 (the script file it runs) unless
     layer 1 hit, and every hit inside a bash -c string. repeats = it sits in a loop or runs under xargs / parallel / watch. A run of a
     paid script that is free (cfg, F4b) is no hit: it comes back as (None, script, False, its raw arguments) for paid_finish. ps: the
-    PowerShell tool (F6): the cmdlets that call (PAID_PS_CALLER), the mentions (PAID_PS_MENTION) and `$env:KEY = …` as preparation."""
+    PowerShell tool (F6): the cmdlets that call (PAID_PS_CALLER), the mentions (PAID_PS_MENTION) and `$env:KEY = …` as preparation.
+    ext: the arguments come from outside the command line (a repeater, xargs / parallel / watch, is above this run)."""
     ms = list(PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():]))
-    toks, rep = paid_unwrap([next(g for g in a.groups() if g is not None) for a in ms])
+    toks, rep, cdw = paid_unwrap([next(g for g in a.groups() if g is not None) for a in ms])
     if not toks:
         return []
     raws = [a.group(0) for a in ms][len(ms) - len(toks):]   # the same words with their quotes, aligned with toks
     cmd = re.sub(r"\.exe$", "", paid_basename(toks[0]).lower())
+    c0 = toks[1] if toks[0].lower() == "builtin" and len(toks) > 1 else toks[0]
+    if cdw or PAID_CD.match(c0):                            # F4b fix: after a folder change the file the guard finds is not the one that runs
+        cfg.moved = True
     if cmd in PAID_MENTION or (ps and cmd in PAID_PS_MENTION):
         return []
-    rep, out = rep or loop, []
+    if ps and cmd in START_PROCESS and PAID_FIRST.search(seg):   # a Start-Process the parser could not read (paid_ps_start left it as it was)
+        return [("a Start-Process that is not read in a command that is not read cleanly", None, False)]
+    moved = cfg.moved or (loop and cfg.cd_any)
+    ext, rep, out = ext or rep, rep or loop, []
     sig = paid_code_signal(seg, hosts, bool(PAID_CALLER.fullmatch(cmd)) or (ps and cmd in PAID_PS_CALLER),
                            cmd not in PAID_PREP and not (ps and toks[0][:5].lower() == "$env:"))   # not cmd: its base name stops at a / in the value
     path = None if sig else paid_script_arg(cmd, toks)
     if sig:
         out.append((sig + " on the command line", cmd, rep))
     if path:
-        name = paid_basename(path)
-        files = paid_script_files(path, cwd)
+        name = paid_basename(path.rstrip("`"))
+        files = paid_script_files(path.rstrip("`"), cwd)
         sig = None
         for f in files:                                                 # a signal in any file found makes the run paid
             src = paid_read_file(f)
             sig = paid_code_signal(src, hosts, True) if src else None
             if sig:
                 break
-        items = cfg.script_items(name, files)
+        items = cfg.script_items(name, [] if moved else files)           # after a folder change a path item matches by file name alone
         golisted = name.lower() in cfg.go
         if sig or items or golisted:
-            args = raws[toks.index(path) + 1:]
-            if not cfg.blind and paid_run_free(cfg, args, items, files, golisted):
+            k = toks.index(path) + 1
+            args = raws[k:]
+            base = len(ms) - len(toks) + k                               # the index of the first argument among the words with their places
+            odd = [bool((base + j > 0 and ms[base + j - 1].end() == ms[base + j].start()) or (base + j + 1 < len(ms) and ms[base + j].end() == ms[base + j + 1].start()))
+                   for j in range(len(args))]                            # quoted text glued to other text is one word to the shell, two to the splitter
+            if not cfg.blind and paid_run_free(cfg, args, items, files, golisted, odd, ext, moved):
                 out.append((None, name, False, tuple(args)))
             else:
                 out.append((f"{sig} in {name}" if sig else f"{name} is in paid_scripts", name, rep))
     if depth < 2 and cmd in ("bash", "sh", "zsh", "dash", "ksh") and "-c" in toks[1:-1]:   # bash -c "python render.py": judge the string too
-        out += paid_scan(paid_segments(toks[toks.index("-c") + 1], True), hosts, cwd, cfg, depth + 1, rep, ps)
+        out += paid_scan(paid_segments(toks[toks.index("-c") + 1], True), hosts, cwd, cfg, depth + 1, rep, ps, ext)
     return out
 
 
-def paid_scan(segs, hosts, cwd, cfg, depth=0, loop=False, ps=False):
+def paid_scan(segs, hosts, cwd, cfg, depth=0, loop=False, ps=False, ext=False):
     """Every hit of these segments in order, flagged `repeats` when it stands between a for / while / until / select and its `done`. ps
     (F6): PowerShell has no `done` (its braces are `;` by now), so a hit after a loop word (foreach, for, while, do, ForEach-Object, %,
     .ForEach) repeats, to the end of the command."""
@@ -2268,7 +2376,7 @@ def paid_scan(segs, hosts, cwd, cfg, depth=0, loop=False, ps=False):
             d = d or bool(PAID_PS_LOOP.match(seg) or PAID_PS_METHOD.search(seg))
         else:
             d += bool(PAID_LOOP_OPEN.match(seg))
-        out += paid_seg_hits(seg, hosts, cwd, cfg, depth, loop or d > 0, ps)
+        out += paid_seg_hits(seg, hosts, cwd, cfg, depth, loop or d > 0, ps, ext)
         if not ps and PAID_LOOP_END.match(seg):
             d = max(0, d - 1)
     return out
@@ -2329,6 +2437,7 @@ def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False):
     extra = [h for h in adapter_list(adapter, "paid_hosts") if re.fullmatch(r"[\w.-]+", h)]
     hosts = paid_host_re(PAID_HOSTS + tuple(extra)) if extra else PAID_HOST
     cfg = PaidCfg(adapter, project or cwd, blind)
+    cfg.cd_any = bool(PAID_CD_WORD.search(text))   # a loop may run its cd before the run that stands above it in the text
     segs = paid_segments(text, True)   # keep: a segment that ends at a backtick or ( keeps it, so a free flag beside `…` / $(…) is seen as not plain (as paid_seg_args reads it)
     looped = any(PAID_LOOP_OPEN.match(s) for s in segs)   # a body is not tied to a segment: any loop in the command makes it a repeat
     if blind:
@@ -2379,6 +2488,14 @@ def paid_seg_args(text, script, depth=0, skip=()):
 def paid_unq(t):
     """A raw word with one pair of outer quotes taken off."""
     return t[1:-1] if len(t) > 1 and t[0] in "'\"" and t[-1] == t[0] else t
+
+
+def paid_quirky(t):
+    """True when a raw word is not one clean literal for the free flags and the `only` flags (F4b fix): a backslash in it (an escape in
+    bash), or a quote anywhere except as the one outer pair (`'--dry-run'x`, `--dry-run""`, `"--dry"-run`). The shell may turn such a
+    word into a flag, or out of one. paid_not_plain, the count rule's test, is not changed."""
+    u = paid_unq(t)
+    return "\\" in t or "'" in u or '"' in u
 
 
 def paid_not_plain(t):
@@ -2557,7 +2674,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
     if not strict and not PAID_ARM.search(adapter):
         return None
     if ps:
-        text = paid_ps_text(text)
+        text = paid_ps_text(ps_text(paid_ps_blocks(cmd)) if "{" in cmd else text)   # a script block after a pipe or a switch is marked as a loop first
     hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps)
     if not hits:
         return None

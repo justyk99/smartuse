@@ -204,3 +204,19 @@ O for i in 1 2 3; do echo $i; done
 O while read l; do echo $l; done < /dev/null
 O until true; do sleep 1; done
 O for i in 1 2; do echo $i; done; python x.py
+# --- 0.7.0 F4b fix: a command substitution is scanned where a mention, a double-quoted word or an assignment held it (no go: denied) ...
+D echo "$(python render.py)"
+D git log "$(python render.py)"
+D echo $(python render.py)
+D (python render.py)
+D X=$(python render.py)
+D export X="$(python render.py)"
+D echo `python render.py`
+D echo "`python render.py`"
+D echo "a $(echo "$(python render.py)")"
+D cat "$(python render.py --n 1)" | head
+# --- ... and a mention with no substitution, a single-quoted one, or a substitution of a script that is not paid, is allowed
+O echo "run python render.py later"
+O echo 'x $(python render.py)'
+O echo "$(python x.py)"
+O git commit -m 'run `python render.py` first'
