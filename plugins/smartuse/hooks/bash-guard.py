@@ -1893,20 +1893,194 @@ def paid_script_arg(cmd, toks):
     return None
 
 
-def paid_read_script(tok, cwd):
-    """The first 256 KB of that script (UTF-8, bad bytes replaced) from the event's cwd, whatever its size, or None: a path the
-    guard cannot see ($f, `…`), a missing file. What lies beyond 256 KB is never read (a stated limit). One stat and one read."""
+def paid_script_files(tok, cwd):
+    """The files a script word may be, as paths: [] when the guard cannot see one (a $f, `…` or glob in the word, a missing file).
+    Today a relative word is joined to the event's cwd and that is the one file. The folder lookup (F4b step 1, D-YK13) would
+    hand in more files here; the callers read every file of the list and take a signal in any of them."""
     if re.search(r"[$`*?]", tok):
-        return None
-    p = native_path(os.path.expanduser(tok))
-    p = os.path.join(cwd, p)   # an absolute path stays itself
+        return []
+    p = os.path.join(cwd, native_path(os.path.expanduser(tok)))   # an absolute path stays itself
     try:
-        if not os.path.isfile(p):
-            return None
+        return [p] if os.path.isfile(p) else []
+    except OSError:
+        return []
+
+
+def paid_read_file(p):
+    """The first 256 KB of a file (UTF-8, bad bytes replaced), whatever its size, or None when it cannot be read. What lies beyond
+    256 KB is never read (a stated limit)."""
+    try:
         with open(p, "rb") as fh:
             return fh.read(262144).decode("utf-8", "replace")
     except OSError:
         return None
+
+
+PAID_FLAG = re.compile(r"--[A-Za-z0-9_-]+")   # a flag of paid_free: and of `only`: two dashes, then letters, digits, - or _
+
+
+def paid_glob(pat, s):
+    """`*` and `?` against one path part, nothing else is special. No regex is built per item (V9: 2,000 items must stay cheap), and
+    a part longer than any file name never matches (the work is its length times the pattern's)."""
+    if len(s) > 255:
+        return False
+    i = j = mark = 0
+    star = -1
+    while i < len(s):
+        if j < len(pat) and pat[j] == "*":
+            star, mark, j = j, i, j + 1
+        elif j < len(pat) and (pat[j] == "?" or pat[j] == s[i]):
+            i += 1
+            j += 1
+        elif star >= 0:
+            mark += 1
+            i, j = mark, star + 1
+        else:
+            return False
+    while j < len(pat) and pat[j] == "*":
+        j += 1
+    return j == len(pat)
+
+
+def paid_parts(spec):
+    """(parts, climbs, absolute) of one path spec of the adapter: a \\ is read as /, empty and `.` parts are dropped."""
+    s = spec.replace("\\", "/")
+    parts = [p for p in s.split("/") if p not in ("", ".")]
+    return parts, ".." in parts, s.startswith(("/", "~")) or bool(re.match(r"[A-Za-z]:", s))
+
+
+def paid_rel(p, base):
+    """p relative to base with / between parts, or None when p lies outside base (or on another drive)."""
+    try:
+        r = os.path.relpath(p, base).replace("\\", "/")
+    except ValueError:
+        return None
+    return None if r in (".", "..") or r.startswith("../") or r.startswith("/") or re.match(r"[A-Za-z]:", r) else r
+
+
+def paid_gentry(parts, flags):
+    """A pattern item with its cheap look-ahead: the literal text before its first * / ? and after its last, of the whole path and of
+    its last part (a start / end test in C rules most items out before the part-by-part match)."""
+    j = "/".join(parts)
+    k = [m.start() for m in re.finditer(r"[*?]", j)]
+    last = parts[-1]
+    lk = [m.start() for m in re.finditer(r"[*?]", last)]
+    return (parts, flags, j[:k[0]], j[k[-1] + 1:], last[:lk[0]] if lk else last, last[lk[-1] + 1:] if lk else last)
+
+
+class PaidCfg:
+    """What the adapter says about scripts, read once per command (F4b): the `paid_scripts:` items (a file name, or a project-relative
+    path or pattern, each with the flags of its `only`), the `paid_free:` items (flags and path patterns) and the names the go lines
+    cover. blind (V10): the command is not read cleanly, so no run is free."""
+    def __init__(self, adapter, project, blind=False):
+        self.project, self.blind, self.base = project, blind, None
+        self.ci = os.name == "nt" or sys.platform == "darwin"   # the file system's case rule, for the paid_free: paths
+        self.names, self.paths, self.pnames = {}, {}, {}        # literal items: file name / project-relative path / file name of a path item -> [flags or None]
+        self.gnames, self.gpaths = [], []                       # items with * or ?: paid_gentry
+        self.go = {paid_basename(g["script"]).lower() for g in map(paid_parse_go, paid_lines(adapter)) if g}   # a script with a go is a paid script
+        for item in adapter_list(adapter, "paid_scripts"):
+            self.add_item(item)
+        self.free_flags, self.free_paths = set(), []
+        for item in adapter_list(adapter, "paid_free"):
+            if item.startswith("-"):
+                if PAID_FLAG.fullmatch(item):                   # a single-dash item is ignored
+                    self.free_flags.add(item)
+                continue
+            parts, climbs, absolute = paid_parts(item)
+            if parts and not climbs and not absolute:           # an absolute or climbing item is ignored
+                self.free_paths.append([p.lower() if self.ci else p for p in parts])
+
+    def add_item(self, item):
+        """One `paid_scripts:` item: `<script>` or `<script> only <flag> [<flag> ...]`. An item that does not parse makes its first
+        word a script that is paid on every run."""
+        w = item.split()
+        flags = tuple(w[2:]) if len(w) >= 3 and w[1].lower() == "only" and all(PAID_FLAG.fullmatch(f) for f in w[2:]) else None
+        parts, climbs, absolute = paid_parts(w[0])
+        if not parts:
+            return
+        low = [p.lower() for p in parts]
+        wild = any(c in w[0] for c in "*?")
+        if "/" in w[0].replace("\\", "/") and not climbs and not absolute:   # a project-relative path or pattern
+            if wild:
+                self.gpaths.append(paid_gentry(low, flags))
+            else:
+                self.paths.setdefault("/".join(low), []).append(flags)
+                self.pnames.setdefault(low[-1], []).append(flags)
+        elif wild:                                                          # a file name with a pattern; an absolute or climbing item is read by its file name alone
+            self.gnames.append(paid_gentry(low[-1:], flags))
+        else:
+            self.names.setdefault(low[-1], []).append(flags)
+
+    def rels(self, p):
+        """(as written, resolved) project-relative paths of a file found, each None when it lies outside the project."""
+        if self.base is None:
+            b = os.path.abspath(native_path(self.project))
+            self.base = (b, os.path.realpath(b))
+        return paid_rel(os.path.abspath(p), self.base[0]), paid_rel(os.path.realpath(p), self.base[1])
+
+    @staticmethod
+    def gmatch(e, parts, joined):
+        return joined.startswith(e[2]) and joined.endswith(e[3]) and len(e[0]) == len(parts) and all(paid_glob(a, b) for a, b in zip(e[0], parts))
+
+    def script_items(self, name, files):
+        """The flags (a tuple, None for an item with no `only`) of every paid_scripts: item that matches this run of a script, [] when
+        none does. name: the file name of the script word; files: the files found for it. A file-name item matches in any folder and
+        any case. A path item is compared with the project-relative path of each file found, as written and resolved, in any case;
+        a script not found, or outside the project, is matched by its file name alone."""
+        low = name.lower()
+        out = list(self.names.get(low, ()))
+        out += [e[1] for e in self.gnames if self.gmatch(e, [low], low)]
+        if self.paths or self.gpaths:
+            rels = {r.lower() for p in files for r in self.rels(p) if r}
+            if rels:
+                for r in rels:
+                    out += self.paths.get(r, ())
+                    parts = r.split("/")
+                    out += [e[1] for e in self.gpaths if self.gmatch(e, parts, r)]
+            else:
+                out += self.pnames.get(low, ())
+                out += [e[1] for e in self.gpaths if low.startswith(e[4]) and low.endswith(e[5]) and paid_glob(e[0][-1], low)]
+        return out
+
+    def free_file(self, p):
+        """True when this found file, as written and resolved (links followed), lies inside the project and matches a paid_free: path."""
+        w, r = self.rels(p)
+        if not w or not r:
+            return False
+        for rel in (w, r):
+            parts = (rel.lower() if self.ci else rel).split("/")
+            if not any(len(pat) == len(parts) and all(paid_glob(a, b) for a, b in zip(pat, parts)) for pat in self.free_paths):
+                return False
+        return True
+
+
+def paid_flag_present(args, flags):
+    """True when the pay flag of an `only` item may be on the command line: a plain argument equal to a flag, the flag with =value, or
+    a shortened start of it that a parser accepts (--pa for --pay); or any argument that is not a plain literal."""
+    starts = {f[:k] for f in flags for k in range(3, len(f) + 1)}
+    for t in args:
+        if paid_not_plain(t):
+            return True
+        u = paid_unq(t)
+        if u.startswith("--") and len(u) > 2 and u.split("=", 1)[0] in starts:
+            return True
+    return False
+
+
+def paid_run_free(cfg, args, items, files, golisted):
+    """True when this one run of a paid script is free (the order of paid-guard-plan 8.4 F4b): a free flag among plain literal
+    arguments, before any bare --; else `only` (every matching item has it: free when no flag is there); else a free path (never for a
+    script that a paid_scripts: item lists or a go names). args: the raw words after the script word."""
+    if cfg.free_flags and not any(paid_not_plain(t) for t in args):
+        for t in args:
+            u = paid_unq(t)
+            if u == "--":
+                break
+            if u.split("=", 1)[0] in cfg.free_flags:
+                return True
+    if items:
+        return all(fl is not None for fl in items) and not paid_flag_present(args, {f for fl in items for f in fl})
+    return bool(files) and not golisted and bool(cfg.free_paths) and all(cfg.free_file(p) for p in files)
 
 
 def paid_stdin_bodies(cmd):
@@ -1970,12 +2144,15 @@ def paid_unwrap(toks):
     return toks, rep
 
 
-def paid_seg_hits(seg, hosts, cwd, names, depth=0, loop=False):
+def paid_seg_hits(seg, hosts, cwd, cfg, depth=0, loop=False):
     """[(signal, script, repeats)] for one command segment: layer 1 (the segment's own text), layer 2 (the script file it runs) unless
-    layer 1 hit, and every hit inside a bash -c string. repeats = it sits in a loop or runs under xargs / parallel / watch."""
-    toks, rep = paid_unwrap([next(g for g in a.groups() if g is not None) for a in PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():])])
+    layer 1 hit, and every hit inside a bash -c string. repeats = it sits in a loop or runs under xargs / parallel / watch. A run of a
+    paid script that is free (cfg, F4b) is no hit: it comes back as (None, script, False, its raw arguments) for paid_finish."""
+    ms = list(PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():]))
+    toks, rep = paid_unwrap([next(g for g in a.groups() if g is not None) for a in ms])
     if not toks:
         return []
+    raws = [a.group(0) for a in ms][len(ms) - len(toks):]   # the same words with their quotes, aligned with toks
     cmd = re.sub(r"\.exe$", "", paid_basename(toks[0]).lower())
     if cmd in PAID_MENTION:
         return []
@@ -1986,23 +2163,32 @@ def paid_seg_hits(seg, hosts, cwd, names, depth=0, loop=False):
         out.append((sig + " on the command line", cmd, rep))
     if path:
         name = paid_basename(path)
-        src = paid_read_script(path, cwd)
-        sig = paid_code_signal(src, hosts, True) if src else None
-        if sig:
-            out.append((f"{sig} in {name}", name, rep))
-        elif name.lower() in names:
-            out.append((f"{name} is in paid_scripts", name, rep))
+        files = paid_script_files(path, cwd)
+        sig = None
+        for f in files:                                                 # a signal in any file found makes the run paid
+            src = paid_read_file(f)
+            sig = paid_code_signal(src, hosts, True) if src else None
+            if sig:
+                break
+        items = cfg.script_items(name, files)
+        golisted = name.lower() in cfg.go
+        if sig or items or golisted:
+            args = raws[toks.index(path) + 1:]
+            if not cfg.blind and paid_run_free(cfg, args, items, files, golisted):
+                out.append((None, name, False, tuple(args)))
+            else:
+                out.append((f"{sig} in {name}" if sig else f"{name} is in paid_scripts", name, rep))
     if depth < 2 and cmd in ("bash", "sh", "zsh", "dash", "ksh") and "-c" in toks[1:-1]:   # bash -c "python render.py": judge the string too
-        out += paid_scan(paid_segments(toks[toks.index("-c") + 1]), hosts, cwd, names, depth + 1, rep)
+        out += paid_scan(paid_segments(toks[toks.index("-c") + 1], True), hosts, cwd, cfg, depth + 1, rep)
     return out
 
 
-def paid_scan(segs, hosts, cwd, names, depth=0, loop=False):
+def paid_scan(segs, hosts, cwd, cfg, depth=0, loop=False):
     """Every hit of these segments in order, flagged `repeats` when it stands between a for / while / until / select and its `done`."""
     out, d = [], 0
     for seg in segs:
         d += bool(PAID_LOOP_OPEN.match(seg))
-        out += paid_seg_hits(seg, hosts, cwd, names, depth, loop or d > 0)
+        out += paid_seg_hits(seg, hosts, cwd, cfg, depth, loop or d > 0)
         if PAID_LOOP_END.match(seg):
             d = max(0, d - 1)
     return out
@@ -2047,22 +2233,29 @@ def paid_parse_go(line):
     return g
 
 
-def paid_hit(cmd, text, cwd, adapter, blind=False):
-    """[(signal, script, repeats)] — EVERY paid signal in the command (stdin-heredoc bodies first, then each segment), [] when none.
+def paid_finish(raw):
+    """The hits as paid_verdict reads them: (signal, script, repeats, skip). The free runs the scan saw (signal None) are not hits. skip
+    = the raw arguments of the free runs of the hit's own script, so the count rule (paid_seg_args) reads the paid run's segment and
+    not the free run's. With no free run skip is empty and nothing differs from F3."""
+    free = [h for h in raw if h[0] is None]
+    return [(h[0], h[1], h[2], tuple(f[3] for f in free if h[1] and f[1].lower() == h[1].lower())) for h in raw if h[0] is not None]
+
+
+def paid_hit(cmd, text, cwd, adapter, blind=False, project=None):
+    """[(signal, script, repeats, skip)] — EVERY paid signal in the command (stdin-heredoc bodies first, then each segment), [] when none.
     text = the command with data heredocs stripped. blind (V10): the command is one the source check cannot read cleanly (complexity(),
     or over the heredoc scan cap): the HEREDOC pattern is not run (it rescans the text once per opener), and the whole text is searched
     for a paid word instead; a hit there has script None (no go can cover a command that was not read)."""
     extra = [h for h in adapter_list(adapter, "paid_hosts") if re.fullmatch(r"[\w.-]+", h)]
     hosts = paid_host_re(PAID_HOSTS + tuple(extra)) if extra else PAID_HOST
-    names = {paid_basename(s).lower() for s in adapter_list(adapter, "paid_scripts")}
-    names |= {paid_basename(g["script"]).lower() for g in map(paid_parse_go, paid_lines(adapter)) if g}   # a script with a go is a paid script
-    segs = paid_segments(text)
+    cfg = PaidCfg(adapter, project or cwd, blind)
+    segs = paid_segments(text, True)   # keep: a segment that ends at a backtick or ( keeps it, so a free flag beside `…` / $(…) is seen as not plain (as paid_seg_args reads it)
     looped = any(PAID_LOOP_OPEN.match(s) for s in segs)   # a body is not tied to a segment: any loop in the command makes it a repeat
     if blind:
         sig = paid_code_signal(cmd, hosts, True)
-        return ([(sig + " in a command that is not read cleanly", None, False)] if sig else []) + paid_scan(segs, hosts, cwd, names)
+        return paid_finish(([(sig + " in a command that is not read cleanly", None, False)] if sig else []) + paid_scan(segs, hosts, cwd, cfg))
     out = [(sig + " on the command line", interp, looped) for interp, body in paid_stdin_bodies(cmd) for sig in [paid_code_signal(body, hosts, True)] if sig]
-    return out + paid_scan(segs, hosts, cwd, names)
+    return paid_finish(out + paid_scan(segs, hosts, cwd, cfg))
 
 
 def paid_find_go(data, project, script, adapter):
@@ -2080,9 +2273,10 @@ def paid_find_go(data, project, script, adapter):
     return None
 
 
-def paid_seg_args(text, script, depth=0):
+def paid_seg_args(text, script, depth=0, skip=()):
     """The words after `script` in the command segment that runs it, RAW (quotes kept: unq() takes them off), up to the next && / || /
-    ; / |; a bash -c "…" string is searched the same way. None when no segment holds the script."""
+    ; / |; a bash -c "…" string is searched the same way. None when no segment holds the script. skip: the raw arguments of the free
+    runs of the script (paid_finish): a segment whose words are one of them is a free run and is passed over."""
     for seg in paid_segments(text, True):
         toks = [a.group(0) for a in PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():])]
         for i, t in enumerate(toks):
@@ -2092,9 +2286,11 @@ def paid_seg_args(text, script, depth=0):
                     if a in ("&&", "||", ";", "|"):
                         break
                     out.append(a)
+                if tuple(out) in skip:
+                    break
                 return out
         if depth < 2 and "-c" in toks[:-1]:
-            r = paid_seg_args(paid_unq(toks[toks.index("-c") + 1]), script, depth + 1)
+            r = paid_seg_args(paid_unq(toks[toks.index("-c") + 1]), script, depth + 1, skip)
             if r is not None:
                 return r
     return None
@@ -2181,7 +2377,7 @@ def paid_count(data, sdir, items, text, deadline=None):
         tid = re.sub(r"[^A-Za-z0-9._-]", "-", str(data.get("tool_use_id") or ""))
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         todo = []                                             # (index, go_id, entry, ok, marker) of the runs to count
-        for k, (go_id, go, script) in enumerate(items):
+        for k, (go_id, go, script, skip) in enumerate(items):
             marker = sdir / (f"paid.{tid}.done" if k == 0 else f"paid.{tid}.{go_id[-8:]}.done") if tid else None
             if marker and marker.exists():
                 continue                                      # this call was counted already (the other copy of the hook)
@@ -2196,7 +2392,7 @@ def paid_count(data, sdir, items, text, deadline=None):
             if used and not ok:
                 return False, f"run {used} of {runs} is done; the batch waits for the owner's \"test ok\" (typed in this session). Show the owner the one output first.", k
             if not ok and go["count"] != "none":
-                raw = paid_seg_args(text, script) or []
+                raw = paid_seg_args(text, script, 0, skip) or []
                 bad = next((t for t in raw if paid_not_plain(t)), None)
                 if bad:                                       # $X, `…`, a glob, @file: the real arguments are not the ones the guard sees
                     return False, f"first run after the go must make ONE output: its arguments must be plain literals (seen {clip(bad)}).", k
@@ -2279,7 +2475,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False):
     adapter, why = paid_adapter(project)
     if not strict and not PAID_ARM.search(adapter):
         return None
-    hits = paid_hit(cmd, text, cwd, adapter, blind)
+    hits = paid_hit(cmd, text, cwd, adapter, blind, project)
     if not hits:
         return None
     head = lambda h: f"paid call ({clip(h[0])}) — "
@@ -2304,7 +2500,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False):
                 again = next((h for h in hits if h[2] or low.count(h[1].lower()) > 1), None)
                 if again:
                     return (head(again) + f"a loop or repeat runs {clip(again[1])} more than once in one call; run it once per call so each run is counted.")
-                r = paid_count(data, paid_home() / ".claude" / "smartuse" / "projects" / paid_project_key(project), [(c[1], c[2], c[0][1]) for c in covered], text, deadline)
+                r = paid_count(data, paid_home() / ".claude" / "smartuse" / "projects" / paid_project_key(project), [(c[1], c[2], c[0][1], c[0][3]) for c in covered], text, deadline)
                 if r:
                     first = covered[r[2]][0]
                     why, rule = (r[1], "") if r[0] else ("", r[1])

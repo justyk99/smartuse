@@ -171,6 +171,35 @@ elif mode == "hostre":   # hostre GUARD: the linear host finder gives the same m
                "café." + a, "x." + a + "." + b, b + b, "." * 5 + b, ""]
     bad = [s[:30] for s in samples if [(m.start(), m.group(0)) for m in old.finditer(s)] != [(m.start(), m.group(0)) for m in new.finditer(s)]]
     print("ok" if not bad and sum(len(list(old.finditer(s))) for s in samples) >= 15 else "differs on %s" % bad)
+elif mode == "ftime":    # ftime GUARD PROJECT: the F4b readers inside the process, each text under 32 KB and decided in under 1 s with the verdict the cases show
+    import os, time
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "ftime"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    proj, bad = sys.argv[3], []
+    os.makedirs(os.path.join(proj, ".claude"), exist_ok=True); os.makedirs(os.path.join(proj, "tools"), exist_ok=True)
+    open(os.path.join(proj, "tools", "entry.py"), "w").write("print(1)\n")
+    open(os.path.join(proj, "render.py"), "w").write("import " + "open" + "ai\n")   # a paid script, the SDK name never spelled whole here
+    ev = {"cwd": proj, "tool_use_id": "toolu_ft"}
+    def verdict(c, adapter):
+        open(os.path.join(proj, ".claude", "smartuse.local.md"), "w").write(adapter)
+        return ns["paid_verdict"](ev, c, c, True, None)
+    def check(name, c, adapter, want_none):
+        assert len(c) < 32768, name
+        t0 = time.monotonic(); r = verdict(c, adapter); dt = time.monotonic() - t0
+        if dt >= 1.0:
+            bad.append("%s: %.2f s" % (name, dt))
+        if (r is None) != want_none:
+            bad.append("%s: verdict %r" % (name, r and r[:60]))
+    items = (["tools/entry.py only --pay"] + ["n%d.py only --a%d" % (i, i) for i in range(700)] + ["d%d/p%d.py only --b%d" % (i, i, i) for i in range(700)]
+             + ["g%d/*_%d.py only --c%d" % (i, i, i) for i in range(600)])
+    ad = "paid_scripts: " + ", ".join(items) + "\n"
+    check("2,000 paid_scripts items, 30 KB of arguments, no pay flag", "python tools/entry.py " + "--zz " * 5000, ad, True)
+    check("2,000 paid_scripts items, 30 KB of arguments, the pay flag last", "python tools/entry.py " + "--zz " * 5000 + "--pay", ad, False)
+    fr = "paid_free: " + ", ".join("--ff%d" % i for i in range(1000)) + ", --dry-run\n"
+    check("1,000 free flags, 30 KB of free words", "python render.py " + "--dry-run " * 3000, fr, True)
+    check("1,000 free flags, 30 KB of words that are not", "python render.py " + "--ff " * 6000, fr, False)
+    check("1,200 distinct script runs against the 2,000 items", ";".join("python tools/e%d.py" % i for i in range(1200)), ad, True)
+    print("ok" if not bad else "; ".join(bad))
 PY
 CW=$(wp "$D/chk.py")
 
@@ -692,4 +721,166 @@ mkdir -p "$D/pt"
 r=$(py "$CW" ptime "$(wp "$G")" "$(wp "$D/pt")" </dev/null 2>&1)
 [ "$r" = ok ] && ok "four ordinary commands under 5 ms each, a 256 KB script with no signal under 50 ms, five 30 KB texts (dotted host run, key names, SDK imports, the segment splitter, the count-flag reader) under 1 s each" || ko "paid-path timing: $r"
 [ "$(py "$CW" hostre "$(wp "$G")" </dev/null 2>&1)" = ok ] && ok "the linear host finder (a pattern that took 30 s on 28 KB of a.a.a.) gives the same matches, text and place, as the pattern it replaced: 23 short texts, subdomains, glued and look-alike hosts" || ko "host finder: $(py "$CW" hostre "$(wp "$G")" </dev/null 2>&1 | tail -1)"
+# ===== 25. 0.7.0 F4b: free runs (paid_free: flags and paths), pay flags (`only` on a paid_scripts: item), entry scripts (paths and patterns). Step 1 (the folder lookup, D-YK13) is not built: a script is the file under the event's cwd
+mkat() { # $1 = a path under the project (always with a folder), $2 = key | sdk | none: a script that names a paid key, a paid SDK, or nothing paid
+  mkdir -p "$(dirname "$D/proj/$1")"
+  case "$2" in
+    key) printf 'import os\nK = os.environ["%s_API_KEY"]\nprint("check")\n' OPENAI > "$D/proj/$1";;
+    sdk) printf '%s\nprint("x")\n' "$IMP" > "$D/proj/$1";;
+    *) printf 'print("x")\n' > "$D/proj/$1";;
+  esac
+}
+nostate() { [ ! -e "$P" ] && ok "$1" || ko "$1 -- state was written: $(ls "$P" 2>&1)"; }   # a free run touches nothing: no state dir at all
+mkf4() { mkpaid; mkat tools/entry.py none; mkat other/entry.py none; mkat tools/x_job.py none; mkat tools/x_run.py none; mkat other/x_job.py none
+  mkat tests/check_a.py key; mkat tools/check_a.py key; mkat tests/sub/check_b.py key; mkat tests/check_p.py none; mkat pay.py sdk; mkat sub/client.py sdk; }
+
+# --- 25a. paid_free: flags. A run of a paid script whose plain literal arguments hold a free flag is free: allowed, not counted, no go needed
+fresh; mkf4; adapter 'paid_free: --dry-run, --mock\n'
+allow "free flag: python render.py --dry-run runs with no go, nothing printed" 'python render.py --dry-run' toolu_f1
+nostate "... and writes no state (no state dir, no claim marker)"
+allow "... the second listed flag (--mock) too" 'python render.py --mock --prompt cat' toolu_f2
+deny "... a run with no free flag is still refused" 'python render.py --n 1' 'no go from the owner for render.py'
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1, count none\npaid_free: --dry-run\n'
+allow "free flag with a go: the paying run passes and counts" 'python render.py --n 1' toolu_f3
+allow "... a dry run after it passes" 'python render.py --dry-run' toolu_f4
+[ "$(used)" = 1 ] && ok "... and is not counted: used stays 1" || ko "used after a free run: $(used) $(cat "$R" 2>&1)"
+[ ! -e "$P/paid.toolu_f4.done" ] && ok "... no claim marker for the free run" || ko "a free run left a marker: $(ls "$P")"
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+allow "free flag --flag=value" 'python render.py --dry-run=1' toolu_f5
+allow "... a free flag in quotes (a plain literal)" 'python render.py "--dry-run"' toolu_f5b
+deny "a \$VAR beside the free flag: not free" 'python render.py --dry-run $EXTRA' 'no go from the owner for render.py'
+deny "a glob beside the free flag: not free" 'python render.py --dry-run *.png' 'no go from the owner for render.py'
+deny "a command substitution beside the free flag: not free" 'python render.py --dry-run `echo x`' 'no go from the owner for render.py'
+deny "the free flag after a bare --: not free" 'python render.py -- --dry-run' 'no go from the owner for render.py'
+deny "a shortened spelling (--dry) is not the flag" 'python render.py --dry' 'no go from the owner for render.py'
+deny "a look-alike (--dry-runs) is not the flag" 'python render.py --dry-runs' 'no go from the owner for render.py'
+deny "a look-alike (--dry-run-x) is not the flag" 'python render.py --dry-run-x' 'no go from the owner for render.py'
+deny "a free flag glued to something (--no-dry-run) is not the flag" 'python render.py --no-dry-run' 'no go from the owner for render.py'
+fresh; mkf4; adapter 'paid_free: -d\n'
+deny "a single-dash item is ignored: -d frees nothing" 'python render.py -d' 'no go from the owner for render.py'
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+allow "inside bash -c \"...\" the free flag frees" 'bash -c "python render.py --dry-run"' toolu_f6
+allow "a literal loop of free runs is allowed (no hit, so no repeat)" 'for i in 1 2; do python render.py --dry-run; done' toolu_f7
+allow "two free runs in one command are two free runs (no same-script-twice rule)" 'python render.py --dry-run && python render.py --dry-run' toolu_f8
+nostate "... nothing written"
+allow "a free run behind a wrapper (timeout 60 ...)" 'timeout 60 python render.py --dry-run' toolu_f9
+deny "a tagged command (V10, three substitutions) frees nothing" 'echo $(date) $(pwd) $(id); python render.py --dry-run' 'no go from the owner for render.py'
+guardx PowerShell "$(tin 'python render.py --dry-run')" toolu_f10; [ -z "$OUT" ] && [ -z "$ERR" ] && ok "the PowerShell tool: a free flag frees the same way" || ko "PowerShell free run: '$OUT' '$ERR'"
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+inlight allow "light, armed by paid_free: a free run passes silently" 'python render.py --dry-run' toolu_f11
+inlight deny "light, armed by paid_free: a run with no free flag is refused" 'python render.py --n 1' 'no go from the owner for render.py'
+
+# --- 25b. paid_free: paths. A script at a project-relative path that matches is free; a script that is also listed or has a go is never free by path
+fresh; mkf4; adapter 'paid_free: tests/check_*.py\n'
+allow "free path: tests/check_*.py frees a check that names a key" 'python tests/check_a.py' toolu_p1
+nostate "... and writes no state"
+deny "... the same name under tools/ is not freed" 'python tools/check_a.py' 'no go from the owner for check_a.py'
+deny "... * does not cross a folder (tests/sub/check_b.py)" 'python tests/sub/check_b.py' 'no go from the owner for check_b.py'
+fresh; mkf4; adapter 'paid_scripts: check_missing.py\npaid_free: tests/check_*.py\n'
+deny "a script that is listed but not found is never free by path" 'python tests/check_missing.py' 'check_missing.py is in paid_scripts'
+case "$PW" in [A-Za-z]:/*)   # a \ in a path needs the Windows file system rules (the same word on POSIX is an escape)
+  fresh; mkf4; adapter 'paid_free: tests\\check_*.py\n'
+  allow "a \\ in the item and in the script word (Windows spelling)" 'python tests\check_a.py' toolu_p2;;
+*) ok "a \\ in the item and the script word: skipped (not Windows)";; esac
+fresh; mkf4; adapter "paid_free: $PW/tests/check_*.py, ../tests/check_*.py, ~/tests/check_*.py\n"
+deny "an absolute, a climbing and a ~ item are ignored: nothing is freed" 'python tests/check_a.py' 'no go from the owner for check_a.py'
+fresh; mkf4; adapter 'paid_free: tests/check_*.py\n'
+allow "the script by an absolute path inside the project is freed" "python $PW/tests/check_a.py" toolu_p3
+mkdir -p "$D/elsewhere/tests"; cp "$D/proj/tests/check_a.py" "$D/elsewhere/tests/check_a.py"
+deny "... one outside the project is not" "python $(wp "$D/elsewhere")/tests/check_a.py" 'no go from the owner for check_a.py'
+fresh; mkf4; adapter 'paid_free: tests/*.py\n'
+rm -f "$D/proj/tests/link.py"; ln -s "$D/proj/tools/check_a.py" "$D/proj/tests/link.py" 2>/dev/null
+if [ -L "$D/proj/tests/link.py" ]; then
+  deny "a link under tests/ to a paying script elsewhere is not freed (resolved, it is outside the pattern)" 'python tests/link.py' 'no go from the owner for link.py'
+else ok "a link to a paying script: skipped (no link can be made here)"; fi
+rm -f "$D/proj/tests/link.py"
+fresh; mkf4; adapter 'paid_scripts: check_p.py\npaid_free: tests/check_*.py\n'
+deny "a script that is also listed in paid_scripts: stays paid" 'python tests/check_p.py' 'check_p.py is in paid_scripts'
+fresh; mkf4; adapter 'paid_scripts: check_p.py\npaid_free: --dry-run, tests/check_*.py\n'
+allow "... a free flag still frees it" 'python tests/check_p.py --dry-run' toolu_p4
+nostate "... with no state written"
+fresh; mkf4; adapter 'paid: check_p.py x 3, cap RM1, count none\npaid_free: tests/check_*.py\n'
+allow "a script named by a go line is not free by path: it runs on its go ..." 'python tests/check_p.py' toolu_p5
+[ "$(used)" = 1 ] && ok "... and is counted: used 1" || ko "go + free path: $(cat "$R" 2>&1)"
+
+# --- 25c. paid_scripts: items, `only`
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py\n'
+guard 'python tools/entry.py' toolu_i0; case "$OUT" in *'entry.py is in paid_scripts'*) ok "a path item denies its script (entry.py is in paid_scripts)";; *) ko "path item: '$OUT' '$ERR'";; esac
+allow "... and allows the same name in another folder" 'python other/entry.py' toolu_i1
+fresh; mkf4; adapter 'paid_scripts: tools/*_job.py\n'
+guard 'python tools/x_job.py' toolu_i2; case "$OUT" in *'x_job.py is in paid_scripts'*) ok "a pattern item denies a script it matches";; *) ko "pattern item: '$OUT' '$ERR'";; esac
+allow "... not a script it does not match" 'python tools/x_run.py' toolu_i3
+allow "... nor the same name in another folder" 'python other/x_job.py' toolu_i4
+fresh; mkf4; adapter 'paid_scripts: entry.py\n'
+guard 'python tools/entry.py' toolu_i5; case "$OUT" in *'entry.py is in paid_scripts'*) ok "a file-name item matches in any folder, as F3 built it (tools/)";; *) ko "name item: '$OUT' '$ERR'";; esac
+guard 'python other/entry.py' toolu_i6; case "$OUT" in *'entry.py is in paid_scripts'*) ok "... and in the other folder";; *) ko "name item, other folder: '$OUT' '$ERR'";; esac
+fresh; mkf4; adapter 'paid_scripts: tools\\entry.py\n'
+guard 'python tools/entry.py' toolu_i7; case "$OUT" in *'entry.py is in paid_scripts'*) ok "a path item with a \\ matches the same path";; *) ko "backslash item: '$OUT' '$ERR'";; esac
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "only --pay: no flag, the run is free: allowed with no go" 'python tools/entry.py --out a.png' toolu_o1
+nostate "... and writes no state"
+deny "only --pay: with the flag the run is refused without a go" 'python tools/entry.py --pay' 'no go from the owner for entry.py'
+deny "only: the flag with a value (--pay=yes) is the flag" 'python tools/entry.py --pay=yes' 'no go from the owner for entry.py'
+deny "only: a shortened start of the flag (--pa) is the flag, a parser accepts it" 'python tools/entry.py --pa' 'no go from the owner for entry.py'
+deny "only: a \$VAR with the flag absent may hold it" 'python tools/entry.py $X' 'no go from the owner for entry.py'
+deny "only: a glob with the flag absent may hold it" 'python tools/entry.py *.json' 'no go from the owner for entry.py'
+allow "only: a different flag is not the flag (--payload is no start of --pay)" 'python tools/entry.py --payload x' toolu_o2
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\npaid: entry.py x 3, cap RM1, count none\n'
+allow "only with a go: the run without the flag is free" 'python tools/entry.py' toolu_o3
+nostate "... nothing counted"
+allow "only with a go: the run with the flag passes on the go" 'python tools/entry.py --pay' toolu_o4
+[ "$(used)" = 1 ] && ok "... and counts: used 1" || ko "only + go: $(cat "$R" 2>&1)"
+fresh; mkf4; adapter 'paid_scripts: pay.py only --pay\n'
+allow "only on a script whose source holds a signal: no flag, free" 'python pay.py --n 1' toolu_o5
+deny "... with the flag, the signal in the source is named" 'python pay.py --pay' 'in pay.py'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay --polish\n'
+allow "several flags: none present is free" 'python tools/entry.py' toolu_o6
+deny "... the second one denies" 'python tools/entry.py --polish' 'no go from the owner for entry.py'
+deny "... the first one denies" 'python tools/entry.py --pay' 'no go from the owner for entry.py'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay, entry.py\n'
+deny "a second item for the script without only makes it paid on every run" 'python tools/entry.py' 'no go from the owner for entry.py'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\npaid_free: --dry-run\n'
+allow "a pay flag beside a free flag is free" 'python tools/entry.py --pay --dry-run' toolu_o7
+nostate "... and writes no state"
+for bad in 'tools/entry.py only' 'tools/entry.py only -p' 'tools/entry.py only --pay more' 'tools/entry.py only pay'; do
+  fresh; mkf4; adapter "paid_scripts: $bad\n"
+  deny "an item that does not parse ($bad) is paid on every run (the first word is the script)" 'python tools/entry.py' 'no go from the owner for entry.py'
+done
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1, only --pay\n'
+allow "only on a go line is not read: the go stands and the script is paid on every run (the run counts)" 'python render.py --n 1' toolu_o8
+[ "$(used)" = 1 ] && ok "... used 1" || ko "only on a go line: $(cat "$R" 2>&1)"
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py\n'
+deny "a path item and a script word from a variable match by file name" 'python $S/entry.py' 'entry.py is in paid_scripts'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "... with only, the variable word and no flag: free" 'python $S/entry.py' toolu_o9
+deny "... with the flag: refused" 'python $S/entry.py --pay' 'no go from the owner for entry.py'
+fresh; mkf4; adapter 'paid_scripts: tools/missing.py only --pay\n'
+deny "a script that is not found is matched by file name alone (with the flag)" 'python tools/missing.py --pay' 'no go from the owner for missing.py'
+
+# --- 25d. one command, a free run and a paid run of one script: the count rule reads the paid run's arguments
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1\npaid_free: --dry-run\n'
+allow "a free run then the first paid run with --n 1: passes" 'python render.py --dry-run && python render.py --n 1' toolu_c1
+[ "$(used)" = 1 ] && ok "... one run counted: used 1" || ko "free then paid: $(cat "$R" 2>&1)"
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1\npaid_free: --dry-run\n'
+deny "a free run then a paid run with --n 6: the count rule reads the paid run (seen --n 6)" 'python render.py --dry-run && python render.py --n 6' 'seen --n 6;' toolu_c2
+[ ! -e "$R" ] && [ ! -e "$P/paid.toolu_c2.done" ] && ok "... and nothing is counted" || ko "a count-rule deny left state: $(ls "$P" 2>&1)"
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1\npaid_free: --dry-run\n'
+allow "a paid run first, then a free run: passes" 'python render.py --n 1 && python render.py --dry-run' toolu_c3
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+deny "a free run and a paid run, no go: the paid run is named" 'python render.py --dry-run; python render.py --n 1' 'no go from the owner for render.py'
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1\npaid_free: --dry-run\n'
+deny "two paid runs and a free one are still a repeat" 'python render.py --n 1 && python render.py --dry-run && python render.py --n 1' 'a loop or repeat runs render.py more than once'
+
+# --- 25e. pins: what F3 did stays (no new key, or a new key with no free run)
+fresh; mkf4; adapter 'paid: render.py x 3, cap RM1\n'
+deny "pin: with no paid_free:, --dry-run is a paid run like any other (the count rule: no count flag)" 'python render.py --dry-run' 'first run after the go must make ONE output'
+deny "pin: a mention of the script before the run is still the segment the count rule reads (F3)" 'echo render.py; python render.py --n 1' 'seen no count flag'
+cf "pin: a shortened count flag on its own is refused (no count flag): --num-im 1" 'python render.py --num-im 1' deny '' 'seen no count flag'
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+inlight deny "pin: a paid_free: line with no free run in the command still arms light" 'python render.py --n 1' 'no go from the owner for render.py'
+
+# ===== 26. timing for the F4b readers, inside the process: 2,000 paid_scripts: items against a 30 KB argument list, 1,000 free flags against 30 KB of free words, 1,500 distinct script runs against the items
+mkdir -p "$D/ft"
+r=$(py "$CW" ftime "$(wp "$G")" "$(wp "$D/ft")" </dev/null 2>&1)
+[ "$r" = ok ] && ok "F4b timing: each 30 KB text is decided in under 1 s, with the verdicts the cases above show" || ko "F4b timing: $r"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
