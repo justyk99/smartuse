@@ -239,6 +239,46 @@ elif mode == "pstime":   # pstime GUARD PROJECT: F6, PowerShell texts through th
         if (r is None) != none:
             bad.append("%s: verdict %r" % (nm, r and r[:60]))
     print("ok" if not bad else "; ".join(bad))
+elif mode == "fxtime":   # fxtime GUARD PROJECT: the F4b fix readers inside the process (Bash texts, then PowerShell texts), each under 32 KB and decided in under 1 s with the verdict the cases show
+    import os, time
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "fxtime"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    proj, bad = sys.argv[3], []
+    for d in (".claude", "tools", "tests"):
+        os.makedirs(os.path.join(proj, d), exist_ok=True)
+    open(os.path.join(proj, "tools", "entry.py"), "w").write("print(1)\n")
+    open(os.path.join(proj, "render.py"), "w").write("import " + "open" + "ai\n")   # a paid script, the SDK name never spelled whole here
+    open(os.path.join(proj, "warm.py"), "w").write("print(1)\n")
+    ev = {"cwd": proj, "tool_use_id": "toolu_fx"}
+    def check(name, c, adapter, want_none, ps=False):
+        assert len(c) < 32768, (name, len(c))
+        open(os.path.join(proj, ".claude", "smartuse.local.md"), "w").write(adapter)
+        t0 = time.monotonic(); r = ns["paid_verdict"](ev, c, ns["ps_text"](c) if ps else c, True, None, False, ps); dt = time.monotonic() - t0
+        if dt >= 1.0:
+            bad.append("%s: %.2f s" % (name, dt))
+        if (r is None) != want_none:
+            bad.append("%s: verdict %r" % (name, r and r[:60]))
+    only = "paid_scripts: tools/entry.py only --pay\n"
+    free = "paid_free: --dry-run, tests/*.py\n"
+    check("cd words, then a paid run, a free path and a free flag listed", "cd a; " * 5000 + "python render.py --n 1", free, False)
+    check("30 KB of glued quoted words against an only item", "python tools/entry.py " + "'a'b " * 5000, only, False)
+    check("30 KB of glued free flags", "python render.py " + "'--dry-run'x " * 2400, free, False)
+    check("30 KB of words with a backslash", "python render.py " + "--dry\\-run " * 2700, free, False)
+    check("30 KB of false free-flag values", "python render.py " + "--dry-run=no " * 2300, free, False)
+    check("xargs with 30 KB of arguments", "printf x | xargs python tools/entry.py " + "--zz " * 5000, only, False)
+    check("one mention with 2,000 substitutions", "echo notes.py " + '"$(echo x)" ' * 2000, "", True)
+    check("1,500 mentions with a substitution, then a paid run", 'echo "$(echo x)"; ' * 1500 + "python render.py --n 1", "", False)
+    check("2,000 nested substitutions around a paid run", 'echo "$(' * 2000 + "python render.py" + ')"' * 2000, "", False)
+    check("2,000 nested substitutions, no paid run", 'echo "$(' * 2000 + "notes.py" + ')"' * 2000, "", True)
+    check("a back-tick word in 30 KB of mentions", 'echo "`echo x`" ' * 1900 + "notes.py", "", True)
+    check("PowerShell: 5,000 chained assignments, then a paid run", "$a = " * 5000 + "python render.py", "", False, True)
+    check("PowerShell: 5,000 Start-Process parameters the guard does not know", "Start-Process " + "-Foo " * 5000 + "python warm.py", "", False, True)
+    check("PowerShell: 5,000 Start-Process prefixes it does know", "Start-Process python -ArgumentList warm.py " + "-Wai " * 5000, "", True, True)
+    check("PowerShell: 1,200 script blocks after pipes, no paid run", "1..3 | Foo-Bar { $_ }; " * 1200 + "python warm.py", "", True, True)
+    check("PowerShell: 1,500 nested blocks after pipes around a paid run", "1..3 | Foo { " * 1500 + "python render.py --n 1" + " }" * 1500, "", False, True)
+    check("PowerShell: 1,800 Set-Location words, then a paid run", "Set-Location a; " * 1800 + "python render.py", free, False, True)
+    check("PowerShell: 1,000 mentions with a substitution, no paid run", 'Write-Output "$(Get-Date)"; ' * 1000 + "python warm.py", "", True, True)
+    print("ok" if not bad else "; ".join(bad))
 PY
 CW=$(wp "$D/chk.py")
 
@@ -1066,4 +1106,204 @@ PGTOOL=Bash
 mkdir -p "$D/pst"
 r=$(py "$CW" pstime "$(wp "$G")" "$(wp "$D/pst")" </dev/null 2>&1)
 [ "$r" = ok ] && ok "F6 timing: four ordinary PowerShell commands under 5 ms each, ten 30 KB PowerShell texts decided in under 1 s with the verdicts the cases above show" || ko "F6 timing: $r"
+
+# ===== 29. 0.7.0 F4b fix round (automated security review): every case here moves a run toward paid or scanned, never toward free
+# --- 29a. a word that is not plain is never a free flag, and never missing from an `only` check (a backslash, a quote that is not the one outer pair, quoted text glued to other text)
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+allow "29a pin: the plain free flag still frees" 'python render.py --dry-run' toolu_n1
+allow "29a pin: ... one outer pair of double quotes" 'python render.py "--dry-run"' toolu_n2
+allow "29a pin: ... one outer pair of single quotes" "python render.py '--dry-run'" toolu_n3
+deny "29a: \"--dry\"-run (quoted text glued to text) is not free" 'python render.py "--dry"-run' 'no go from the owner for render.py'
+deny "29a: --dry-run\\ (a trailing backslash) is not free" 'python render.py --dry-run\' 'no go from the owner for render.py'
+deny "29a: --dry\\-run (a backslash inside) is not free" 'python render.py --dry\-run' 'no go from the owner for render.py'
+deny "29a: '--dry-run'x (glued after the quotes) is not free" "python render.py '--dry-run'x" 'no go from the owner for render.py'
+deny "29a: \"--dry-run\"x is not free" 'python render.py "--dry-run"x' 'no go from the owner for render.py'
+deny "29a: x\"--dry-run\" (glued before the quotes) is not free" 'python render.py x"--dry-run"' 'no go from the owner for render.py'
+deny "29a: --dry-run\"\" (empty quotes glued on) is not free" 'python render.py --dry-run""' 'no go from the owner for render.py'
+deny "29a: --dry-run'' is not free" "python render.py --dry-run''" 'no go from the owner for render.py'
+deny "29a: a quote inside the outer pair is not free" "python render.py \"--dry-run'\"" 'no go from the owner for render.py'
+deny "29a: a word that reads as a bare -- ends the look (\\-\\- then the flag)" 'python render.py \-\- --dry-run' 'no go from the owner for render.py'
+PGTOOL=PowerShell
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+allow "29a PS pin: the plain free flag still frees" 'python render.py --dry-run' toolu_n4
+deny "29a PS: --dry-run\\ is read with / for \\ (--dry-run/): not the flag, not free" 'python render.py --dry-run\' 'no go from the owner for render.py'
+deny "29a PS: \"--dry\"-run is not free" 'python render.py "--dry"-run' 'no go from the owner for render.py'
+deny "29a PS: '--dry-run'x is not free" "python render.py '--dry-run'x" 'no go from the owner for render.py'
+deny "29a PS: --dry-run\"\" is not free" 'python render.py --dry-run""' 'no go from the owner for render.py'
+PGTOOL=Bash
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "29a only pin: no pay flag, free" 'python tools/entry.py --out a.png' toolu_n5
+allow "29a only pin: a quoted value with a blank is plain" 'python tools/entry.py --prompt "a cat" --out a.png' toolu_n6
+deny "29a only: --pa\\y (the shell reads --pay) is paid" 'python tools/entry.py --pa\y' 'no go from the owner for entry.py'
+deny "29a only: --pay\\ is paid" 'python tools/entry.py --pay\' 'no go from the owner for entry.py'
+deny "29a only: --pay\"\" is paid" 'python tools/entry.py --pay""' 'no go from the owner for entry.py'
+deny "29a only: --pa\"\"y is paid" 'python tools/entry.py --pa""y' 'no go from the owner for entry.py'
+deny "29a only: --pa'y' is paid" "python tools/entry.py --pa'y'" 'no go from the owner for entry.py'
+deny "29a only: '--pay'x is paid" "python tools/entry.py '--pay'x" 'no go from the owner for entry.py'
+deny "29a only: \"--p\"ay is paid" 'python tools/entry.py "--p"ay' 'no go from the owner for entry.py'
+deny "29a only: a Windows-looking word with a backslash may hold it" 'python tools/entry.py --out C:\x\a.png' 'no go from the owner for entry.py'
+PGTOOL=PowerShell
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "29a PS only pin: no flag, free" 'python tools\entry.py --out a.png' toolu_n7
+deny "29a PS only: --pa\"\"y is paid" 'python tools\entry.py --pa""y' 'no go from the owner for entry.py'
+deny "29a PS only: the backtick is PowerShell's escape (--pa\`y is --pay)" 'python tools\entry.py --pa`y' 'no go from the owner for entry.py'
+allow "29a PS only (pinned): a trailing \\ is read as / and is part of the word, not the flag: free" 'python tools\entry.py --pay\' toolu_n8
+PGTOOL=Bash
+
+# --- 29b. arguments from outside: under xargs / parallel / watch an `only` script is paid whatever flags it shows; a free flag still frees it
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "29b pin: the run alone, no pay flag: free" 'python tools/entry.py --out a.png' toolu_x1
+deny "29b: printf -- --pay | xargs python tools/entry.py is paid" 'printf -- --pay | xargs python tools/entry.py' 'no go from the owner for entry.py'
+deny "29b: echo --pay | xargs python tools/entry.py is paid" 'echo --pay | xargs python tools/entry.py' 'no go from the owner for entry.py'
+deny "29b: ... with a flag that is not the pay flag" 'echo --pay | xargs python tools/entry.py --out a.png' 'no go from the owner for entry.py'
+deny "29b: xargs -n 1 (options of xargs)" 'printf -- --pay | xargs -n 1 python tools/entry.py' 'no go from the owner for entry.py'
+deny "29b: parallel" 'printf -- --pay | parallel python tools/entry.py' 'no go from the owner for entry.py'
+deny "29b: watch" 'watch python tools/entry.py' 'no go from the owner for entry.py'
+deny "29b: xargs sh -c \"...\" hands the arguments down" 'printf -- --pay | xargs sh -c "python tools/entry.py"' 'no go from the owner for entry.py'
+deny "29b: timeout around xargs" 'printf -- --pay | timeout 60 xargs python tools/entry.py' 'no go from the owner for entry.py'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\npaid_free: --dry-run\n'
+allow "29b: the free flag visible on the line still frees it under xargs" 'printf -- --pay | xargs python tools/entry.py --dry-run' toolu_x2
+nostate "... and writes no state"
+deny "29b: the free flag with a false value does not" 'printf -- --pay | xargs python tools/entry.py --dry-run=no' 'no go from the owner for entry.py'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\npaid: entry.py x 3, cap RM1, count none\n'
+deny "29b: with a go, xargs is still a repeat (denied whatever the counter says)" 'printf -- --pay | xargs python tools/entry.py' 'a loop or repeat runs entry.py more than once'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "29b pin: a literal loop of runs with no pay flag is not an outside source" 'for i in 1 2; do python tools/entry.py --out a.png; done' toolu_x3
+
+# --- 29c. after a folder change (cd, pushd, Set-Location, env -C) no paid_free: path frees a run, and a paid_scripts: path item matches by file name alone; a free flag still frees
+fresh; mkf4; adapter 'paid_free: tests/check_*.py\n'
+allow "29c pin: the plain run of the free path is free" 'python tests/check_a.py' toolu_m0
+nostate "... and writes no state"
+for c in 'cd sub && python tests/check_a.py' 'cd sub; python tests/check_a.py' 'pushd sub; python tests/check_a.py' 'cd sub || exit 1; python tests/check_a.py' 'builtin cd sub && python tests/check_a.py' 'cd sub; echo ok; python tests/check_a.py' \
+         'env -C sub python tests/check_a.py' 'env --chdir=sub python tests/check_a.py' 'env --chdir sub python tests/check_a.py' 'env -Csub python tests/check_a.py' 'bash -c "cd sub && python tests/check_a.py"' \
+         '(cd sub && python tests/check_a.py)' 'for d in a b; do python tests/check_a.py; cd $d; done'; do
+  deny "29c: $c is not free by path" "$c" 'no go from the owner for check_a.py'
+done
+allow "29c pin: a cd after the run does not matter" 'python tests/check_a.py && cd sub' toolu_m1
+allow "29c pin: another command that is not a folder change" 'ls sub && python tests/check_a.py' toolu_m2
+fresh; mkf4; adapter 'paid_free: --dry-run, tests/check_*.py\n'
+allow "29c: a free flag still frees after a cd" 'cd sub && python tests/check_a.py --dry-run' toolu_m3
+nostate "... and writes no state"
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py\n'
+allow "29c pin: a path item does not match another folder's file" 'python other/entry.py' toolu_m4
+deny "29c: after a cd the path item matches by file name alone" 'cd sub && python other/entry.py' 'entry.py is in paid_scripts'
+fresh; mkf4; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "29c: with only, the cd run with no flag is free" 'cd sub && python other/entry.py --out a.png' toolu_m5
+deny "29c: with only, the cd run with the flag is paid (matched by name)" 'cd sub && python other/entry.py --pay' 'no go from the owner for entry.py'
+PGTOOL=PowerShell
+fresh; mkf4; adapter 'paid_free: tests/check_*.py\n'
+allow "29c PS pin: the plain run of the free path is free" 'python tests/check_a.py' toolu_m6
+for c in 'Set-Location sub; python tests/check_a.py' 'sl sub; python tests/check_a.py' 'chdir sub; python tests/check_a.py' 'cd sub; python tests/check_a.py' 'Push-Location sub; python tests/check_a.py' 'Set-Location sub && python tests/check_a.py' 'Set-Location -Path sub; python tests\check_a.py'; do
+  deny "29c PS: $c is not free by path" "$c" 'no go from the owner for check_a.py'
+done
+PGTOOL=Bash
+
+# --- 29d. a free flag with a value: free only as the bare word, or =1 / =true / =yes (any case)
+fresh; mkf4; adapter 'paid_free: --dry-run\n'
+for v in 1 true yes TRUE Yes tRuE; do
+  allow "29d: --dry-run=$v is free" "python render.py --dry-run=$v" toolu_v1
+done
+nostate "... and writes no state"
+for v in false 0 no False NO FALSE '' 2 off 11 'yes!'; do
+  deny "29d: --dry-run=$v is not free" "python render.py --dry-run=$v" 'no go from the owner for render.py'
+done
+deny "29d: a quoted false value is not free" 'python render.py "--dry-run=false"' 'no go from the owner for render.py'
+deny "29d: a false value beside another flag is not free" 'python render.py --dry-run=false --n 1' 'no go from the owner for render.py'
+allow "29d: a false value and then the bare flag: the bare flag frees" 'python render.py --dry-run=false --dry-run' toolu_v2
+
+# --- 29e. a mention, a double-quoted word or an assignment does not hide a command substitution (bash and PowerShell)
+fresh; mkf4; mkplain polish
+for c in 'echo "$(python render.py)"' 'git log "$(python render.py)"' 'echo $(python render.py)' '(python render.py)' 'X=$(python render.py)' 'export X="$(python render.py)"' \
+         'echo `python render.py`' 'echo "`python render.py`"' 'cat "$(python render.py --n 1)" | head' 'echo "a $(echo "$(python render.py)")"' 'echo ok && (python render.py)' 'printf "%s" "$(cd sub && python render.py)"'; do
+  deny "29e Bash: $c" "$c" 'no go from the owner for render.py'
+done
+allow "29e Bash pin: a mention with no substitution" 'echo "run python render.py later"' toolu_s1
+allow "29e Bash pin: single quotes keep the substitution text" "echo 'x \$(python render.py)'" toolu_s2
+allow "29e Bash pin: a commit message with backticks in single quotes" "git commit -m 'run \`python render.py\` first'" toolu_s3
+allow "29e Bash pin: a substitution of a script with no signal" 'echo "$(python polish.py)"' toolu_s4
+PGTOOL=PowerShell
+for c in 'Write-Output "$(python render.py)"' 'Write-Host (python render.py)' 'Write-Host $(python render.py)' 'Write-Output @(python render.py)' 'gc x | % { python render.py }' \
+         'Write-Host "a $(python render.py) b"' 'echo hi | Write-Output "$(& python render.py)"' 'Write-Output "$(Write-Output "$(python render.py)")"' 'Get-Content x | Write-Host (python render.py)' 'gc x | ForEach-Object { python render.py }'; do
+  deny "29e PS: $c" "$c" 'no go from the owner for render.py'
+done
+allow "29e PS pin: a mention with no substitution" 'Write-Output "run python render.py later"' toolu_s5
+allow "29e PS pin: single quotes keep the substitution text" "Write-Host 'a \$(python render.py) b'" toolu_s6
+allow "29e PS pin: a substitution of a script with no signal" 'Write-Output "$(python polish.py)"' toolu_s7
+PGTOOL=Bash
+
+# --- 29f. PowerShell: only `$env:NAME = <one literal word>` is preparation; what else follows the = is scanned as a segment of its own
+PGTOOL=PowerShell
+fresh; mkf4
+for c in '$env:X = $(python render.py)' '$env:X = (python render.py)' '$env:X = python render.py' '$env:X = "$(python render.py)"' '$x = python render.py' '[string]$x = python render.py' '$x += python render.py' \
+         '$env:X = Start-Process python render.py' '$a = $b = python render.py' '$env:X = 1; $y = python render.py'; do
+  deny "29f PS: $c" "$c" 'render.py'
+done
+allow "29f PS pin: a literal in single quotes" "\$env:X = 'abc'" toolu_e1
+allow "29f PS pin: a literal in double quotes" '$env:X = "abc"' toolu_e2
+allow "29f PS pin: a plain word" '$env:X = abc' toolu_e3
+allow "29f PS pin: a key name is the variable, the value is a literal" "\$env:$KN = 'sk-x'" toolu_e4
+allow "29f PS pin: a key name read into another variable" "\$env:X = \$env:$KN" toolu_e5
+allow "29f PS pin: a read of the script is a mention" '$x = Get-Content render.py' toolu_e6
+allow "29f PS pin: the variable, then a script with no signal" '$env:X = abc; python polish.py' toolu_e7
+PGTOOL=Bash
+
+# --- 29g. PowerShell Start-Process: a word starting with - is never the program; parameters resolve by unique prefix; what cannot be read fails closed
+PGTOOL=PowerShell
+fresh; mkf4; mkplain polish
+for c in 'Start-Process -Wa python render.py' 'Start-Process -FilePath:python render.py' 'Start-Process -ErrorAction Stop python render.py' 'Start-Process -Verb RunAs python render.py' \
+         'Start-Process -Wai -NoNew python render.py' 'Start-Process -File python -Arg render.py' 'Start-Process -Wait -PassThru -FilePath python -ArgumentList render.py' '$p = Start-Process python render.py -PassThru'; do
+  deny "29g PS: $c" "$c" 'render.py'
+done
+for c in 'Start-Process -Foo bar python render.py' 'Start-Process -Foo python render.py' 'Start-Process python polish.py -Foo' 'Start-Process -W python polish.py' 'Start-Process -FilePath -Foo python polish.py' 'Start-Process -Verbose:python python polish.py -Bar' \
+         'Start-Process -- python polish.py' 'Start-Process -X python polish.py' 'saps -Foo python polish.py' 'start -Foo python polish.py'; do
+  deny "29g PS: $c (not read cleanly)" "$c" 'too tangled to read'
+done
+allow "29g PS pin: a unique prefix (-Wai is -Wait)" 'Start-Process -Wai python polish.py' toolu_t1
+allow "29g PS pin: -NoNew and -Arg prefixes" 'Start-Process -NoNew python -Arg polish.py' toolu_t2
+allow "29g PS pin: common parameters (-ErrorAction Stop)" 'Start-Process -ErrorAction Stop python polish.py' toolu_t3
+allow "29g PS pin: -ea alias, -WhatIf switch" 'Start-Process -ea Stop -WhatIf python polish.py' toolu_t4
+allow "29g PS pin: -WorkingDirectory and -Verb" 'Start-Process python -ArgumentList polish.py -WorkingDirectory sub -Verb Open' toolu_t5
+allow "29g PS pin: an unknown parameter with a program that is no interpreter" 'Start-Process -Foo notepad; python polish.py' toolu_t6
+PGTOOL=Bash
+
+# --- 29h. repeat detection in PowerShell: a script block after a pipe or a switch, Where-Object, ?, .Where(), the cmdlets that run a block (a go still denies it)
+PGTOOL=PowerShell
+rp "29h PS: Where-Object" '1..3 | Where-Object { python render.py --n 1 }'
+rp "29h PS: ? (the Where-Object alias)" '1..3 | ? { python render.py --n 1 }'
+rp "29h PS: where (the alias)" 'Get-ChildItem | Where { python render.py --n 1 }'
+rp "29h PS: the .Where() method" '(1..3).Where({ python render.py --n 1 })'
+rp "29h PS: the .where() method, lower case" '(1..3).where({ python render.py --n 1 })'
+rp "29h PS: switch" 'switch (1) { 1 { python render.py --n 1 } }'
+rp "29h PS: switch with options" 'switch -Regex ($x) { "a" { python render.py --n 1 } }'
+rp "29h PS: a variable set from a switch" '$r = switch (1) { 1 { python render.py --n 1 } }'
+rp "29h PS: Sort-Object with a script block" '1..3 | Sort-Object { python render.py --n 1 }'
+rp "29h PS: Group-Object with a script block" '1..3 | Group-Object { python render.py --n 1 }'
+rp "29h PS: Select-Object with a calculated property" "1..3 | Select-Object @{n='a'; e={ python render.py --n 1 }}"
+rp "29h PS: Format-Table with a calculated property" '1..3 | Format-Table { python render.py --n 1 }'
+rp "29h PS: a cmdlet the guard has never heard of, a block after a pipe" '1..3 | Foo-Bar { python render.py --n 1 }'
+rp "29h PS: ... inside an if block" 'if ($true) { 1..3 | Foo-Bar { python render.py --n 1 } }'
+rp "29h PS: ... after several pipes" 'Get-Date | Get-Member | Foo-Bar -x { python render.py --n 1 }'
+rp "29h PS: ForEach-Object -Parallel" '1..3 | ForEach-Object -Parallel { python render.py --n 1 }'
+rp "29h PS: Invoke-Command" 'Invoke-Command -ScriptBlock { python render.py --n 1 }'
+rp "29h PS: icm" 'icm { python render.py --n 1 }'
+rp "29h PS: Start-Job" 'Start-Job { python render.py --n 1 }'
+rp "29h PS: Start-ThreadJob" 'Start-ThreadJob -ScriptBlock { python render.py --n 1 }'
+rp "29h PS: Register-ObjectEvent -Action" 'Register-ObjectEvent $w Changed -Action { python render.py --n 1 }'
+rp "29h PS: the earlier forms stay: ForEach-Object" '1..3 | ForEach-Object { python render.py --n 1 }'
+rp "29h PS: the earlier forms stay: foreach" 'foreach ($i in 1..3) { python render.py --n 1 }'
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+allow "29h PS pin: a pipe with no block, then one run" 'Get-ChildItem | Sort-Object Name; python render.py --n 1' toolu_h1
+[ "$(used)" = 1 ] && ok "... counted once" || ko "29h pin: $(cat "$R" 2>&1)"
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+allow "29h PS pin: a block that is not after a pipe, one run" 'if ($true) { python render.py --n 1 }' toolu_h2
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+allow "29h PS pin: the run comes before the block after a pipe" 'python render.py --n 1; 1..3 | Where-Object { $_ -gt 1 }' toolu_h3
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+allow "29h PS pin: a mention of Where-Object is not a loop" 'Get-Help Where-Object; python render.py --n 1' toolu_h4
+PGTOOL=Bash
+
+# ===== 30. timing for the F4b fix readers (folder changes, glued words, substitutions in mentions, assignments, Start-Process parameters, script blocks), inside the process: each 30 KB text decided in under 1 s
+mkdir -p "$D/fx"
+r=$(py "$CW" fxtime "$(wp "$G")" "$(wp "$D/fx")" </dev/null 2>&1)
+[ "$r" = ok ] && ok "F4b fix timing: each 30 KB text (cd lists, glued quoted words, substitutions in mentions, nested substitutions, assignment chains, Start-Process parameters, script blocks after pipes) is decided in under 1 s with the verdict the cases above show" || ko "F4b fix timing: $r"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
