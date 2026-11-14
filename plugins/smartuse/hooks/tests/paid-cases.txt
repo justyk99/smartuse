@@ -289,3 +289,28 @@ O echo "run python render.py later"
 O echo 'x $(python render.py)'
 O echo "$(python x.py)"
 O git commit -m 'run `python render.py` first'
+# --- 0.7.0 F4b step 1 (V17, D-YK13): a relative script word is looked for under the cwd and under each folder a plain word before it names
+F fpol/gem.py import os<NL>key = os.environ["GEMINI_API_KEY"]
+F fpol/calm.py print("nothing paid")
+F fchain/finner/deep.py import os<NL>key = os.environ["OPENAI_API_KEY"]
+D cd fpol && python gem.py
+D cd fpol; python gem.py
+D pushd fpol; python gem.py
+D pushd fpol && python gem.py && popd
+D Set-Location fpol; python gem.py
+D (cd fpol && python gem.py)
+D env -C fpol python gem.py
+D cd fpol && python ./gem.py --n 1
+D cd fchain && cd finner && python deep.py
+D bash -c "cd fpol && python gem.py"
+D cd fpol && bash -c "python gem.py"
+D ls fpol && python gem.py
+D cd fpol && cd .. && python fpol/gem.py
+O cd fpol && python calm.py
+O cd nofolder && python gem.py
+O d=fpol; cd $d && python gem.py
+O cd "$d" && python gem.py
+O cd fpo* && python gem.py
+O cd - && python gem.py
+O python gem.py && cd fpol
+O python gem.py

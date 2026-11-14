@@ -293,6 +293,88 @@ elif mode == "fxtime":   # fxtime GUARD PROJECT: the F4b fix readers inside the 
     check("1,700 inline key assignments, then a paid run",(("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
     check("1,700 env words with an inline key, then a paid run", "env " + (("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
     print("ok" if not bad else "; ".join(bad))
+elif mode == "ltime":    # ltime GUARD PROJECT: F4b step 1, the folder lookup inside the process: each text under 32 KB and decided in under 1 s with the verdict the cases show (this mode writes its own folders)
+    import os, time
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "ltime"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    proj, bad = sys.argv[3], []
+    sdk = "import " + "open" + "ai\n"                                     # a paid script, the SDK name never spelled whole here
+    for i in range(70):
+        os.makedirs(os.path.join(proj, "d%d" % i), exist_ok=True)
+    for i in range(300):
+        os.makedirs(os.path.join(proj, "e%d" % i), exist_ok=True)
+    for d, n in (("pol", "g.py"), ("d9", "g9.py"), ("d4", "g4.py"), ("d0", "g0.py")):
+        os.makedirs(os.path.join(proj, d), exist_ok=True); open(os.path.join(proj, d, n), "w").write(sdk)
+    os.makedirs(os.path.join(proj, ".claude"), exist_ok=True)
+    open(os.path.join(proj, "warm.py"), "w").write("print(1)\n")
+    ev = {"cwd": proj, "tool_use_id": "toolu_lt"}
+    def check(name, c, adapter, want_none, ps=False, strict=True, deadline=None, has=""):
+        assert len(c) < 32768, (name, len(c))
+        open(os.path.join(proj, ".claude", "smartuse.local.md"), "w").write(adapter)
+        t0 = time.monotonic(); r = ns["paid_verdict"](ev, c, ns["ps_text"](c) if ps else c, strict, deadline, False, ps); dt = time.monotonic() - t0
+        if dt >= 1.0:
+            bad.append("%s: %.2f s" % (name, dt))
+        if (r is None) != want_none or (has and not (r and has in r)):
+            bad.append("%s: verdict %r" % (name, r and r[:90]))
+    check("warm up", "python warm.py", "", True)       # the patterns compile on first use
+    cds = "; ".join("cd d%d" % i for i in range(64))
+    ten = "; ".join("cd d%d" % i for i in range(10))
+    check("64 folder words, the script in the nearest folder", cds + "; cd pol; python g.py", "", False)
+    check("PowerShell: 64 folder words, the script in the nearest folder", cds.replace("cd ", "Set-Location ") + "; Set-Location pol; python g.py", "", False, True)
+    check("a script only in the folder 10 folders back is beyond the 6 nearest (a stated limit)", ten + "; python g0.py", "", True)
+    check("... in the 6th nearest folder it is read", ten + "; python g4.py", "", False)
+    check("... in the nearest folder it is read", ten + "; python g9.py", "", False)
+    check("3,000 plain words, then a relative script word in the folder named last", "echo " + "w " * 3000 + "pol; python g.py", "", False)
+    check("3,000 plain words, then a relative script word that is nowhere", "echo " + "w " * 3000 + "; python nowhere.py", "", True)
+    check("30 KB of cd words to one folder, then the run", "cd pol; " * 3500 + "python g.py", "", False)
+    check("30 KB of distinct words, then the run", ";".join("echo x%d y%d" % (i, i) for i in range(1700)) + "; python warm.py", "", True)
+    check("as many runs as fit in 30 KB, each after 64 new words of its own: the probe cap is spent, a run that still needs a lookup is unreadable (strict denies)", ";".join("echo " + " ".join("f%d_%d" % (i, j) for j in range(64)) + "; python warm.py" for i in range(1000))[:32000], "", False, has="could not verify")
+    check("1,500 relative runs of files that are not there", ";".join("python u%d.py" % i for i in range(1500)), "", True)
+    check("a missing folder", "cd nowhere; python g.py", "", True)
+    check("PowerShell: a missing folder", "Set-Location nowhere; python g.py", "", True, True)
+    ad = "paid_scripts: nothing.py\n"                                    # arms light
+    cap0 = ns["PAID_LOOK_STATS"]; ns["PAID_LOOK_STATS"] = 2
+    check("fix 3: the probe cap spent, strict: could not verify (a lookup that was cut is no 'no signal')", "cd d0; cd d1; cd pol; python g.py", "", False, has="could not verify whether g.py pays")
+    check("fix 3: ... light allows, as a script that cannot be read does", "cd d0; cd d1; cd pol; python g.py", ad, True, strict=False)
+    ns["PAID_LOOK_STATS"] = cap0
+    check("fix 3: the same text with the cap whole is denied as a paid run", "cd d0; cd d1; cd pol; python g.py", "", False, has="no go from the owner for g.py")
+    filler = ";".join("echo " + " ".join("f%d_%d" % (i, j) for j in range(40)) + "; python warm.py" for i in range(56))
+    check("fix 3: a crafted text that spends the cap, then a cd run of a paid script: not allowed in strict", filler + "; cd pol; python g.py", "", False)
+    check("fix 3: ... and in light it is allowed as a script that cannot be read (m7)", filler + "; cd pol; python g.py", ad, True, strict=False)
+    open(os.path.join(proj, "pol", "h.py"), "w").write("print(1)\n")
+    open(os.path.join(proj, "rg.py"), "w").write(sdk)
+    adf = "paid_scripts: rg.py only --pay\n"
+    check("fix 2: a file name item frees a run with no flag (the cap whole)", "cd d0; cd d1; python rg.py", adf, True)
+    cap0 = ns["PAID_LOOK_STATS"]; ns["PAID_LOOK_STATS"] = 1
+    check("fix 2: the lookup cut short: no only freedom, the run is paid (strict)", "cd d0; cd d1; python rg.py", adf, False, has="no go from the owner for rg.py")
+    check("fix 2: ... and in light", "cd d0; cd d1; python rg.py", adf, False, strict=False, has="no go from the owner for rg.py")
+    ns["PAID_LOOK_STATS"] = cap0
+    check("fix 2: a free path frees the run when the lookup is whole", "echo d0; echo d1; python rg.py", "paid_free: rg.py\n", True)
+    ns["PAID_LOOK_STATS"] = 1
+    check("fix 2: ... and does not when the lookup was cut short (the file list is incomplete)", "echo d0; echo d1; python rg.py", "paid_free: rg.py\n", False, has="no go from the owner for rg.py")
+    ns["PAID_LOOK_STATS"] = cap0
+    check("fix 4: the hook's deadline already past, a run that needs a lookup is unreadable: strict denies", "cd pol; python h.py", "", False, deadline=time.monotonic() - 1, has="could not verify")
+    check("fix 4: ... the same run with time left is allowed (no signal in pol/h.py)", "cd pol; python h.py", "", True, deadline=time.monotonic() + 100)
+    check("fix 4: ... a plain run that needs none is not changed by it", "python warm.py", "", True, deadline=time.monotonic() + 100)
+    check("fix 4: 32 KB of the same cd and run pair (the files are read once)", "cd pol; python g.py; " * 1500, "", False, has="no go from the owner for g.py")
+    check("fix 4: 32 KB of cd and run pairs over 300 folders", "".join("cd e%d; python w.py; " % (i % 300) for i in range(1500)), "", True)
+    check("fix 4: PowerShell, 32 KB of Set-Location and run pairs over 300 folders", "".join("Set-Location e%d; python w.py; " % (i % 300) for i in range(950)), "", True, True)
+    check("fix 5: PowerShell, Set-Location -Path:pol reads the value as the folder", "Set-Location -Path:pol; python g.py", "", False, True, has="no go from the owner for g.py")
+    check("fix 5: ... -LiteralPath:pol, a quoted value, a shortened parameter", "Set-Location -LiteralPath:pol; sl -Pa:'pol'; python g.py", "", False, True)
+    check("a folder at the outside of two nested bash -c strings", "cd pol; bash -c \"bash -c 'python g.py'\"", "", False)
+    h = os.path.join(proj, "home"); os.makedirs(os.path.join(h, "hf"), exist_ok=True); open(os.path.join(h, "hf", "gh.py"), "w").write(sdk)
+    old = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+    os.environ["HOME"] = os.environ["USERPROFILE"] = h
+    try:
+        check("a ~ folder is expanded", "cd ~/hf; python gh.py", "", False)
+        check("a ~ word that names no folder", "cd ~/nothere; python gh.py", "", True)
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("ok" if not bad else "; ".join(bad))
 PY
 CW=$(wp "$D/chk.py")
 
@@ -817,7 +899,7 @@ mkdir -p "$D/pt"
 r=$(py "$CW" ptime "$(wp "$G")" "$(wp "$D/pt")" </dev/null 2>&1)
 [ "$r" = ok ] && ok "four ordinary commands under 5 ms each, a 256 KB script with no signal under 50 ms, five 30 KB texts (dotted host run, key names, SDK imports, the segment splitter, the count-flag reader) under 1 s each" || ko "paid-path timing: $r"
 [ "$(py "$CW" hostre "$(wp "$G")" </dev/null 2>&1)" = ok ] && ok "the linear host finder (a pattern that took 30 s on 28 KB of a.a.a.) gives the same matches, text and place, as the pattern it replaced: 23 short texts, subdomains, glued and look-alike hosts" || ko "host finder: $(py "$CW" hostre "$(wp "$G")" </dev/null 2>&1 | tail -1)"
-# ===== 25. 0.7.0 F4b: free runs (paid_free: flags and paths), pay flags (`only` on a paid_scripts: item), entry scripts (paths and patterns). Step 1 (the folder lookup, D-YK13) is not built: a script is the file under the event's cwd
+# ===== 25. 0.7.0 F4b: free runs (paid_free: flags and paths), pay flags (`only` on a paid_scripts: item), entry scripts (paths and patterns). Step 1 (the folder lookup, D-YK13) is section 34; the cases here keep a script that is the file under the event's cwd
 mkat() { # $1 = a path under the project (always with a folder), $2 = key | sdk | none: a script that names a paid key, a paid SDK, or nothing paid
   mkdir -p "$(dirname "$D/proj/$1")"
   case "$2" in
@@ -1436,4 +1518,203 @@ done
 nostate "33: ... and those touch no state"
 # a folder flag before run is a recorded limit (SECURITY.md): the run is in another folder, the guard does not unwrap it
 allow "33 limit: pdm -p sub run python render.py is not unwrapped (a folder flag)" 'pdm -p sub run python render.py --n 1'
+
+# ===== 34. 0.7.0 F4b step 1, the folder lookup (V17, D-YK13): a relative script word is looked for under the event's cwd and under each folder that a plain word before it names (chained in command order, handed down into bash -c); every file found is read. Not followed: a folder from a variable, a substitution or a glob; a folder the command creates; cd -
+mkl() { mkf4; mkat polish/gemini_client.py key; mkat chain/inner/x.py sdk; mkat tests/check_a.py none; mkat polish/dup.py key; mkat dup.py none; mkat dup2.py sdk; mkat polish/dup2.py none; mkat other/notpaid.py none; mkat hold/z.py sdk; }
+# --- 34a. no go: a run after a folder change is read in the folder it names, Bash tool
+fresh; mkl
+for c in 'cd polish && python gemini_client.py' 'cd polish; python gemini_client.py' 'cd ./polish && python gemini_client.py' 'cd polish || exit 1; python gemini_client.py' 'pushd polish; python gemini_client.py' 'pushd polish && python gemini_client.py && popd' \
+         'Set-Location polish; python gemini_client.py' 'cd polish && python ./gemini_client.py' '(cd polish && python gemini_client.py)' 'env -C polish python gemini_client.py' 'env --chdir=polish python gemini_client.py' \
+         'cd polish && python gemini_client.py --n 1' 'cd polish && cd . && python gemini_client.py' 'cd chain && cd inner && python x.py' 'cd chain; cd inner; python x.py' \
+         'bash -c "cd polish && python gemini_client.py"' 'cd polish && bash -c "python gemini_client.py"' 'bash -c "cd chain && cd inner && python x.py"' 'cd chain && bash -c "cd inner && python x.py"' \
+         'tool --dir=polish; python gemini_client.py' 'ls polish && python gemini_client.py' 'cd sub && python ../render.py' 'cd polish && python dup.py' 'cd polish && python dup2.py' 'cd hold && python z.py'; do
+  deny "34a: $c" "$c" 'no go from the owner for'
+done
+deny "34a: the reason names the file, not the folder" 'cd polish && python gemini_client.py' 'no go from the owner for gemini_client.py'
+deny "34a: ... and the signal is the one in that file" 'cd polish && python gemini_client.py' "OPENAI_API_KEY in gemini_client.py"
+deny "34a: a newline between the cd and the run" $'cd polish\npython gemini_client.py' 'no go from the owner for gemini_client.py'
+deny "34a: popd after the run does not hide it" 'pushd polish && python gemini_client.py; popd' 'no go from the owner for gemini_client.py'
+nostate "34a: ... and no deny wrote state"
+# --- 34b. pins: what the lookup does not change
+allow "34b pin: the script is not in the cwd and no word names a folder" 'python gemini_client.py' toolu_l0
+allow "34b pin: a cd after the run is not before it" 'python gemini_client.py && cd polish' toolu_l1
+deny "34b pin: a path from the cwd is read as before" 'python polish/gemini_client.py' 'no go from the owner for gemini_client.py'
+deny "34b pin: a script in the cwd is read as before, with a cd to a folder that has none of that name" 'cd other && python render.py --n 1' 'no go from the owner for render.py'
+allow "34b pin: a folder with no paid script of that name" 'cd other && python notpaid.py' toolu_l2
+allow "34b pin: a missing script, and the folder only after it" 'python render_missing.py polish/gemini_client.py' toolu_l3
+nostate "34b: ... pins write no state"
+# --- 34c. allowed: no signal in the file, a missing folder, and the stated limits (a variable, a glob, cd -, a folder the command creates, a folder beyond 6 / 64 words)
+fresh; mkl
+allow "34c: cd tests && python check_a.py (no signal in tests/check_a.py)" 'cd tests && python check_a.py' toolu_l4
+allow "34c: a missing folder" 'cd nowhere && python gemini_client.py' toolu_l5
+allow "34c limit: a folder from a variable is not followed" 'D=polish; cd $D && python gemini_client.py' toolu_l6
+allow "34c limit: ... in double quotes" 'D=polish; cd "$D" && python gemini_client.py' toolu_l7
+allow "34c limit: ... in braces" 'cd ${D:-x} && python gemini_client.py' toolu_l8
+allow "34c limit: a glob is not followed" 'cd pol* && python gemini_client.py' toolu_l9
+allow "34c limit: a ? glob" 'cd polis? && python gemini_client.py' toolu_l10
+allow "34c limit: cd - is not followed" 'cd - && python gemini_client.py' toolu_l11
+allow "34c limit: a folder the command makes is not followed" 'mkdir newdir && cd newdir && python gemini_client.py' toolu_l12
+nostate "34c: ... and none of them wrote state"
+adapter 'paid_scripts: gemini_client.py\n'
+deny "34c: a script listed by file name is still caught after a folder from a variable" 'D=polish; cd $D && python gemini_client.py' 'gemini_client.py is in paid_scripts'
+fresh; mkl; adapter 'paid_scripts: tests/check_a.py\n'
+allow "34c: a path item of another folder does not match" 'cd other && python notpaid.py' toolu_l13
+# --- 34d. with a go for gemini_client.py: allowed after the folder change and counted once; a free flag frees the dry run
+fresh; mkl; adapter 'paid: gemini_client.py x 3, cap RM1, count none, test ok\n'
+allow "34d: with a go, cd polish && python gemini_client.py passes" 'cd polish && python gemini_client.py --n 1' toolu_g1
+[ "$(used)" = 1 ] && ok "... and is counted once: used 1" || ko "34d used: $(used) $(cat "$R" 2>&1)"
+allow "34d: pushd form, a second run" 'pushd polish; python gemini_client.py --n 1' toolu_g2
+[ "$(used)" = 2 ] && ok "... counted: used 2" || ko "34d used 2: $(used) $(cat "$R" 2>&1)"
+allow "34d: inside bash -c" 'bash -c "cd polish && python gemini_client.py --n 1"' toolu_g3
+[ "$(used)" = 3 ] && ok "... counted: used 3" || ko "34d used 3: $(used) $(cat "$R" 2>&1)"
+deny "34d: the run after the cap is denied" 'cd polish && python gemini_client.py --n 1' 'gemini_client.py'
+fresh; mkl; adapter 'paid_free: --dry-run\n'
+allow "34d: the dry run after cd is free, no go" 'cd polish && python gemini_client.py --dry-run' toolu_g4
+allow "34d: ... pushd" 'pushd polish; python gemini_client.py --dry-run=1' toolu_g5
+allow "34d: ... inside bash -c" 'bash -c "cd polish && python gemini_client.py --dry-run"' toolu_g6
+nostate "34d: ... and writes no state"
+deny "34d: the paying run after it is not free" 'cd polish && python gemini_client.py --dry-run && cd polish && python gemini_client.py' 'no go from the owner for gemini_client.py'
+fresh; mkl; adapter 'paid: gemini_client.py x 3, cap RM1, count none\npaid_free: --dry-run\n'
+allow "34d: with a go, the dry run is free" 'cd polish && python gemini_client.py --dry-run' toolu_g7
+[ ! -e "$R" ] && ok "... and the counter is untouched" || ko "34d dry run wrote $(cat "$R")"
+allow "34d: then the paying run counts" 'cd polish && python gemini_client.py --n 1' toolu_g8
+allow "34d: a dry run after it is not counted" 'cd polish && python gemini_client.py --dry-run' toolu_g9
+[ "$(used)" = 1 ] && ok "... used stays 1" || ko "34d used after dry: $(used) $(cat "$R" 2>&1)"
+# --- 34e. a free path and an `only` item after a folder change (a free path holds when every found file lies in the project and matches it, as written and resolved; the file the guard finds under the cwd after a folder change is not evidence, see 35b)
+fresh; mkl; mkat tests/check_a.py key; adapter 'paid_free: tests/check_*.py\n'
+allow "34e pin: the plain run of the free path is free" 'python tests/check_a.py' toolu_p0
+allow "34e: cd tests && python check_a.py, the one file found in tests/ matches the free path: free after cd" 'cd tests && python check_a.py' toolu_p1a
+allow "34e: a plain word that names the folder (no cd): the file found there matches the free path: free" 'ls tests && python check_a.py' toolu_p1b
+nostate "34e: ... and writes no state"
+fresh; mkl; adapter 'paid_scripts: tools/entry.py only --pay\n'
+allow "34e: only, the run after cd with no flag is free" 'cd tools && python entry.py --out a.png' toolu_p1
+deny "34e: only, the run after cd with the flag is paid" 'cd tools && python entry.py --pay' 'no go from the owner for entry.py'
+deny "34e: only, a folder word without cd and the flag: found in another folder, matched by file name" 'ls tools && python entry.py --pay' 'no go from the owner for entry.py'
+# --- 34f. PowerShell tool: a \ in a folder or script word reads as /
+PGTOOL=PowerShell
+fresh; mkl
+for c in 'Set-Location polish; python gemini_client.py' 'Set-Location -Path .\polish; python gemini_client.py' 'Push-Location polish; python gemini_client.py' 'pushd polish; python gemini_client.py' 'cd polish; python gemini_client.py' 'cd .\polish; python .\gemini_client.py' \
+         'sl polish; python gemini_client.py' 'Set-Location polish && python gemini_client.py' 'cd chain; cd inner; python x.py' 'cd .\chain; cd .\inner; python x.py' 'cd chain\inner; python x.py' 'Set-Location -LiteralPath .\chain\inner; python x.py' \
+         'bash -c "cd polish && python gemini_client.py"' 'cd polish; bash -c "python gemini_client.py"' 'cd polish; python polish\gemini_client.py' 'cd chain; python inner\x.py' 'cd sub; python ..\render.py'; do
+  deny "34f PS: $c" "$c" 'no go from the owner for'
+done
+allow "34f PS pin: no folder is named" 'python gemini_client.py' toolu_q0
+allow "34f PS: cd tests; python check_a.py (no signal)" 'cd tests; python check_a.py' toolu_q1
+allow "34f PS: a missing folder" 'Set-Location nowhere; python gemini_client.py' toolu_q2
+allow "34f PS limit: a variable folder" 'Set-Location $d; python gemini_client.py' toolu_q3
+allow "34f PS limit: a wildcard folder" 'Set-Location pol*; python gemini_client.py' toolu_q4
+nostate "34f PS: ... no state"
+fresh; mkl; adapter 'paid: gemini_client.py x 3, cap RM1, count none\npaid_free: --dry-run\n'
+allow "34f PS: with a go, Set-Location polish; python gemini_client.py passes" 'Set-Location polish; python gemini_client.py --n 1' toolu_q5
+[ "$(used)" = 1 ] && ok "... and is counted once: used 1" || ko "34f used: $(used) $(cat "$R" 2>&1)"
+allow "34f PS: the dry run after Set-Location is free and not counted" 'Set-Location polish; python gemini_client.py --dry-run' toolu_q6
+[ "$(used)" = 1 ] && ok "... used stays 1" || ko "34f used after dry: $(used) $(cat "$R" 2>&1)"
+PGTOOL=Bash
+# --- 34g. timing, inside the process: 64 folder words before a script, a 30 KB text, many words and runs; the ~ folder
+mkdir -p "$D/lt"
+r=$(py "$CW" ltime "$(wp "$G")" "$(wp "$D/lt")" </dev/null 2>&1)
+[ "$r" = ok ] && ok "34g folder lookup timing: 64 folder words before a script, the 6-folder cap, 3,000 words, 30 KB of cd words, runs with 64 words each, a missing folder, PowerShell, nested bash -c and ~ are each decided in under 1 s with the verdict the cases above show" || ko "34g folder lookup timing: $r"
+
+# ===== 35. step 1 fix round (re-check). 35a: a paid_scripts: path item is matched against the files the lookup found (the file name alone only when none was found); a found file the item does not cover gets no `only` freedom. 35b: a paid_free: path frees a run when every found file lies in the project and matches it. 35c: PowerShell -Path:value
+mk35() { mkl; mkat polish/client.py key; mkat tools/client.py none; mkat tests/check_a.py key; }
+# --- 35a. the item names tools/client.py; the key is in polish/client.py
+fresh; mk35; adapter 'paid_scripts: tools/client.py only --pay\n'
+for c in 'cd polish && python client.py' 'cd polish; python client.py --out a.png' 'pushd polish; python client.py' 'cd polish && python client.py --pay' '(cd polish && python client.py)' 'bash -c "cd polish && python client.py"' 'ls polish && python client.py' 'env -C polish python client.py'; do
+  deny "35a: $c (the item does not cover polish/client.py: paid, no only freedom)" "$c" 'no go from the owner for client.py'
+  guard "$c" toolu_a0; case "$OUT" in *"OPENAI_API_KEY in client.py"*) ok "... the signal is the one in polish/client.py";; *) ko "35a signal: $c -> $OUT";; esac
+done
+inlight deny "35a light: cd polish && python client.py" 'cd polish && python client.py' 'no go from the owner for client.py'
+inlight deny "35a light: pushd" 'pushd polish; python client.py' 'no go from the owner for client.py'
+allow "35a: cd tools && python client.py (matches the item path, no signal, no flag): free" 'cd tools && python client.py' toolu_a1
+deny "35a: ... with the flag: paid" 'cd tools && python client.py --pay' 'no go from the owner for client.py'
+allow "35a pin: the plain run of the item's own file, no flag" 'python tools/client.py' toolu_a2
+nostate "35a: ... and none of the allows wrote state"
+fresh; mk35; adapter 'paid_scripts: polish/client.py only --pay\n'
+allow "35a: the item names polish/client.py: cd polish && python client.py with no flag is free (the owner's item)" 'cd polish && python client.py' toolu_a3
+deny "35a: ... with the flag it is paid" 'cd polish && python client.py --pay' 'no go from the owner for client.py'
+fresh; mk35; adapter 'paid_scripts: tools/client.py\n'
+deny "35a: an item with no only: the script found elsewhere with a signal is paid" 'cd polish && python client.py' 'no go from the owner for client.py'
+fresh; mk35; adapter 'paid_scripts: tools/client.py only --pay\npaid_free: --dry-run\n'
+allow "35a: a free flag still frees it" 'cd polish && python client.py --dry-run' toolu_a4
+fresh; mk35; adapter 'paid_scripts: tools/client.py only --pay\npaid_free: polish/*.py\n'
+deny "35a: a script that an item lists is never free by path" 'cd tools && python client.py --pay' 'no go from the owner for client.py'
+fresh; mk35; adapter 'paid_scripts: tools/client.py only --pay\npaid: client.py x 3, cap RM1, count none\n'
+allow "35a: with a go for client.py the cd run passes" 'cd polish && python client.py --n 1' toolu_a5
+[ "$(used)" = 1 ] && ok "... and is counted once" || ko "35a used: $(used) $(cat "$R" 2>&1)"
+PGTOOL=PowerShell
+fresh; mk35; adapter 'paid_scripts: tools/client.py only --pay\n'
+for c in 'Set-Location polish; python client.py' 'Push-Location polish; python client.py' 'cd polish; python client.py --pay' 'Set-Location -Path polish; python client.py'; do
+  deny "35a PS: $c" "$c" 'no go from the owner for client.py'
+done
+allow "35a PS: Set-Location tools; python client.py is free" 'Set-Location tools; python client.py' toolu_a6
+PGTOOL=Bash
+# --- 35b. a free path after a folder change
+fresh; mk35; adapter 'paid_free: tests/check_*.py\n'
+for c in 'cd tests && python check_a.py' 'cd tests; python check_a.py' 'pushd tests; python check_a.py' 'pushd tests && python check_a.py && popd' 'ls tests && python check_a.py' 'env -C tests python check_a.py' 'bash -c "cd tests && python check_a.py"' '(cd tests && python check_a.py)' 'cd tools && python ../tests/check_a.py'; do
+  allow "35b: $c is free (the one file found lies in the project and matches tests/check_*.py)" "$c" toolu_b1
+done
+nostate "35b: ... and writes no state"
+inlight allow "35b light: cd tests && python check_a.py" 'cd tests && python check_a.py' toolu_b2
+for c in 'cd tools && python check_a.py' 'ls tests tools && python check_a.py' 'cd tests && cd ../tools && python check_a.py' 'cd sub && python tests/check_a.py' 'pushd sub; python tests/check_a.py' 'cd tests && python tools/check_a.py'; do
+  deny "35b: $c is not free (a found file is outside the pattern, or the file found under the cwd is not the one that runs)" "$c" 'no go from the owner for check_a.py'
+done
+fresh; mk35; adapter 'paid_free: tests/check_*.py\npaid: check_a.py x 3, cap RM1, count none\n'
+deny "35b: a script a go names is never free by path" 'cd tests && python check_a.py --n 1 && python check_a.py --n 1' 'a loop or repeat runs check_a.py more than once'
+fresh; mk35; adapter 'paid_free: tests/check_*.py, --dry-run\n'
+allow "35b: a free flag frees a run whose files are outside the pattern" 'cd tools && python check_a.py --dry-run' toolu_b3
+PGTOOL=PowerShell
+fresh; mk35; adapter 'paid_free: tests/check_*.py\n'
+for c in 'Set-Location tests; python check_a.py' 'Push-Location tests; python check_a.py' 'cd .\tests; python .\check_a.py' 'Set-Location -Path:tests; python check_a.py'; do
+  allow "35b PS: $c is free" "$c" toolu_b4
+done
+deny "35b PS: Set-Location tools; python check_a.py is not free" 'Set-Location tools; python check_a.py' 'no go from the owner for check_a.py'
+deny "35b PS: Set-Location sub; python tests\check_a.py is not free" 'Set-Location sub; python tests\check_a.py' 'no go from the owner for check_a.py'
+PGTOOL=Bash
+# --- 35c. PowerShell -Param:value reads the value as the folder, as --opt=value is read
+PGTOOL=PowerShell
+fresh; mk35
+for c in 'Set-Location -Path:polish; python gemini_client.py' 'Set-Location -LiteralPath:polish; python gemini_client.py' "Set-Location -Path:'polish'; python gemini_client.py" 'Set-Location -Path:.\polish; python gemini_client.py' 'sl -Pa:polish; python gemini_client.py' 'Push-Location -Path:polish; python gemini_client.py'; do
+  deny "35c PS: $c" "$c" 'no go from the owner for gemini_client.py'
+done
+allow "35c PS: a missing folder in -Path:" 'Set-Location -Path:nowhere; python gemini_client.py' toolu_c1
+PGTOOL=Bash
+fresh; mk35
+deny "35c: a quoted --opt=value" 'tool --dir="polish"; python gemini_client.py' 'no go from the owner for gemini_client.py'
+
+# ===== 36. step 1 fix round 2. 36a: `only` freedom needs every found file that holds a signal to be covered by an `only` item (a path item matches only its own file). 36b: the attached value of env -C, the PowerShell -LP and -PSPath parameters
+mk36() { mkl; mkat client.py sdk; mkat tools/client.py none; mkat polish/client.py key; }
+# --- 36a. the item names tools/client.py; the root client.py and polish/client.py pay
+fresh; mk36; adapter 'paid_scripts: tools/client.py only --pay\n'
+for c in 'ls tools && python client.py' 'git status tools; python client.py' 'cd tools && cd .. && python client.py' 'ls tools && cd polish && python client.py' 'cd polish && ls ../tools && python client.py' 'echo tools; python client.py --out a.png' 'ls tools && python ./client.py'; do
+  deny "36a: $c (the signal is in a file the item does not cover: paid, no only freedom)" "$c" 'no go from the owner for client.py'
+done
+inlight deny "36a light: ls tools && python client.py" 'ls tools && python client.py' 'no go from the owner for client.py'
+inlight deny "36a light: cd tools && cd .. && python client.py" 'cd tools && cd .. && python client.py' 'no go from the owner for client.py'
+nostate "36a: ... and no deny wrote state"
+PGTOOL=PowerShell
+for c in 'Get-ChildItem tools; python client.py' 'gci tools; python client.py' 'Set-Location tools; Set-Location ..; python client.py'; do
+  deny "36a PS: $c" "$c" 'no go from the owner for client.py'
+done
+PGTOOL=Bash
+fresh; mk36; adapter 'paid_scripts: client.py only --pay\n'
+allow "36a: a file name item covers every folder: ls tools && python client.py with no flag is free (the owner's item)" 'ls tools && python client.py' toolu_s1
+deny "36a: ... with the flag it is paid" 'ls tools && python client.py --pay' 'no go from the owner for client.py'
+fresh; mk36; adapter 'paid_scripts: polish/client.py only --pay\n'
+deny "36a: two files pay, the item covers only polish/client.py: paid" 'ls polish && python client.py' 'no go from the owner for client.py'
+deny "36a: ... after cd" 'cd polish && python client.py' 'no go from the owner for client.py'
+fresh; mk36; adapter 'paid_scripts: tools/client.py only --pay\npaid_free: --dry-run\n'
+allow "36a: a free flag still frees it" 'ls tools && python client.py --dry-run' toolu_s2
+fresh; mk36; adapter 'paid_scripts: tools/client.py only --pay\npaid: client.py x 3, cap RM1, count none\n'
+allow "36a: with a go the run passes and is counted once" 'ls tools && python client.py --n 1' toolu_s3
+[ "$(used)" = 1 ] && ok "... used 1" || ko "36a used: $(used) $(cat "$R" 2>&1)"
+# --- 36b. env -Cdir, PowerShell -LP and -PSPath
+fresh; mkl
+deny "36b: env -Cpolish python gemini_client.py" 'env -Cpolish python gemini_client.py' 'no go from the owner for gemini_client.py'
+deny "36b: env -C polish still read" 'env -C polish python gemini_client.py' 'no go from the owner for gemini_client.py'
+PGTOOL=PowerShell
+for c in 'Set-Location -LP:polish; python gemini_client.py' 'Set-Location -PSPath:polish; python gemini_client.py' 'Set-Location -PSP:polish; python gemini_client.py' 'Set-Location -lp:polish; python gemini_client.py' 'Push-Location -PSPath:.\polish; python gemini_client.py'; do
+  deny "36b PS: $c" "$c" 'no go from the owner for gemini_client.py'
+done
+allow "36b PS: a missing folder" 'Set-Location -LP:nowhere; python gemini_client.py' toolu_s4
+PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
