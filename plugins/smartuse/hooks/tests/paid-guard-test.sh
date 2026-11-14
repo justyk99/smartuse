@@ -118,6 +118,9 @@ elif mode == "inproc":   # inproc GUARD PROJECT KIND: main() run in this process
     elif kind == "lock":
         ns["BUDGET_S"] = 0.3
         run("strict")
+    elif kind == "unread":   # 0.7.0 review fix m7: the script exists but its read fails (the mock stands for a file that cannot be opened)
+        ns["paid_read_file"] = lambda p: None
+        run("strict", "python polish.py"); run("light", "python polish.py")
 elif mode == "ptime":    # ptime GUARD PROJECT: the paid path inside the process, no process start in the times
     import os, time
     src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "ptime"}
@@ -282,6 +285,11 @@ elif mode == "fxtime":   # fxtime GUARD PROJECT: the F4b fix readers inside the 
     check("PowerShell: 1,500 nested blocks after pipes around a paid run", "1..3 | Foo { " * 1500 + "python render.py --n 1" + " }" * 1500, "", False, True)
     check("PowerShell: 1,800 Set-Location words, then a paid run", "Set-Location a; " * 1800 + "python render.py", free, False, True)
     check("PowerShell: 1,000 mentions with a substitution, no paid run", 'Write-Output "$(Get-Date)"; ' * 1000 + "python warm.py", "", True, True)
+    # 0.7.0 review fix round: the runner wrappers (M1) and the inline key before a script (m5)
+    check("24 KB of runner words (pdm run, conda run -n e, op run --) around a paid run", "pdm run " * 1500 + "conda run -n e " * 500 + "op run -- " * 500 + "python render.py --n 1", "", False)
+    check("PowerShell: 24 KB of runner words around a paid run", "pdm run " * 1500 + "conda run -n e " * 500 + "op run -- " * 500 + "python render.py --n 1", "", False, True)
+    check("1,700 inline key assignments, then a paid run", (("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
+    check("1,700 env words with an inline key, then a paid run", "env " + (("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
     print("ok" if not bad else "; ".join(bad))
 PY
 CW=$(wp "$D/chk.py")
@@ -310,7 +318,8 @@ mkplain polish
 fresh; printf 'import os\nKEY = os.environ["%s_API_KEY"]\nprint("batch of 6")\n' GEMINI > "$D/proj/render.py"
 deny "incident replay: python render.py --images 6, the key in the source, no go -> denied at the first call" 'python render.py --images 6' 'GEMINI_API_KEY in render.py'
 case "$OUT" in *'bash-guard: paid call (GEMINI_API_KEY in render.py) '*) ok "the reason starts bash-guard: paid call (<signal>) and names the key and the script";; *) ko "reason start: $OUT";; esac
-case "$OUT" in *'no go from the owner for render.py. The owner types in this session: \"paid go: render.py x <runs>, cap <amount>\" (or adds \"paid: render.py x <runs>, cap <amount>\" to .claude/smartuse.local.md). Nothing was spent.'*) ok "... and gives the exact lines to type, ending Nothing was spent.";; *) ko "reason body: $OUT";; esac
+case "$OUT" in *'no go from the owner for render.py. Ask the owner to add \"paid: render.py x <runs>, cap <amount>\" to .claude/smartuse.local.md. Nothing was spent.'*) ok "... and gives the exact adapter line to add, ending Nothing was spent.";; *) ko "reason body: $OUT";; esac
+case "$OUT" in *'typed in this session'*|*'types in this session'*|*'paid go:'*) ko "reason still names the typed go (F5 is not built): $OUT";; *) ok "... and names no typed go (F5 adds it back)";; esac
 [ ! -e "$P" ] && ok "a deny writes nothing: no state dir" || ko "a deny created $P"
 [ "$(py "$CW" shape "$OUT" </dev/null)" = ok ] && ok "the deny JSON is the other guards' shape: one ASCII line, hookEventName PreToolUse, permissionDecision deny, reason prefixed bash-guard:" || ko "deny shape: $OUT"
 fresh; mkpaid
@@ -461,7 +470,8 @@ fresh; mkpaid; adapter 'paid: render.py x 3, cap RM2\n'
 allow "x 3: run 1 (--n 1) passes" 'python render.py --n 1' toolu_r1
 [ "$(used)" = 1 ] && ok "... used 1" || ko "used: $(used)"
 deny "run 2 is denied: the batch waits for the owner's test ok" 'python render.py --n 1' "run 1 of 3 is done; the batch waits for the owner's " toolu_r2
-case "$OUT" in *'waits for the owner'\''s \"test ok\" (typed in this session). Show the owner the one output first.'*) ok "... the reason says test ok is typed in this session and to show the owner the one output first";; *) ko "waits reason: $OUT";; esac
+case "$OUT" in *'waits for the owner'\''s \"test ok\": ask the owner to add \", test ok\" to that paid: line. Show the owner the one output first.'*) ok "... the reason says to add test ok to the paid: line and to show the owner the one output first";; *) ko "waits reason: $OUT";; esac
+case "$OUT" in *'typed in this session'*|*'types in this session'*) ko "waits reason still names the typed line (F5 is not built): $OUT";; *) ok "... and names no typed line (F5 adds it back)";; esac
 [ "$(used)" = 1 ] && [ ! -e "$P/paid.toolu_r2.done" ] && ok "... a denied run is not counted: used still 1, no claim marker" || ko "used after the deny: $(used)"
 adapter 'paid: render.py x 3, cap RM2, test ok\n'
 allow "the owner adds test ok to the line: run 2 passes (any flags)" 'python render.py --images 6' toolu_r3
@@ -1325,7 +1335,7 @@ PGTOOL=Bash
 # ===== 30. timing for the F4b fix readers (folder changes, glued words, substitutions in mentions, assignments, Start-Process parameters, script blocks), inside the process: each 30 KB text decided in under 1 s
 mkdir -p "$D/fx"
 r=$(py "$CW" fxtime "$(wp "$G")" "$(wp "$D/fx")" </dev/null 2>&1)
-[ "$r" = ok ] && ok "F4b fix timing: each 30 KB text (cd lists, glued quoted words, substitutions in mentions, nested substitutions, assignment chains, Start-Process parameters, script blocks after pipes) is decided in under 1 s with the verdict the cases above show" || ko "F4b fix timing: $r"
+[ "$r" = ok ] && ok "F4b fix timing: each 30 KB text (cd lists, glued quoted words, substitutions in mentions, nested substitutions, assignment chains, Start-Process parameters, script blocks after pipes; 0.7.0 review fix: 24 KB of runner words in Bash and PowerShell, 1,700 inline keys, with and without env) is decided in under 1 s with the verdict the cases above show" || ko "F4b fix timing: $r"
 
 # ===== 31. 0.7.0 F8: a quote in a # comment no longer hides the lines after it (strip_comments reads the text the paid scan reads)
 # a paid run between two comments that hold an apostrophe each: the two quotes used to pair up and the run between them was read as text
@@ -1353,4 +1363,57 @@ fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, test ok\n'
 allow "31 pin: a multi-line commit message with a # line and an apostrophe still runs" $'git commit -m "fix the parser\n# it\'s a heading\nmore text"' toolu_f8n
 allow "31 pin: a paid word inside such a message is text, not a run" $'git commit -m "a\n# it\'s\npython render.py --n 1\n# don\'t\nb"' toolu_f8o
 nostate "31 ... and touches no state"
+
+# ===== 32. 0.7.0 review fix round (dev-flow phase 7). M1: pdm / hatch / rye / pixi / conda / op / dotenv / doppler `run` unwrap to the command they run (as poetry run does), Bash and PowerShell
+for c in 'pdm run python render.py --n 1' 'hatch run python render.py --n 1' 'hatch run test:python render.py --n 1' 'rye run python render.py --n 1' 'pixi run python render.py --n 1' 'pixi run -e dev python render.py --n 1' \
+         'conda run python render.py --n 1' 'conda run -n myenv python render.py --n 1' 'conda run -p /opt/envs/x python render.py --n 1' 'conda run --no-capture-output -n myenv python render.py --n 1' \
+         'op run -- python render.py --n 1' 'op run --env-file=.env -- python render.py --n 1' 'op run --env-file .env -- python render.py --n 1' 'dotenv run -- python render.py --n 1' 'dotenv run python render.py --n 1' \
+         'doppler run -- python render.py --n 1' 'doppler run -p proj -c dev -- python render.py --n 1' 'timeout 60 pdm run python render.py --n 1' 'pdm run timeout 60 python render.py --n 1'; do
+  wrap "$c" render.py
+done
+fresh; mkpaid; mkplain polish
+for c in 'pdm run python polish.py' 'pdm run pytest' 'hatch run python polish.py' 'hatch run test:pytest' 'rye run python polish.py' 'pixi run python polish.py' 'conda run -n myenv python polish.py' 'op run -- python polish.py' \
+         'dotenv run -- python polish.py' 'doppler run -- python polish.py' 'doppler run -p proj -c dev -- python polish.py' 'pdm run' 'op run --' 'conda run -n myenv' 'pdm install' 'conda install x'; do
+  allow "32 M1: a runner around a script with no paid signal passes: $c" "$c"
+done
+nostate "32 M1: ... and those touch no state"
+fresh; mkpaid; adapter 'paid: polish.py x 3, cap RM2\n'
+deny "32 M1: a go for another script does not cover the one behind the runner" 'pdm run python render.py --n 1' 'no go from the owner for render.py'
+PGTOOL=PowerShell
+for c in 'pdm run python render.py --n 1' 'hatch run python render.py --n 1' 'rye run python render.py --n 1' 'pixi run python render.py --n 1' 'conda run -n myenv python render.py --n 1' 'op run -- python render.py --n 1' 'dotenv run -- python render.py --n 1' \
+         'doppler run -- python render.py --n 1'; do
+  wrap "$c" render.py
+done
+fresh; mkpaid; mkplain polish
+for c in 'pdm run python polish.py' 'conda run -n myenv python polish.py' 'op run -- python polish.py' 'doppler run -- python polish.py' 'dotenv run -- python polish.py'; do
+  allow "32 M1 PS: a runner around a script with no paid signal passes: $c" "$c"
+done
+PGTOOL=Bash
+# m5: a key spelled in front of the command (NAME=value, or after env) is preparation: the script is read as usual and the go is matched by its name; the key still makes the run paid
+KEYN=$(printf '%s_API_KEY' OPENAI)
+fresh; printf 'print("x")\n' > "$D/proj/render.py"; mkplain polish
+deny "32 m5: KEY=x python render.py, no go -> denied, naming render.py (not python)" "$KEYN=x python render.py --n 1" 'no go from the owner for render.py'
+deny "32 m5: ... the signal named is the key" "$KEYN=x python render.py --n 1" "$KEYN on the command line) "
+deny "32 m5: env KEY=x python render.py, no go -> denied, naming render.py" "env $KEYN=x python render.py --n 1" 'no go from the owner for render.py'
+deny "32 m5: KEY=x timeout 5 python render.py, no go -> denied, naming render.py" "$KEYN=x timeout 5 python render.py --n 1" 'no go from the owner for render.py'
+deny "32 m5: KEY=x python polish.py (a script with no signal of its own) -> denied, naming polish.py" "$KEYN=x python polish.py" 'no go from the owner for polish.py'
+deny "32 m5: KEY=x python -c (no script file) still names the command word" "$KEYN=x python -c 'print(1)'" 'no go from the owner for python'
+nostate "32 m5: ... and no deny wrote state"
+adapter 'paid: polish.py x 3, cap RM2\n'
+deny "32 m5: a go for another script does not cover render.py" "$KEYN=x python render.py --n 1" 'no go from the owner for render.py'
+adapter 'paid: render.py x 10, cap RM5, test ok\n'
+allow "32 m5: with a go for render.py, KEY=x python render.py passes" "$KEYN=x python render.py --n 1" toolu_m5a
+[ "$(used)" = 1 ] && ok "... and is counted once: used 1" || ko "32 m5 used: $(used) $(cat "$R" 2>&1)"
+allow "32 m5: env KEY=x python render.py passes with the same go" "env $KEYN=x python render.py --n 1" toolu_m5b
+[ "$(used)" = 2 ] && ok "... and is counted: used 2" || ko "32 m5 used after env: $(used) $(cat "$R" 2>&1)"
+allow "32 m5: KEY=x pdm run python render.py passes with the same go" "$KEYN=x pdm run python render.py --n 1" toolu_m5c
+fresh; printf 'print("x")\n' > "$D/proj/render.py"; adapter 'paid: render.py x 3, cap RM2\n'
+deny "32 m5: the count rule still reads the run: the first run with no count flag is denied" "$KEYN=x python render.py --images 6" 'must make ONE output' toolu_m5e
+allow "32 m5: ... and the first run with one output passes: KEY=x python render.py --n 1" "$KEYN=x python render.py --n 1" toolu_m5d
+# m7: a script that exists but cannot be opened is read as no signal; in strict that is "could not verify", in light it stays allowed
+fresh; mkplain polish; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
+r=$(py "$CW" inproc "$(wp "$G")" "$PW" unread </dev/null 2>&1)
+case "$r" in *'strict '*' deny bash-guard: paid call ('*'could not verify the go (polish.py could not be read)'*'[rule paid]'*) ok "32 m7: strict, a script whose read fails -> denied: could not verify the go (polish.py could not be read)";; *) ko "32 m7 strict: $r";; esac
+case "$r" in *'light '*' allow'*) ok "32 m7: light, the same script -> allowed (as before)";; *) ko "32 m7 light: $r";; esac
+[ ! -e "$R" ] && ok "32 m7: ... and nothing is counted" || ko "32 m7: state was written: $(cat "$R")"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

@@ -5,7 +5,8 @@
 (the launcher's remembered Python name). The model may read them, never write them.
 0.7.0 F9: also the paid counter `~/.claude/smartuse/projects/<key>/paid-runs.json`, its lock `paid-runs.lock` and its claim markers
 `paid.<tool_use_id>.done` (they say how many paid runs are left), and the session transcripts `~/.claude/projects/**/*.jsonl`, subagent
-transcripts included (the paid check reads the owner's "go" and "test ok" there). `receipts.jsonl` and a memory `.md` are not matched.
+transcripts included (a later feature, F5, reads the owner's typed "go" and "test ok" lines there; the paid check does not read them yet,
+so the protection is ahead of the reader). `receipts.jsonl` and a memory `.md` are not matched.
 The path is normalised before the match (backslashes, `x/..`, case): APFS and NTFS are case-insensitive, so
 `.claude/SmartUse.Local.MD` is the adapter too. stdin is read as bytes and decoded as UTF-8 here: on Windows a piped stdin
 is decoded in the ANSI code page, where a non-ASCII path makes json.load raise — and a guard that raises fails OPEN.
