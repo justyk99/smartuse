@@ -545,6 +545,9 @@ def tup(path, name):
             return list(ast.literal_eval(n.value))
     return None
 mine, theirs = tup(sys.argv[1], "KNOWN_RULES"), tup(sys.argv[2], "RULE_NAMES")
+gates = tup(sys.argv[2], "GATE_NAMES")   # 0.7.0 F10: the named gates (paid) are known names too, so the copy is RULE_NAMES plus GATE_NAMES
+if theirs is not None:
+    theirs = theirs + (gates or [])
 if mine is None:
     print("BAD heartbeat.py has no KNOWN_RULES")
 elif theirs is None:
@@ -615,6 +618,10 @@ case "$OUT" in *"heartbeat: FAIL · no event: the hooks are not firing, restart 
 CLAUDE_PLUGIN_OPTION_RULES_OFF="Force-Push nonsense,human-only" evo "$(SS d4)"
 OUT=$(doc "$PW")
 case "$OUT" in *"level: light · rules off: force-push · unknown name: nonsense"*) case "$OUT" in *human-only*) echo "FAIL F7 --doctor names a floor rule: $OUT"; fail=1;; *) echo "PASS F7 --doctor, an unknown rule name: listed once; a valid name is off; a floor name is not an unknown";; esac;; *) echo "FAIL F7 --doctor, an unknown rule name: $OUT"; fail=1;; esac
+# 0.7.0 F10: `paid` is a gate name (bash-guard.py GATE_NAMES), not a rule, and light can name it in Rules off: the doctor knows it
+CLAUDE_PLUGIN_OPTION_RULES_OFF="paid" evo "$(SS d5)"
+OUT=$(doc "$PW")
+case "$OUT" in *"unknown name"*) echo "FAIL F10 --doctor, rules_off=paid must not print an unknown name: $OUT"; fail=1;; *"level: light · rules off: paid"*) echo "PASS F10 --doctor, rules_off=paid: listed as off, no unknown-name warning";; *) echo "FAIL F10 --doctor, rules_off=paid: $OUT"; fail=1;; esac
 UH="$D/homeU"; mkdir -p "$UH/.claude"; : > "$UH/.claude/smartuse"   # a regular file where the state folder's parent should be: nothing can be created under it
 OUT=$(HOME="$UH" doc "$PW")
 case "$OUT" in *"state folder: FAIL · cannot be written"*"check"*) echo "PASS F7 --doctor, an unwritable state folder: FAIL with the fix";; *) echo "FAIL F7 --doctor, an unwritable state folder: $OUT"; fail=1;; esac

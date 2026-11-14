@@ -2,7 +2,7 @@
 
 Source: the incident "The relay that turned photos into words" (anonymised; the course's case study 7). Two Claude Code sessions on one project: a cloud **manager** that plans and reviews, a laptop **builder** that writes code and renders 3D room pictures; they talk through git and short messages; the **owner** talks to the manager from a phone. The manager forwarded the owner's photos as one line of text, read one day of a three-day export, ran eight review rounds on numbers while the owner's test was "does it look real on my phone", and spent about RM7.5 on paid image runs that were all thrown away (one batch orange from the manager's own light setting).
 
-Status: **proposal, nothing built.** Each rule below gets the cheapest mechanism that *enforces* it (a hook or a gate, not a reminder), the test that would have failed on this incident, and its limits. Build order at the end.
+Status: **proposal; rule 4 is built in 0.7.0 (not released), the rest is not built.** Each rule below gets the cheapest mechanism that *enforces* it (a hook or a gate, not a reminder), the test that would have failed on this incident, and its limits. Build order at the end.
 
 ## Three primitives cover the five rules
 All three are deterministic, stdlib-only, 0 model tokens, and reuse what smartuse already has (the transcript parsing in `ledger.py`, the human-only adapter guarded by `file-guard` and `bash-guard`, the Stop-gate pattern of `until-done.py`).
@@ -34,6 +34,14 @@ All three are deterministic, stdlib-only, 0 model tokens, and reuse what smartus
 - **Mechanism: a `paid` rule family in `bash-guard`.** A command is a paid call when it names a paid-API host or key variable (image and LLM APIs: `api.openai.com`, `api.stability.ai`, `api.replicate.com`, `fal.run`, `generativelanguage.googleapis.com`, `api.ideogram.ai`, … and `*_API_KEY` / `*_TOKEN` names), or runs a script whose source, or the `.env` beside it, names one. MCP tools the project marks in the adapter (`paid_tools:`) count too (PreToolUse on those tool names). A paid call is denied unless a go exists for that script: either a `paid:` entry in the human-only adapter (`script`, `runs`, `cap`), or — for an owner who is only on a phone — a line the owner typed in this session that passes the owner-quote check, `paid go: <script> × <runs>, cap <amount>`. The hook counts runs in the state dir. The first run after a new go must ask for one output (the project names its count flag in the adapter); further runs need `test ok` from the owner, also by quote.
 - **Test that fails on this incident:** the batch command that spent the RM7.5, with no go anywhere. Expected: **denied at the first call** (RM0 spent). With a go of `× 10` but no `test ok`: the second call is **denied**, so the orange batch is one picture, not a batch. With the go inside a message relayed from the manager session: **denied** (the go must be the owner's own typing).
 - **Limits:** a call hidden behind configuration the scan cannot see (a host read from a remote config) slips through; the adapter's `paid_scripts:` list closes that for a known project.
+- **Built in 0.7.0 (not released), and where it differs from this proposal.**
+  - It is a named check, `paid`, that runs last in `bash-guard` (beside `RULES`, not an entry of it), on the Bash, PowerShell and Monitor tools. Every deny ends `[rule paid]`. Strict: always on; light: on only where the adapter has a paid line.
+  - **No `.env`.** The scan reads the command and the first 256 KB of the script it runs. It never opens a `.env` beside the script, and a host or key that lives only there is not seen. List the script in `paid_scripts:` instead.
+  - **No `paid_tools:`.** MCP tools are not checked; the proposal's `paid_tools:` key is not built.
+  - **Named keys, not a family.** The key variables are named (`OPENAI_API_KEY` and the like), not every `*_API_KEY` or `*_TOKEN`. `paid_hosts:` adds hosts.
+  - **The go.** The adapter line `paid: <script> x <runs>, cap <amount>[, count <flag> | count none][, test ok]` is built, with the one-output-first rule and the run counter. The typed `paid go:` line from a phone, and `test ok` by quote, are not built in this release (F5); `test ok` goes on the adapter line.
+  - **Added:** `paid_scripts:` (with `only <flag>`), `paid_free:` for dry runs and offline checks, and `paid_guard: on`. The counter and the session transcripts are owner-only for the shell and the file tools.
+  - The limits and over-denies are in `SECURITY.md`.
 
 ## Rule 5 — visual iteration runs between the owner and the builder; the planner joins only when asked
 - **Mechanism (two lines of defence, both cheap):**
@@ -48,7 +56,7 @@ All three are deterministic, stdlib-only, 0 model tokens, and reuse what smartus
 - Add: "Paid calls: the person's typed go, one test output, then the batch."
 
 ## Build order (cheapest first, most money or harm first)
-1. Rule 4 — the `paid` rule in `bash-guard` (a regex family, a counter, one owner-quote check). Stops money leaking today.
+1. Rule 4 — the `paid` check in `bash-guard` (a counter and the adapter go; the owner-quote check is F5, not built). Stops money leaking today. Built in 0.7.0, not released.
 2. Rule 1 — `relay.py save` + `relay-guard`, then the receiver's open-before-done gate. The lesson of the incident.
 3. Rule 2 — `inventory.py` + the brief gate; the ask-again check.
 4. Rules 3 and 5 — the review-file contract and the planner's `deny_write:` / visual-parameters section (both reuse the owner-quote check).
