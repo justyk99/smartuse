@@ -144,12 +144,12 @@ RULES = [
      r"(?:\s+(?:-\S+|/[a-z]\b|bypass|unrestricted|remotesigned|allsigned|hidden|minimized))*\s+)?[\"']?(?:\.[\\/])?\1(?![\w.-])",
      "download then execute in PowerShell (a download run as commands, or a script the same command downloads and runs) — save the file, read it, then run it on purpose"),
     # ps-rm-root (0.7.0 F7): Remove-Item or an alias (rm, ri, del, erase, rd, rmdir; not `git rm`) with a recurse flag (-r…, /s) and a force flag (-fo…,
-    # -f, /q) in one segment, and as a word of it a root (/, \, C:, C:\, with a trailing *), the home folder (~, $HOME, $env:USERPROFILE, %USERPROFILE%,
+    # -f, /q) in one segment, and as a word of it a root (/, \, C:, C:\, with a trailing *), the home folder (~, $HOME, $env:USERPROFILE, ${env:USERPROFILE} (ps_text reads its braces as ;), %USERPROFILE%,
     # C:\Users\<name>, /home/<name>), `.` or `*`. A path below them (.\build, $HOME\.cache, *.tmp) is not matched. The three scans are bounded.
     (r"(?<![\w.-])(?<!git )(?:remove-item|ri|rm|del|erase|rd|rmdir)(?![\w-])"
      r"(?=[^;&|\n]{0,300}?\s(?:--?r[a-z]*|/s)(?![\w/-]))(?=[^;&|\n]{0,300}?\s(?:--?f(?:o[a-z]*)?|/q)(?![\w/-]))"
      r"[^;&|\n]{0,300}?\s[\"']?(?:\*(?:\.\*)?|[\\/]+\*?|[a-z]:[\\/]*\*?|~[\\/]*\*?|\$\{?home\}?[\\/]*\*?"
-     r"|\$env:(?:userprofile|homepath|homedrive|systemdrive)[\\/]*\*?|%userprofile%[\\/]*\*?|\.[\\/]*\*?"
+     r"|\$(?:env:(?:userprofile|homepath|homedrive|systemdrive)|[{;]env:(?:userprofile|homepath|homedrive|systemdrive)[};])[\\/]*\*?|%userprofile%[\\/]*\*?|\.[\\/]*\*?"
      r"|[a-z]:[\\/]+users[\\/]+[^\\/\s\"';&|)]+[\\/]*\*?|/home/[^/\s\"';&|)]+/*\*?)[\"']?(?=[\s;&|)]|$)",
      "Remove-Item -Recurse -Force of a root, the home folder, . or * — delete named paths only"),
 ]
@@ -1938,7 +1938,7 @@ PAID_PS_ALIAS = {"args": "argumentlist", "path": "filepath", "pspath": "filepath
                  "proga": "progressaction", "ev": "errorvariable", "wv": "warningvariable", "iv": "informationvariable", "ov": "outvariable",
                  "ob": "outbuffer", "pv": "pipelinevariable", "vb": "verbose", "db": "debug", "wi": "whatif", "cf": "confirm"}
 PAID_PS_ALL = PAID_PS_SP_VAL + PAID_PS_SP_SW + PAID_PS_COMMON_VAL + PAID_PS_COMMON_SW
-PAID_PS_LIT = re.compile(r"""(?:'[^']*'|"[^"$`()@]*"|[^\s'"$`()@;|&<>]+)""")   # one literal word: quoted, or plain with nothing that expands
+PAID_PS_LIT = re.compile(r"""(?:'[^']*'|"[^"$`()@]*"|[-+]?(?:0x[\da-f]+|\d+(?:\.\d+)?(?:e[-+]?\d+)?|\.\d+)(?:[kmgtp]b|[ld])?|\$(?:[\w:.?]+|\{[^}$`]*\}))""", re.I)   # one literal word on the right of an =: a quoted word (no expansion in "..."), a number, a $variable read ($true, $false, $null too); a bare word is a command in PowerShell and is scanned
 PAID_PS_ASSIGN = re.compile(r"(?:\[[^\]]*\]\s*)*\$[\w:.?{}-]+\s*[-+*/%]?=\s*")   # `$x = `, `[int]$x = `, `$env:X = `, `$x += ` at the start of a statement
 
 

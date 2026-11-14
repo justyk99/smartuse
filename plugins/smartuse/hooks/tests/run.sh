@@ -811,11 +811,24 @@ twin deny  'Remove-Item -Recurse -Force /'
 twin deny  'Remove-Item -Recurse -Force /home/yk'
 twin deny  'cmd /c rd /s /q C:\'
 twin deny  'Get-Date; Remove-Item -Force -Recurse $env:USERPROFILE\*'
+# the brace form of the environment variable (0.7.0 fix round 2): ${env:USERPROFILE} is $env:USERPROFILE
+twin deny  'Remove-Item -Recurse -Force ${env:USERPROFILE}'
+twin deny  'Remove-Item -Recurse -Force ${env:USERPROFILE}\*'
+twin deny  'Remove-Item -Recurse -Force ${env:HOMEPATH}\*'
+twin deny  'Remove-Item -Recurse -Force ${env:HOMEDRIVE}\*'
+twin deny  'Remove-Item -Recurse -Force ${env:SYSTEMDRIVE}\*'
+twin deny  'rm -r -fo "${env:USERPROFILE}"'
+twin deny  'Remove-Item -Force -Recurse -Path ${env:userprofile}'
+# known limit: the PowerShell tool reads the braces as ; so the flags must come before the brace form; flags after it are seen in the Bash tool only
+check deny 'Remove-Item -Path ${env:userprofile} -Recurse -Force'
 # ps-rm-root: allow (a named folder, a pattern, no recurse or no force, a path inside the home folder, a mention)
 twin allow 'Remove-Item -Recurse -Force .\build'
 twin allow 'Remove-Item -Recurse -Force build'
 twin allow 'Remove-Item -Recurse -Force ./build/'
 twin allow 'Remove-Item -Recurse -Force $env:TEMP\x'
+twin allow 'Remove-Item -Recurse -Force ${env:TEMP}\build'
+twin allow 'Remove-Item -Recurse -Force ${env:USERPROFILE}\.cache\x'
+twin allow 'Remove-Item -Recurse -Force ${env:TEMP}'
 twin allow 'Remove-Item -Recurse -Force *.tmp'
 twin allow 'Remove-Item -Recurse -Force .\*.log'
 twin allow 'Remove-Item .\build -Recurse'
@@ -846,7 +859,7 @@ for t in Bash PowerShell; do
 done
 # decided within a second inside the process, 30 KB each: a dense run of download commands and of Remove-Item commands, then a last one that is
 # (deny) or is not (allow) the rule's case; every shape is run through the PowerShell tool and the Bash tool
-for shape in dl-words-deny dl-flags-deny dl-flags-allow dl-run-deny dl-run-allow rm-words-deny rm-flags-deny rm-flags-allow rm-sep-deny; do
+for shape in dl-words-deny dl-flags-deny dl-flags-allow dl-run-deny dl-run-allow rm-words-deny rm-flags-deny rm-flags-allow rm-sep-deny rm-brace-deny rm-brace-allow; do
   r=$(py - "$G" "$shape" <<'PY'
 import contextlib, io, json, sys, time, types
 src = open(sys.argv[1], encoding="utf-8").read()
@@ -874,6 +887,12 @@ elif s == "rm-flags-deny":
 elif s == "rm-flags-allow":
     u = "Remove-Item -Recurse -Force a "
     cmd, rule, hit = u * (N // len(u)) + "b", "ps-rm-root", False
+elif s == "rm-brace-deny":
+    u = "Remove-Item -Recurse -Force ${env:TEMP} "
+    cmd, rule, hit = u * (N // len(u)) + "Remove-Item -Recurse -Force ${env:USERPROFILE}", "ps-rm-root", True
+elif s == "rm-brace-allow":
+    u = "Remove-Item -Recurse -Force ${env:TEMP} "
+    cmd, rule, hit = u * (N // len(u)) + "Remove-Item -Recurse -Force ${env:USERPROFILE\\x}", "ps-rm-root", False
 else:
     u = "Remove-Item -Recurse -Force a; "
     cmd, rule, hit = u * (N // len(u)) + "Remove-Item -Recurse -Force .", "ps-rm-root", True
