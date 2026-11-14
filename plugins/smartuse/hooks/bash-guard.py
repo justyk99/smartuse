@@ -129,7 +129,7 @@ RULES = [
     (r"(?<![\w.-])paid-runs\.(?:json|lock)(?![\w-]|\.\w)|(?<![\w.-])paid\.[\w-][\w.-]*\.done(?![\w-]|\.\w)"
      r"|(?<![\w-])smartuse\.local\.md(?![\w-]|\.\w)|(?<![\w.-])trusted-checks\.json(?![\w-]|\.\w)"
      r"|\.claude[. ]*[/\\]smartuse[. ]*[/\\]interpreter(?![\w-]|\.\w)",
-     "owner-only file (it records the paid runs the owner allowed): the shell may read it, nothing else. Ask the owner."),
+     "owner-only file (the paid-run counter, the adapter, the trust file or the launcher file): the shell may read it, nothing else. Ask the owner."),
     # ps-download-exec (0.7.0 F7): a download cmdlet or alias (_PS_DL) whose output runs as commands. (1) piped on to iex / Invoke-Expression or
     # powershell / pwsh / cmd (a pipe into bash, sh and the like stays pipe-to-shell's); (2) given to iex / Invoke-Expression, or to [scriptblock]::Create, in the same segment; (3) a script the same command saves with
     # -o / -OutFile / -Output / -Destination and runs: the file named there is the next command, or the first argument of an interpreter, in one of
