@@ -25,6 +25,16 @@ SAY=""; [ "${1:-}" = "--say-missing" ] && { SAY=1; shift; }
 # guards on (the plugin option's text is anything but empty / off / false / no / 0), one fixed sentence on stderr and exit 2, which blocks
 # the call and shows Claude why. Light (the default, also with no option set) -> silent exit 0 as before.
 GUARD=""; [ -z "$SAY" ] && [ "${1:-}" = "--guard" ] && { GUARD=1; shift; }
+# The bytecode cache (0.7.0 D-YK15): Python compiles a MAIN script on every start and never keeps the result; bash-guard.py's compile alone
+# is ~60 ms on every Bash call. When the first word (after the two options above) is an existing *.py file, it runs through a short loader
+# passed with -c: one Python start, no extra file, and the script is read through importlib's source loader, which keeps its bytecode in
+# hooks/__pycache__/ and reuses it while the source's mtime and size are unchanged. The cache is only a speed-up: PYTHONDONTWRITEBYTECODE,
+# or a folder that cannot be written, means no pyc and the same run as before. `-c` puts '' (the cwd, the user's project) first on sys.path,
+# so the loader replaces it with the script's own folder BEFORE it imports anything beyond sys and os (both loaded at start-up): a json.py
+# planted in the project is never imported. With PYTHONSAFEPATH set, Python adds no such entry and the loader leaves sys.path alone, as a
+# script run would. Anything that is not an existing *.py file (-c "...", -, a missing path) is passed to the interpreter untouched.
+LDR='import sys,os; p=sys.argv[1]; sys.path[0]=sys.path[0] or os.path.dirname(os.path.realpath(p)); sys.argv=sys.argv[1:]; import types; from importlib.machinery import SourceFileLoader as L; a=os.path.abspath(p); l=L("__main__",a); m=types.ModuleType("__main__"); m.__file__=a; m.__loader__=l; sys.modules["__main__"]=m; exec(l.get_code("__main__"),m.__dict__)'
+case "$1" in -*) ;; *.py) [ -f "$1" ] && set -- -c "$LDR" "$@";; esac
 C="${HOME:+$HOME/.claude/smartuse/interpreter}"; P=""
 if [ -n "$C" ] && [ -f "$C" ] && { read -r -n 16 P || [ -n "$P" ]; } < "$C"; then   # a regular file, read capped at 16 characters: a name is at most 7
   P=${P%$'\r'}

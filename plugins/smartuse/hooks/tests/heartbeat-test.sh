@@ -628,4 +628,97 @@ case "$OUT" in *"state folder: FAIL · cannot be written"*"check"*) echo "PASS F
 VER=$(py -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$H/../.claude-plugin/plugin.json"); VER=${VER%$'\r'}
 OUT=$(doc "$PW")
 case "$OUT" in *"plugin: smartuse $VER"*) [ -n "$VER" ] && echo "PASS F7 --doctor reads the plugin version from plugin.json ($VER)" || { echo "FAIL F7 empty version"; fail=1; };; *) echo "FAIL F7 --doctor version line (plugin.json says '$VER'): $OUT"; fail=1;; esac
+# --- 0.7.0 D-YK15: the bytecode cache. py.sh runs a hook script (a first word that is an existing *.py file) through a short loader
+# passed with -c, so Python keeps the compiled script in hooks/__pycache__/ and reuses it while the source is unchanged (a main script
+# is compiled on every start and never cached; bash-guard.py's compile alone is ~60 ms). Cases run on a COPY of the hooks, so no
+# pyc lands in the real folder. R1 behaves as the plain script run (compared with `python script` itself), R2 the cwd is never on
+# sys.path (`-c` puts '' first: a json.py in the user's project must not be imported), R3 the cache is written once and used, R4 it
+# is only a speed-up: no pyc, an unwritable pyc folder or a stale pyc all still run the current source. Not scripts -> as before
+# (the `-c "..."` and `-` cases above).
+K="$D/d15"; mkdir -p "$K/hooks" "$K/proj"; cp "$H/py.sh" "$H/bash-guard.py" "$H/file-guard.py" "$H/heartbeat.py" "$K/hooks/"
+cat > "$K/hooks/probe.py" <<'PROBE'
+import os, sys
+data = sys.stdin.read()
+sys.stdout.write("out:" + data + "|" + __name__ + "|" + os.path.basename(__file__) + "|" + str(os.path.isabs(__file__)) + "|" + os.path.basename(sys.argv[0]) + "|" + repr(sys.argv[1:]) + "|" + str(os.path.normcase(sys.path[0]) == os.path.normcase(os.path.dirname(os.path.realpath(__file__)))) + "|" + str(sys.modules["__main__"].__file__ == __file__) + "\n")
+sys.stderr.write("err:ok\n")
+if __name__ == "__main__":
+    sys.exit(int(os.environ.get("PROBE_RC", "0")))
+PROBE
+mt() { bash "$H/py.sh" -c "import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)" "$1"; }   # a file's mtime in ns (a non-script run: the loader is not involved)
+pyc() { ls "$K/hooks/__pycache__/$1".*.pyc 2>/dev/null | head -1 || true; }
+BGEV='{"tool_name":"Bash","tool_input":{"command":"sudo ls"}}'; BGOK='{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+FGEV='{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/smartuse.local.md","content":"x"}}'
+for RCV in 0 2 7; do
+  REF=$(printf 'in put' | PROBE_RC=$RCV PYTHONUTF8=1 "$REAL" "$K/hooks/probe.py" a "b c" --guard 2>"$D/d15.rerr"; echo "rc=$?")
+  GOT=$(printf 'in put' | PROBE_RC=$RCV bash "$K/hooks/py.sh" "$K/hooks/probe.py" a "b c" --guard 2>"$D/d15.gerr"; echo "rc=$?")
+  if [ "$REF" = "$GOT" ] && cmp -s "$D/d15.rerr" "$D/d15.gerr"; then
+    case "$GOT" in *"out:in put|__main__|probe.py|True|probe.py|['a', 'b c', '--guard']|True|True"*"rc=$RCV") echo "PASS D15 R1 the loader runs a script as python does (stdin, args after it, stderr, exit code $RCV, __name__, absolute __file__, sys.path[0] = its folder)";; *) echo "FAIL D15 R1 exit $RCV: $GOT"; fail=1;; esac
+  else echo "FAIL D15 R1 exit $RCV differs from a plain run: ref '$REF' got '$GOT'"; fail=1; fi
+done
+for EV in "bash-guard|$BGEV" "bash-guard|$BGOK" "file-guard|$FGEV"; do
+  N=${EV%%|*}; E=${EV#*|}
+  REF=$(printf '%s' "$E" | CLAUDE_PLUGIN_OPTION_STRICT=true PYTHONUTF8=1 "$REAL" "$K/hooks/$N.py" 2>&1; echo "rc=$?")
+  GOT=$(printf '%s' "$E" | CLAUDE_PLUGIN_OPTION_STRICT=true bash "$K/hooks/py.sh" --guard "$K/hooks/$N.py" 2>&1; echo "rc=$?")
+  case "$GOT" in *rc=0) [ "$REF" = "$GOT" ] && echo "PASS D15 R1 $N through --guard prints what the plain run prints: ${GOT:0:60}" || { echo "FAIL D15 R1 $N: ref '$REF' got '$GOT'"; fail=1; };; *) echo "FAIL D15 R1 $N: $GOT"; fail=1;; esac
+done
+case "$GOT" in *deny*) ;; *) echo "FAIL D15 R1 the guard events must include a deny: $GOT"; fail=1;; esac
+OUT=$(bash "$K/hooks/py.sh" -c "import sys; print(repr(sys.path[0]))" 2>&1) || true; [ "$OUT" = "''" ] && echo "PASS D15 -c is untouched: no loader, sys.path[0] stays ''" || { echo "FAIL D15 -c: $OUT"; fail=1; }
+OUT=$(printf 'print(40+2)\n' | bash "$K/hooks/py.sh" - 2>&1) || true; [ "$OUT" = 42 ] && echo "PASS D15 '-' (a script on stdin) is untouched" || { echo "FAIL D15 stdin script: $OUT"; fail=1; }
+RC=0; OUT=$(bash "$K/hooks/py.sh" "$K/hooks/nope.py" 2>&1) || RC=$?; RC0=0; "$REAL" "$K/hooks/nope.py" >/dev/null 2>&1 || RC0=$?
+if [ "$RC" = "$RC0" ] && [ "$RC" != 0 ]; then
+  case "$OUT" in *"can't open file"*) echo "PASS D15 R1 a script that does not exist fails as python does (exit $RC, can't open file)";; *) echo "FAIL D15 R1 missing script message: $OUT"; fail=1;; esac
+else echo "FAIL D15 R1 missing script: rc $RC vs $RC0: $OUT"; fail=1; fi
+if command -v cygpath >/dev/null 2>&1; then
+  OUT=$(printf 'z' | bash "$K/hooks/py.sh" "$(cygpath -w "$K/hooks/probe.py")" a 2>&1) || true; case "$OUT" in *"out:z|__main__|probe.py|True|probe.py|['a']|True|True"*) echo "PASS D15 R1 a Windows-style script path (C:\\...) runs through the loader";; *) echo "FAIL D15 Windows-style path: $OUT"; fail=1;; esac
+fi
+# R2: a project that holds json.py / re.py / importlib/util.py (the cwd of every hook) must never be imported by the loader or the hook
+mkdir -p "$K/proj/importlib"
+for M in json re; do printf 'print("PLANTED-%s")\n' "$M" > "$K/proj/$M.py"; done
+printf 'print("PLANTED-importlib-util")\n' > "$K/proj/importlib/util.py"; : > "$K/proj/importlib/__init__.py"
+for EV in "bash-guard|$BGEV" "bash-guard|$BGOK" "file-guard|$FGEV" "heartbeat|{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_use_id\":\"t15\",\"session_id\":\"s15\",\"cwd\":\"$PW\"}"; do
+  N=${EV%%|*}; E=${EV#*|}
+  OUT=$(cd "$K/proj" && printf '%s' "$E" | CLAUDE_PLUGIN_OPTION_STRICT=true CLAUDE_PROJECT_DIR="$PW" bash "$K/hooks/py.sh" "$K/hooks/$N.py" 2>&1; echo "rc=$?")
+  case "$OUT" in *PLANTED*|*Traceback*|*Error*) echo "FAIL D15 R2 $N imported something from the project folder: $OUT"; fail=1;; *rc=0) echo "PASS D15 R2 $N with json.py, re.py and importlib/util.py planted in the cwd: none imported";; *) echo "FAIL D15 R2 $N: $OUT"; fail=1;; esac
+done
+OUT=$(cd "$K/proj" && printf 'q' | bash "$K/hooks/py.sh" "$K/hooks/probe.py" 2>&1) || true; case "$OUT" in *"|True|True"*) echo "PASS D15 R2 sys.path[0] is the script's folder, not '' (checked in the script itself)";; *) echo "FAIL D15 R2 sys.path[0]: $OUT"; fail=1;; esac
+# R3: the cache is written on the first run, left alone on the second, and really used
+rm -rf "$K/hooks/__pycache__"
+printf '%s' "$BGOK" | bash "$K/hooks/py.sh" --guard "$K/hooks/bash-guard.py" >/dev/null 2>&1 || true; PY1=$(pyc bash-guard)
+[ -n "$PY1" ] && echo "PASS D15 R3 the first run wrote hooks/__pycache__/$(basename "$PY1")" || { echo "FAIL D15 R3 no bash-guard pyc after a run"; fail=1; }
+if [ -n "$PY1" ]; then
+  M1=$(mt "$PY1"); sleep 1
+  printf '%s' "$BGOK" | bash "$K/hooks/py.sh" --guard "$K/hooks/bash-guard.py" >/dev/null 2>&1 || true; M2=$(mt "$PY1")
+  [ -n "$M1" ] && [ "$M1" = "$M2" ] && echo "PASS D15 R3 the second run does not rewrite the pyc (mtime $M1 unchanged)" || { echo "FAIL D15 R3 pyc rewritten: $M1 -> $M2"; fail=1; }
+fi
+# the cache is USED: a source edited to a same-size text with the same mtime still runs the cached code (Python trusts mtime + size)
+printf 'import os, sys\nsys.stdout.write("AAAA\\n")\n' > "$K/hooks/cached.py"
+bash "$H/py.sh" -c "import os,sys; os.utime(sys.argv[1], (1700000000, 1700000000))" "$K/hooks/cached.py"
+O1=$(bash "$K/hooks/py.sh" "$K/hooks/cached.py" 2>&1) || true
+printf 'import os, sys\nsys.stdout.write("BBBB\\n")\n' > "$K/hooks/cached.py"
+bash "$H/py.sh" -c "import os,sys; os.utime(sys.argv[1], (1700000000, 1700000000))" "$K/hooks/cached.py"
+O2=$(bash "$K/hooks/py.sh" "$K/hooks/cached.py" 2>&1) || true
+[ "$O1" = AAAA ] && [ "$O2" = AAAA ] && echo "PASS D15 R3 the pyc is used: a same-size, same-mtime edit still runs the cached code" || { echo "FAIL D15 R3 the cache is not used: '$O1' then '$O2' (want AAAA twice)"; fail=1; }
+# R4: a changed source (other size) is recompiled and the pyc is replaced
+printf 'import os, sys\nsys.stdout.write("CCCCCCCC\\n")\n' > "$K/hooks/cached.py"
+O3=$(bash "$K/hooks/py.sh" "$K/hooks/cached.py" 2>&1) || true; O4=$(bash "$K/hooks/py.sh" "$K/hooks/cached.py" 2>&1) || true
+[ "$O3" = CCCCCCCC ] && [ "$O4" = CCCCCCCC ] && [ -n "$(pyc cached)" ] && echo "PASS D15 R4 a stale pyc (the source changed) is recompiled: the new text runs, and the pyc stays" || { echo "FAIL D15 R4 stale pyc: '$O3' '$O4' pyc '$(pyc cached)'"; fail=1; }
+# R4: PYTHONDONTWRITEBYTECODE=1 -> works, writes no pyc
+rm -rf "$K/hooks/__pycache__"
+OUT=$(printf '%s' "$BGEV" | PYTHONDONTWRITEBYTECODE=1 CLAUDE_PLUGIN_OPTION_STRICT=true bash "$K/hooks/py.sh" --guard "$K/hooks/bash-guard.py" 2>&1) || true
+case "$OUT" in *deny*) if [ -z "$(pyc bash-guard)" ] && [ ! -e "$K/hooks/__pycache__" ]; then echo "PASS D15 R4 PYTHONDONTWRITEBYTECODE=1: the guard denies as before and no pyc is written"; else echo "FAIL D15 R4 a pyc was written under PYTHONDONTWRITEBYTECODE"; fail=1; fi;; *) echo "FAIL D15 R4 PYTHONDONTWRITEBYTECODE: $OUT"; fail=1;; esac
+# R4: a pyc path that cannot be written (__pycache__ is a plain file, so the folder cannot be made) -> works as today
+rm -rf "$K/hooks/__pycache__"; : > "$K/hooks/__pycache__"
+OUT=$(printf '%s' "$BGEV" | CLAUDE_PLUGIN_OPTION_STRICT=true bash "$K/hooks/py.sh" --guard "$K/hooks/bash-guard.py" 2>&1; echo "rc=$?")
+case "$OUT" in *deny*"rc=0") echo "PASS D15 R4 a pyc path that cannot be written (a file named __pycache__): the guard still denies, exit 0, no noise";; *) echo "FAIL D15 R4 unwritable pyc path: $OUT"; fail=1;; esac
+rm -f "$K/hooks/__pycache__"
+# R4: a read-only hooks folder (only where chmod really blocks a write: not as root, not on a disk that ignores modes)
+mkdir -p "$K/ro"; cp "$K/hooks/py.sh" "$K/hooks/bash-guard.py" "$K/ro/"; chmod a-w "$K/ro"
+if ! ( : > "$K/ro/.w" ) 2>/dev/null; then
+  OUT=$(printf '%s' "$BGEV" | CLAUDE_PLUGIN_OPTION_STRICT=true bash "$K/ro/py.sh" --guard "$K/ro/bash-guard.py" 2>&1; echo "rc=$?")
+  case "$OUT" in *deny*"rc=0") echo "PASS D15 R4 a read-only hooks folder: the guard still denies, exit 0, no noise";; *) echo "FAIL D15 R4 read-only folder: $OUT"; fail=1;; esac
+else echo "PASS D15 R4 (skipped: chmod does not block writes here, so a read-only folder cannot be made; the unwritable-path case above stands in)"; fi
+chmod u+w "$K/ro" 2>/dev/null || true
+# the repo ignores the cache folder, and py.sh stays bash 3.2 safe (nothing from bash 4+ was added)
+if [ -f "$H/../../../.gitignore" ]; then grep -qx '__pycache__/' "$H/../../../.gitignore" && echo "PASS D15 .gitignore ignores __pycache__/" || { echo "FAIL D15 .gitignore lacks __pycache__/"; fail=1; }; fi
+if grep -nE 'declare -[Aan]|mapfile|readarray|\|&|&>>|coproc|;;&' "$H/py.sh" >/dev/null; then echo "FAIL D15 py.sh uses a bash 4 feature: $(grep -nE 'declare -[Aan]|mapfile|readarray|\|&|&>>|coproc' "$H/py.sh" | head -2)"; fail=1; else echo "PASS D15 py.sh has no bash 4 feature (declare -A/-n, mapfile, readarray, |&, &>>, coproc, ;;&)"; fi
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
