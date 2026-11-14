@@ -230,6 +230,10 @@ elif mode == "pstime":   # pstime GUARD PROJECT: F6, PowerShell texts through th
         "a backslash path word": ("python " + "a\\" * 14000 + "x.py", True),
         "1,500 backslash script runs": (";".join(".\\tools\\e%d.py" % i for i in range(1500)), True),
         "download cmdlets": ("iwr -Uri a.example/x -OutFile y; " * 900, True),
+        "bare-word assignments": ("$a = hello; " * 2500, True),
+        "literal assignments": ("$a = 5; $b = $a; $c = $true; $d = 'x'; " * 750, True),
+        "one number-like word": ("$a = " + "1" * 30000 + "x", True),
+        "one long dotted word": ("$a = " + "1." * 15000 + "x", True),
     }
     for nm, (c, none) in shapes.items():
         assert len(c) < 32768, (nm, len(c))
@@ -1105,7 +1109,7 @@ PGTOOL=Bash
 # ===== 28. timing for the PowerShell forms, inside the process: each 30 KB text decided in under 1 s
 mkdir -p "$D/pst"
 r=$(py "$CW" pstime "$(wp "$G")" "$(wp "$D/pst")" </dev/null 2>&1)
-[ "$r" = ok ] && ok "F6 timing: four ordinary PowerShell commands under 5 ms each, ten 30 KB PowerShell texts decided in under 1 s with the verdicts the cases above show" || ko "F6 timing: $r"
+[ "$r" = ok ] && ok "F6 timing: four ordinary PowerShell commands under 5 ms each, fourteen 30 KB PowerShell texts decided in under 1 s with the verdicts the cases above show" || ko "F6 timing: $r"
 
 # ===== 29. 0.7.0 F4b fix round (automated security review): every case here moves a run toward paid or scanned, never toward free
 # --- 29a. a word that is not plain is never a free flag, and never missing from an `only` check (a backslash, a quote that is not the one outer pair, quoted text glued to other text)
@@ -1245,6 +1249,22 @@ allow "29f PS pin: a key name is the variable, the value is a literal" "\$env:$K
 allow "29f PS pin: a key name read into another variable" "\$env:X = \$env:$KN" toolu_e5
 allow "29f PS pin: a read of the script is a mention" '$x = Get-Content render.py' toolu_e6
 allow "29f PS pin: the variable, then a script with no signal" '$env:X = abc; python polish.py' toolu_e7
+# 0.7.0 fix round 2: on the right of an = only a quoted word, a number, a $variable read and $true / $false / $null are literals; a bare word is a
+# command in PowerShell ($x = .\render.py runs the script), so it is scanned as a segment (a word that names no script and no interpreter finds nothing)
+for c in '$x = .\render.py' '$x = python render.py' '$x = render.py' '$env:X = .\render.py' '$env:X = render.py' '[string]$x = .\render.py' '$x += render.py' '$x = ./render.py' '$a = $b = render.py'; do
+  deny "29f PS bare word: $c" "$c" 'render.py'
+done
+allow "29f PS bare word pin: \$env:K = 'abc'" "\$env:K = 'abc'" toolu_e8
+allow "29f PS bare word pin: a number" '$n = 5' toolu_e9
+allow "29f PS bare word pin: a negative decimal" '$n = -1.5' toolu_e10
+allow "29f PS bare word pin: a variable read" '$y = $x' toolu_e11
+allow "29f PS bare word pin: a variable read with a scope" '$y = $env:PATH' toolu_e12
+allow "29f PS bare word pin: \$true" '$y = $true' toolu_e13
+allow "29f PS bare word pin: \$false" '$y = $false' toolu_e14
+allow "29f PS bare word pin: \$null" '$y = $null' toolu_e15
+allow "29f PS bare word pin: a double-quoted word" '$y = "abc"' toolu_e16
+allow "29f PS bare word pin: a word that names no script and no interpreter" '$x = hello' toolu_e17
+allow "29f PS bare word pin: ... then a script with no signal" '$x = hello; python polish.py' toolu_e18
 PGTOOL=Bash
 
 # --- 29g. PowerShell Start-Process: a word starting with - is never the program; parameters resolve by unique prefix; what cannot be read fails closed
