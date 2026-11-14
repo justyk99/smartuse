@@ -1666,7 +1666,24 @@ def _json_tool_file(a):
     return files[0] if len(files) == 1 else None
 
 
-def _settings_reader_arg(v, i, wi):
+def _copy_lands(dest, src, pat):
+    """0.7.0 review fix M3: does a copy of `src` into `dest` write a path that `pat` (the rule's own pattern) names? Only when dest is a
+    folder: a word ending in a slash or backslash, or one with no file extension (`.`, `..`, `.claude`, a project's state folder), or
+    a project's state folder whatever its name. The copy then makes <dest>/<file name of src>, so a settings file copied into `.claude/`
+    is a write. A destination with a file extension (settings.bak, backup.json) is a file and is not joined. The joined path counts when
+    the pattern's match starts inside the destination (`.claude/` + settings.json) or, for a pattern that names a file alone (paid-runs.json,
+    smartuse.local.md), when the destination is one of the owner's folders (.claude, ~/.claude/smartuse, a project's state folder): a copy of the
+    counter into backup/ is a plain read, as before."""
+    d = dest.replace("\\", "/")
+    base = d.rstrip("/").rsplit("/", 1)[-1]
+    if not (d.endswith("/") or not os.path.splitext(base)[1] or re.search(r"(?:^|/)\.claude/smartuse/projects/[^/]+/?$", d)):
+        return False
+    d = d.rstrip("/")
+    m = pat.search(d + "/" + src.replace("\\", "/").rsplit("/", 1)[-1])
+    return bool(m) and (m.start() < len(d) or bool(re.search(r"(?:^|/)\.claude(?:/smartuse(?:/projects/[^/]+)?)?$|(?:^|/)etc/smartuse$", d, re.I)))
+
+
+def _settings_reader_arg(v, i, wi, pat=None):
     """Is word v[wi] (it names a settings file) a plain argument that only READS it, of the command whose name is v[i]? A reader of
     READERS (not as the value of one of its options, READER_VALUE_OPTS), a git subcommand of GIT_READERS (no --output, no external
     diff), a copy command with the path as a source (not the last word, plain flags only), `python -m json.tool` given that one file."""
@@ -1696,7 +1713,7 @@ def _settings_reader_arg(v, i, wi):
                     return False
             else:
                 pos.append(j)
-        return len(pos) >= 2 and wi in pos and wi != pos[-1]
+        return len(pos) >= 2 and wi in pos and wi != pos[-1] and not (pat is not None and _copy_lands(v[pos[-1]], w, pat))
     if PYFAM.fullmatch(cmd):
         return _json_tool_file(v[i + 1:]) == wi - (i + 1)
     if cmd in READERS:
@@ -1775,7 +1792,7 @@ def _settings_waived(text, ps, pre, name="settings-file"):
         if si not in memo:
             memo[si] = _text_words(v, i)
         tw = memo[si]
-        if not (tw is True or (tw is not None and wi in tw)) and not _settings_reader_arg(v, i, wi):
+        if not (tw is True or (tw is not None and wi in tw)) and not _settings_reader_arg(v, i, wi, pat):
             return False
         if si not in fed:   # what the command prints (the path may be in it) must not be piped on into anything but a plain filter
             fed.add(si)
@@ -1911,7 +1928,16 @@ PAID_WRAP = {"timeout": ("-s -k --signal --kill-after", 1, ""), "nice": ("-n --a
         "env": ("-u -C -S --unset --chdir --split-string", 0, ""), "caffeinate": ("-t -w", 0, ""), "poetry": ("", 0, "run"), "pipenv": ("", 0, "run"),
         "pnpm": ("-p --package", 0, "exec dlx"), "yarn": ("-p --package", 0, "exec dlx"), "npm": ("-p --package", 0, "exec"), "nohup": ("", 0, ""),
         "sudo": ("-u -g -h -p -C -D -R -T -U -r -t", 0, ""), "time": ("-f -o --format --output", 0, ""),
-        "parallel": ("-j -n -N -a -S -L -P --jobs", 0, ""), "watch": ("-n --interval", 0, "")}
+        "parallel": ("-j -n -N -a -S -L -P --jobs", 0, ""), "watch": ("-n --interval", 0, ""),
+        # 0.7.0 review fix M1: the other runners and secret injectors. `pdm run python x.py`, `conda run -n env python x.py`, `op run -- python x.py`
+        "pdm": ("", 0, "run"), "hatch": ("-e --env", 0, "run"), "rye": ("", 0, "run"), "pixi": ("-e --environment --manifest-path", 0, "run"),
+        "conda": ("-n -p --name --prefix", 0, "run"), "op": ("--env-file --account --session", 0, "run"), "dotenv": ("-f --file", 0, "run"),
+        "doppler": ("-p -c --project --config --token -t --config-dir", 0, "run")}
+# 0.7.0 review fix round 2: the runner's OWN options before the subcommand (`hatch -e test run python x.py`, `op --account me run -- python x.py`),
+# name -> the ones that take a value as the NEXT word; any other -word before the subcommand is one word. A folder flag (pdm -p, poetry -C,
+# hatch -p, conda run --cwd) is left out on purpose: that run is in another folder (a stated limit, SECURITY.md).
+PAID_PRE = {"hatch": "-e --env --data-dir --cache-dir --config", "dotenv": "-f --file -q --quote -e --export", "op": "--account --config --encoding --format --session",
+        "doppler": "-p -c -t --project --config --token --config-dir --api-host --scope --timeout --attempts", "pdm": "-c --config", "poetry": ""}
 PAID_REPEAT = frozenset("xargs parallel watch".split())   # these run the command once per input / tick: more than one run in one call
 PAID_LOOP_OPEN = re.compile(r"(?:(?:then|do|else|elif|if|!|\{)\s+)*(?:for|while|until|select)\b")   # a segment that opens a loop …
 PAID_LOOP_END = re.compile(r"done\b")                                                               # … and the one that closes it
@@ -2084,6 +2110,7 @@ def paid_read_file(p):
         return None
 
 
+PAID_UNREAD = "a script that could not be read"   # the signal of a hit for a script file that exists and could not be opened (strict only; paid_verdict turns it into "could not verify")
 PAID_FLAG = re.compile(r"--[A-Za-z0-9_-]+")   # a flag of paid_free: and of `only`: two dashes, then letters, digits, - or _
 
 
@@ -2142,6 +2169,7 @@ class PaidCfg:
     cover. blind (V10): the command is not read cleanly, so no run is free."""
     def __init__(self, adapter, project, blind=False):
         self.project, self.blind, self.base = project, blind, None
+        self.strict = False                                     # paid_hit sets it: strict reads a script that cannot be opened as "could not verify" (m7)
         self.moved, self.cd_any = False, False                  # a folder change was seen before this run (paid_seg_hits sets it); a cd word is anywhere in the command (paid_hit sets it)
         self.ci = os.name == "nt" or sys.platform == "darwin"   # the file system's case rule, for the paid_free: paths
         self.names, self.paths, self.pnames = {}, {}, {}        # literal items: file name / project-relative path / file name of a path item -> [flags or None]
@@ -2300,9 +2328,14 @@ def paid_unwrap(toks):
         rep = rep or name in PAID_REPEAT
         i = 1
         if subs:
-            if len(toks) > 1 and toks[1] in subs:
-                i = 2
-            elif len(toks) > 1 and PAID_INTERP.fullmatch(toks[1]):   # yarn node x.js: the interpreter stays
+            j = 1
+            if name in PAID_PRE:                                      # the runner's own options (and their values) before the subcommand
+                pv = PAID_PRE[name].split()
+                while j < len(toks) and len(toks[j]) > 1 and toks[j][0] == "-" and toks[j] != "--":
+                    j += 2 if toks[j] in pv else 1
+            if j < len(toks) and toks[j] in subs:
+                i = j + 1
+            elif j == 1 and len(toks) > 1 and PAID_INTERP.fullmatch(toks[1]):   # yarn node x.js: the interpreter stays
                 toks = toks[1:]
                 continue
             else:
@@ -2323,6 +2356,8 @@ def paid_unwrap(toks):
             else:
                 break
         toks = toks[i:]
+        if name == "hatch" and toks and re.match(r"[\w.-]+:[\w./-]", toks[0]):   # hatch run test:python x.py: the environment name is not the command
+            toks = [toks[0].split(":", 1)[1]] + toks[1:]
     return toks, rep, cd
 
 
@@ -2476,20 +2511,28 @@ def paid_seg_run(seg, hosts, cwd, cfg, depth, loop, ps, ext):
     sig = paid_code_signal(seg, hosts, bool(PAID_CALLER.fullmatch(cmd)) or (ps and cmd in PAID_PS_CALLER),
                            cmd not in PAID_PREP and not (ps and toks[0][:5].lower() == "$env:"))   # not cmd: its base name stops at a / in the value
     path = None if sig else paid_script_arg(cmd, toks)
-    if sig:
+    if sig in PAID_KEYS and not paid_code_signal(" ".join(raws), hosts, bool(PAID_CALLER.fullmatch(cmd)) or (ps and cmd in PAID_PS_CALLER), True):
+        # 0.7.0 review fix m5: the key stands only in front of the command (KEY=x python render.py, env KEY=x ...): preparation. It still makes the run
+        # paid, but the hit is the script the command runs, so a go for that script covers it (was: the interpreter's name, which no go can name)
+        sp = paid_script_arg(cmd, toks)
+        out.append((sig + " on the command line", paid_basename(sp.rstrip("`")) if sp else cmd, rep))
+    elif sig:
         out.append((sig + " on the command line", cmd, rep))
     if path:
         name = paid_basename(path.rstrip("`"))
         files = paid_script_files(path.rstrip("`"), cwd)
-        sig = None
+        sig, unread = None, False
         for f in files:                                                 # a signal in any file found makes the run paid
             src = paid_read_file(f)
             sig = paid_code_signal(src, hosts, True) if src else None
             if sig:
                 break
+            unread = unread or src is None                              # the file exists and could not be opened (an empty file reads as "")
         items = cfg.script_items(name, [] if moved else files)           # after a folder change a path item matches by file name alone
         golisted = name.lower() in cfg.go
-        if sig or items or golisted:
+        if unread and not sig and cfg.strict:                            # 0.7.0 review fix m7: a script that cannot be read is not "no signal" in strict (light allows, as before)
+            out.append((PAID_UNREAD, name, rep))
+        elif sig or items or golisted:
             k = toks.index(path) + 1
             args = raws[k:]
             base = len(ms) - len(toks) + k                               # the index of the first argument among the words with their places
@@ -2567,7 +2610,7 @@ def paid_finish(raw):
     return [(h[0], h[1], h[2], tuple(f[3] for f in free if h[1] and f[1].lower() == h[1].lower())) for h in raw if h[0] is not None]
 
 
-def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False):
+def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False, strict=False):
     """[(signal, script, repeats, skip)] — EVERY paid signal in the command (stdin-heredoc bodies first, then each segment), [] when none.
     text = the command with data heredocs stripped. blind (V10): the command is one the source check cannot read cleanly (complexity(),
     or over the heredoc scan cap): the HEREDOC pattern is not run (it rescans the text once per opener), and the whole text is searched
@@ -2575,6 +2618,7 @@ def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False):
     extra = [h for h in adapter_list(adapter, "paid_hosts") if re.fullmatch(r"[\w.-]+", h)]
     hosts = paid_host_re(PAID_HOSTS + tuple(extra)) if extra else PAID_HOST
     cfg = PaidCfg(adapter, project or cwd, blind)
+    cfg.strict = strict
     cfg.cd_any = bool(PAID_CD_WORD.search(text))   # a loop may run its cd before the run that stands above it in the text
     segs = paid_segments(text, True)   # keep: a segment that ends at a backtick or ( keeps it, so a free flag beside `…` / $(…) is seen as not plain (as paid_seg_args reads it)
     looped = any(PAID_LOOP_OPEN.match(s) for s in segs)   # a body is not tied to a segment: any loop in the command makes it a repeat
@@ -2725,7 +2769,7 @@ def paid_count(data, sdir, items, text, deadline=None):
             if used >= runs:
                 return False, f"the go for {clip(script)} is used up ({runs} of {runs}). Ask the owner for a new go.", k
             if used and not ok:
-                return False, f"run {used} of {runs} is done; the batch waits for the owner's \"test ok\" (typed in this session). Show the owner the one output first.", k
+                return False, f"run {used} of {runs} is done; the batch waits for the owner's \"test ok\": ask the owner to add \", test ok\" to that paid: line. Show the owner the one output first.", k
             if not ok and go["count"] != "none":
                 raw = paid_seg_args(text, script, 0, skip) or []
                 bad = next((t for t in raw if paid_not_plain(t)), None)
@@ -2815,7 +2859,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         text = paid_ps_text(ps_text(paid_ps_blocks(cmd)) if "{" in cmd else text)   # a script block after a pipe or a switch is marked as a loop first
     elif not blind:
         text = strip_comments(text)   # 0.7.0 F8: Bash only, at or under the heredoc cap (blind is the command that was not read cleanly): a quote in a # comment must not hide a paid run
-    hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps)
+    hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps, strict)
     if not hits:
         return None
     head = lambda h: f"paid call ({clip(h[0])}) — "
@@ -2826,6 +2870,11 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
     if not why and deadline is not None and time.monotonic() >= deadline:
         why = "the hook ran past its deadline"
     first, rule, miss = hits[0], "", None                    # first = the hit the reason names
+    unread = next((h for h in hits if h[0] == PAID_UNREAD), None)   # strict only (paid_hit): a script that exists and could not be opened
+    if unread and not why:
+        # No go clears this and the script has no known paid signal: say what is true (the guard cannot tell whether it pays) and the two ways out.
+        return (f"could not verify whether {clip(unread[1])} pays: it could not be read, so the guard cannot see a paid signal in it. "
+                "Make it readable, or run it in light mode. Nothing was spent.")
     try:
         if not why:
             covered = []                                      # [(hit, go_id, go)] once per script
@@ -2852,8 +2901,8 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         return head(first) + rule
     if not miss:
         return None
-    return (head(miss) + f"no go from the owner for {clip(miss[1])}. The owner types in this session: \"paid go: {clip(miss[1])} x <runs>, cap <amount>\" "
-            f"(or adds \"paid: {clip(miss[1])} x <runs>, cap <amount>\" to .claude/smartuse.local.md). Nothing was spent.")
+    return (head(miss) + f"no go from the owner for {clip(miss[1])}. Ask the owner to add \"paid: {clip(miss[1])} x <runs>, cap <amount>\" "
+            "to .claude/smartuse.local.md. Nothing was spent.")
 
 
 def paid_gate(data, pre, text, tag, ps, strict, off, deadline):

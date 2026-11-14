@@ -723,6 +723,61 @@ PY
 )
   case "$r" in ok*) echo "PASS $shape: owner-file decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL owner-file waiver timing: $shape -> '${r:0:120}'"; fail=1;; esac
 done
+# --- 0.7.0 review fix M3: a copy whose DESTINATION is a folder writes a file with the source's name there, so a protected name read as "a source,
+#     never the last word" is a write when the destination (a word ending in / or \, `.`, or one that names a folder: no file extension, or a known
+#     folder such as .claude or .claude/smartuse/projects/<key>) joined with the source's file name is itself a protected path. A copy into a
+#     folder of the same name elsewhere (backup/) and a copy to a named file (settings.bak) stay allowed, as F2 accepts.
+check deny  'cp ../o/.claude/settings.json .claude/'
+check deny  'cp ../o/.claude/settings.json .claude'
+check deny  'cp -p ~/o/.claude/settings.local.json .claude/'
+check deny  'cp ../o/.claude/settings.json ~/.claude/'
+check deny  'cp /tmp/a.txt ../o/.claude/settings.json .claude/'
+check deny  'cp ../o/.claude/settings.json "$HOME/.claude/"'
+check deny  'cp ../o/.claude/smartuse.local.md .claude/'
+check deny  'cp ../o/.claude/smartuse.local.md .claude'
+check deny  'cp /tmp/paid-runs.json ~/.claude/smartuse/projects/k/'
+check deny  'cp /tmp/paid-runs.json ~/.claude/smartuse/projects/k'
+check deny  'cp /tmp/paid-runs.json ~/.claude/smartuse/projects/k.1'
+check deny  'cp /tmp/trusted-checks.json ~/.claude/smartuse/'
+pcheck deny 'Copy-Item ..\o\.claude\settings.json .claude\'
+pcheck deny 'Copy-Item ..\o\.claude\settings.json .claude'
+pcheck deny 'copy ..\o\.claude\settings.json .claude\'
+pcheck deny 'cp ..\o\.claude\settings.json $HOME\.claude\'
+pcheck deny 'Copy-Item -Path ..\o\.claude\settings.json -Destination .claude\'
+pcheck deny 'Copy-Item ..\o\.claude\settings.json -Destination .claude\'
+pcheck deny 'Copy-Item -Destination .claude\ ..\o\.claude\settings.json'
+pcheck deny 'Copy-Item ..\o\.claude\smartuse.local.md .claude\'
+pcheck deny 'Copy-Item -Path ..\o\.claude\smartuse.local.md -Destination .claude\'
+pcheck deny 'Copy-Item C:\t\paid-runs.json $HOME\.claude\smartuse\projects\k\'
+pcheck deny 'Copy-Item C:\t\paid-runs.json $HOME\.claude\smartuse\projects\k'
+check allow 'cp .claude/settings.json backup/'
+check allow 'cp .claude/settings.json backup'
+check allow 'cp .claude/settings.json /tmp/settings.bak'
+check allow 'cp -p ~/.claude/settings.local.json ~/backup/'
+check allow 'cp ~/.claude/smartuse/projects/k/paid-runs.json /tmp/backup/'
+check allow 'cp ~/.claude/smartuse/projects/k/paid-runs.json backup'
+pcheck allow 'Copy-Item .claude\settings.json backup\'
+pcheck allow 'Copy-Item .claude\settings.json C:\tmp\settings.bak'
+pcheck allow 'copy .claude\smartuse.local.md backup\'
+pcheck allow 'Copy-Item $HOME\.claude\smartuse\projects\k\paid-runs.json C:\tmp\backup\'
+# decided within a second inside the process: 1,000 copies into a backup folder then one into .claude/ (denied), the same text ending in `ls` (allowed)
+for shape in copies-then-folder-writer copies-clean; do
+  r=$(py - "$G" "$shape" <<'PY'
+import contextlib, io, json, sys, time, types
+src = open(sys.argv[1], encoding="utf-8").read()
+cmd = "cp .claude/settings.json backup/; " * 900 + ("cp ../o/.claude/settings.json .claude/" if sys.argv[2] == "copies-then-folder-writer" else "ls")
+sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
+out = io.StringIO()
+t0 = time.monotonic()
+with contextlib.redirect_stdout(out):
+    exec(compile(src, "bash-guard", "exec"), {"__name__": "timing"})
+dt = time.monotonic() - t0
+hit = "[rule settings-file, always on]" in out.getvalue()
+print(("ok %.2f" % dt) if hit == (sys.argv[2] == "copies-then-folder-writer") and dt < 1.0 and len(cmd) < 32768 else "bad %.2f %s" % (dt, out.getvalue()[-90:]))
+PY
+)
+  case "$r" in ok*) echo "PASS $shape: settings-file copy-into-folder decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL settings-file copy-into-folder timing: $shape -> '${r:0:120}'"; fail=1;; esac
+done
 # --- 0.7.0 F3, D-YK12: a command started through the Monitor tool reaches the guard as a Bash one (the field is tool_input.command, as the tool's
 #     own input names it): the same rules, the floor and the fresh-source gate. A Monitor call that carries no command (a websocket) has nothing to check.
 ocheck deny:'bash-guard: sudo' true - 'sudo ls' Monitor

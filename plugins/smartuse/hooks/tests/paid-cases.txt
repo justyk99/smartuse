@@ -190,6 +190,75 @@ O pnpm exec tsc
 O yarn node x.js
 O caffeinate -i sleep 1
 O timeout 5 grep -rn api.openai.com src/
+# --- 0.7.0 review fix M1: pdm / hatch / rye / pixi / conda / op / dotenv / doppler `run` hand over to the command they run (denied with no go; a script with no signal passes)
+D pdm run python render.py
+D hatch run python render.py
+D hatch run test:python render.py
+D rye run python render.py
+D pixi run python render.py
+D pixi run -e dev python render.py
+D conda run python render.py
+D conda run -n myenv python render.py
+D conda run -p /opt/envs/x python render.py
+D op run -- python render.py
+D op run --env-file=.env -- python render.py
+D dotenv run -- python render.py
+D dotenv run python render.py
+D doppler run -- python render.py
+D doppler run -p proj -c dev -- python render.py
+D timeout 5 pdm run python render.py
+D pdm run timeout 5 python render.py
+D pdm run node render.js
+D pdm run bash render.sh
+O pdm run python x.py
+O pdm run pytest
+O hatch run python x.py
+O hatch run test:pytest
+O rye run python x.py
+O pixi run python x.py
+O conda run -n myenv python x.py
+O op run -- python x.py
+O dotenv run -- python x.py
+O doppler run -- python x.py
+O pdm run
+O op run --
+O pdm install
+# --- 0.7.0 review fix round 2 (follow-up 1): a runner's own options before `run`, with an option's value, hand over to the command it runs
+D hatch -e test run python render.py --n 1
+D hatch --env test run python render.py
+D hatch -v run python render.py
+D hatch -q run test:python render.py
+D dotenv -f .env.local run python render.py --n 1
+D dotenv --file .env run -- python render.py
+D dotenv -q never run -- python render.py
+D op --account me run -- python render.py --n 1
+D op --session tok --config /x run -- python render.py
+D op --cache=false run -- python render.py
+D doppler --token x run -- python render.py --n 1
+D doppler --config-dir /x run -- python render.py
+D doppler -p proj -c dev run -- python render.py
+D doppler run --config-dir /x -- python render.py
+D pdm -v run python render.py
+D pdm -q run python render.py
+D pdm --config /x run python render.py
+D poetry -q run python render.py
+D poetry --no-ansi run python render.py
+D poetry -vvv run python render.py
+D timeout 5 hatch -e test run python render.py
+O hatch -e test run pytest
+O hatch -e test run python x.py
+O dotenv -f .env.local run python x.py
+O op --account me run -- python x.py
+O doppler --token x run -- python x.py
+O pdm -v run pytest
+# a folder flag before `run` is a recorded limit (the run is in another folder, the guard does not unwrap it): allowed
+O pdm -p sub run python render.py --n 1
+# --- 0.7.0 review fix m5: a key spelled before the command is preparation (denied with no go, naming the script; a script with no signal and no key passes)
+D OPENAI_API_KEY=x python render.py
+D OPENAI_API_KEY=x python x.py
+D env OPENAI_API_KEY=x python render.py
+D OPENAI_API_KEY=x timeout 5 python render.py
+D export OPENAI_API_KEY=x; python render.py
 # --- a loop or repeat of a paid script is denied; a loop with no paid script is allowed
 D for i in 1 2 3; do python render.py --n 1; done
 D while true; do python render.py --n 1; done
