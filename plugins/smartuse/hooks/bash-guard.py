@@ -2087,17 +2087,93 @@ def paid_script_arg(cmd, toks):
     return None
 
 
-def paid_script_files(tok, cwd):
+PAID_LOOK_WORDS, PAID_LOOK_DIRS, PAID_LOOK_STATS = 64, 6, 2000   # F4b step 1 (V9): the words looked at before a script word, the folders kept, the file system probes (isdir, isfile, open) one command may make beyond the cwd's own file
+
+
+def paid_script_files(tok, cwd, dirs=(), cfg=None):
     """The files a script word may be, as paths: [] when the guard cannot see one (a $f, `…` or glob in the word, a missing file).
-    Today a relative word is joined to the event's cwd and that is the one file. The folder lookup (F4b step 1, D-YK13) would
-    hand in more files here; the callers read every file of the list and take a signal in any of them."""
+    A relative word is joined to the event's cwd (that file comes first, as before step 1) and to each folder in dirs (paid_folders,
+    F4b step 1, D-YK13); an absolute one stays itself. The callers read every file of the list and take a signal in any of them. With
+    a cfg a path is asked of the file system once per command, and a probe in a folder of dirs counts against the cap and the
+    deadline (cfg.probe): when it is refused the lookup stops and cfg.cut says so."""
     if re.search(r"[$`*?]", tok):
         return []
-    p = os.path.join(cwd, native_path(os.path.expanduser(tok)))   # an absolute path stays itself
-    try:
-        return [p] if os.path.isfile(p) else []
-    except OSError:
+    w = native_path(os.path.expanduser(tok))
+    out, seen = [], set()
+    for i, base in enumerate((cwd,) + tuple(dirs)):
+        p = os.path.join(base, w)                                   # an absolute path stays itself
+        k = os.path.normcase(os.path.abspath(p))
+        if k in seen:
+            continue
+        seen.add(k)
+        r = cfg.filecache.get(k) if cfg else None
+        if r is None:
+            if i and cfg and not cfg.probe():
+                break
+            try:
+                r = os.path.isfile(p)
+            except OSError:
+                r = False
+            if cfg:
+                cfg.filecache[k] = r
+        if r:
+            out.append(p)
+        if os.path.isabs(w):
+            break
+    return out
+
+
+def paid_word_path(w):
+    """The path a plain word may name, as the file system reads it, or "" when the word names none the guard follows: a word with a
+    $, `, glob character, = or { }, a script file, `-` or `.`. `--opt=value` gives its value, and so does the PowerShell
+    `-Path:value` / `-LiteralPath:value` / `-PSPath:value` (any shortened parameter name, and `-LP`), and `env -Cvalue`; a quoted value has its quotes taken off; `~` is expanded."""
+    v = w
+    if w[:2] == "--":
+        v = w.partition("=")[2]
+    elif w[:2] == "-C" and len(w) > 2:                              # env -Cdir: the value is attached
+        v = w[2:]
+    elif w[:1] == "-":
+        n, c, x = w[1:].partition(":")
+        n = n.lower()
+        v = x if c and n and ("path".startswith(n) or "literalpath".startswith(n) or n == "lp" or (n[:2] == "ps" and "pspath".startswith(n))) else ""
+    v = v.strip("'\"")
+    if not v or v[0] == "-" or v == "." or len(v) > 255 or re.search(r"[$`*?=\[\]{}<>]", v) or PAID_SCRIPT_EXT.search(v):
+        return ""
+    return native_path(os.path.expanduser(v))
+
+
+def paid_folders(cfg, words, cwd):
+    """The folders a run's earlier words name (F4b step 1, V17): [paths], the nearest last, at most PAID_LOOK_DIRS. Only the last
+    PAID_LOOK_WORDS words are looked at, and only the named paths are looked at (never a folder listed); each probe counts against
+    the cap and the deadline (cfg.probe), and when one is refused the look stops and cfg.cut says so. A plain word is one that
+    paid_word_path accepts. Folders chain in command order: a word is looked for under the folder the one before it named, then under
+    the cwd. A folder from a variable, a substitution or a glob, a folder the command makes, and `cd -` are not followed (stated limits)."""
+    if cfg.deadline is not None and time.monotonic() >= cfg.deadline:   # V8: past the hook's deadline no run looks any further (a run that needs a lookup is unreadable)
+        cfg.cut = True
         return []
+    out, last = [], cwd
+    for w in words[-PAID_LOOK_WORDS:]:
+        c = cfg.wordcache.get(w)                                    # a word is judged once, however many runs look back at it
+        if c is None:
+            c = cfg.wordcache[w] = paid_word_path(w)
+        if not c:
+            continue
+        for base in ((last, cwd) if last != cwd else (cwd,)):
+            p = os.path.join(base, c)
+            d = cfg.dircache.get(p)
+            if d is None:
+                if not cfg.probe():
+                    return out[-PAID_LOOK_DIRS:]
+                try:
+                    d = os.path.isdir(p)
+                except (OSError, ValueError):
+                    d = False
+                cfg.dircache[p] = d
+            if d:
+                out = [x for x in out if x != p] + [p]
+                last = p
+                break
+    return out[-PAID_LOOK_DIRS:]
 
 
 def paid_read_file(p):
@@ -2171,6 +2247,8 @@ class PaidCfg:
         self.project, self.blind, self.base = project, blind, None
         self.strict = False                                     # paid_hit sets it: strict reads a script that cannot be opened as "could not verify" (m7)
         self.moved, self.cd_any = False, False                  # a folder change was seen before this run (paid_seg_hits sets it); a cd word is anywhere in the command (paid_hit sets it)
+        self.words, self.dircache, self.wordcache, self.filecache, self.srccache = [], {}, {}, {}, {}   # F4b step 1: the last words of the segments scanned so far (handed down into a bash -c string), and what the file system said about a word, a folder, a file and a script's source (asked once per command)
+        self.probes, self.cut, self.deadline = 0, False, None    # the probes made beyond the cwd's own file; a lookup of this run was refused by the cap or the deadline; the hook's deadline (paid_hit sets it)
         self.ci = os.name == "nt" or sys.platform == "darwin"   # the file system's case rule, for the paid_free: paths
         self.names, self.paths, self.pnames = {}, {}, {}        # literal items: file name / project-relative path / file name of a path item -> [flags or None]
         self.gnames, self.gpaths = [], []                       # items with * or ?: paid_gentry
@@ -2186,6 +2264,25 @@ class PaidCfg:
             parts, climbs, absolute = paid_parts(item)
             if parts and not climbs and not absolute:           # an absolute or climbing item is ignored
                 self.free_paths.append([p.lower() if self.ci else p for p in parts])
+
+    def probe(self):
+        """One more file system probe for the folder lookup (F4b step 1), or False when the cap (PAID_LOOK_STATS) is spent or the hook's
+        deadline has passed: then cut is set and the run that asked is unreadable (strict denies it, light allows, as m7)."""
+        if self.probes >= PAID_LOOK_STATS or (self.deadline is not None and time.monotonic() >= self.deadline):
+            self.cut = True
+            return False
+        self.probes += 1
+        return True
+
+    def read(self, f, counted):
+        """The first 256 KB of a script (paid_read_file), once per command; a read of a file found in another folder (counted) counts
+        against the probe cap and the deadline, and is None (could not be read) when refused."""
+        if f in self.srccache:
+            return self.srccache[f]
+        if counted and not self.probe():
+            return None
+        self.srccache[f] = src = paid_read_file(f)
+        return src
 
     def add_item(self, item):
         """One `paid_scripts:` item: `<script>` or `<script> only <flag> [<flag> ...]`. An item that does not parse makes its first
@@ -2272,8 +2369,9 @@ def paid_run_free(cfg, args, items, files, golisted, odd=(), ext=False, moved=Fa
     """True when this one run of a paid script is free (the order of paid-guard-plan 8.4 F4b): a free flag among plain literal
     arguments, before any bare --, as the bare word or with =1 / =true / =yes; else `only` (every matching item has it: free when no
     flag is there, and the arguments come from this command line: under xargs / parallel / watch, `ext`, the run is paid); else a free
-    path (never for a script that a paid_scripts: item lists or a go names, and never after a folder change, `moved`: the file the guard
-    found is then not the file that runs). args: the raw words after the script word; odd: which of them are glued to other text."""
+    path (at least one file found, every file found inside the project and matching as written and resolved; never for a script that a
+    paid_scripts: item lists or a go names, and not when `moved`: the caller sets it after a folder change when the file under the cwd
+    was found, which may not be the file that runs). args: the raw words after the script word; odd: which of them are glued to other text."""
     if cfg.free_flags and not any(paid_not_plain(t) for t in args):
         for i, t in enumerate(args):
             u = paid_unq(t)
@@ -2494,7 +2592,9 @@ def paid_seg_run(seg, hosts, cwd, cfg, depth, loop, ps, ext):
     PowerShell tool (F6): the cmdlets that call (PAID_PS_CALLER), the mentions (PAID_PS_MENTION) and `$env:KEY = …` as preparation.
     ext: the arguments come from outside the command line (a repeater, xargs / parallel / watch, is above this run)."""
     ms = list(PAID_ARGS.finditer(seg[PAID_LEAD.match(seg).end():]))
-    toks, rep, cdw = paid_unwrap([next(g for g in a.groups() if g is not None) for a in ms])
+    vals = [next(g for g in a.groups() if g is not None) for a in ms]
+    prev, cfg.words = cfg.words, (cfg.words + vals)[-PAID_LOOK_WORDS:]   # F4b step 1: the words before this segment, and the words a later segment (or a bash -c string of this one) looks back at
+    toks, rep, cdw = paid_unwrap(vals)
     if not toks:
         return []
     raws = [a.group(0) for a in ms][len(ms) - len(toks):]   # the same words with their quotes, aligned with toks
@@ -2520,25 +2620,41 @@ def paid_seg_run(seg, hosts, cwd, cfg, depth, loop, ps, ext):
         out.append((sig + " on the command line", cmd, rep))
     if path:
         name = paid_basename(path.rstrip("`"))
-        files = paid_script_files(path.rstrip("`"), cwd)
-        sig, unread = None, False
-        for f in files:                                                 # a signal in any file found makes the run paid
-            src = paid_read_file(f)
-            sig = paid_code_signal(src, hosts, True) if src else None
-            if sig:
-                break
-            unread = unread or src is None                              # the file exists and could not be opened (an empty file reads as "")
-        items = cfg.script_items(name, [] if moved else files)           # after a folder change a path item matches by file name alone
+        ci, pi = len(ms) - len(toks), toks.index(path)                  # the place of the command word among the words, and of the script word among toks
+        dirs, cfg.cut = (), False
+        if not os.path.isabs(native_path(os.path.expanduser(path.rstrip("`")))):   # F4b step 1 (V17): nothing is looked up until a relative script word is seen; then the folders the words before it name (the command word is not one)
+            dirs = paid_folders(cfg, prev + vals[:ci] + vals[ci + 1:ci + pi], cwd)
+        files = paid_script_files(path.rstrip("`"), cwd, dirs, cfg)
+        own = paid_script_files(path.rstrip("`"), cwd, (), cfg) if dirs and files else files   # the file under the cwd alone (the one a script word meant before step 1)
+        sig, unread, sigfiles = None, False, []
+        for f in files:                                                 # a signal in any file found makes the run paid; every file is read, so every file that holds one is known
+            src = cfg.read(f, f not in own)
+            fs = paid_code_signal(src, hosts, True) if src else None
+            if fs:
+                sig = sig or fs
+                sigfiles.append(f)
+            else:
+                unread = unread or src is None                          # the file exists and could not be opened (an empty file reads as "")
+        unread = unread or cfg.cut                                      # F4b step 1: a lookup that the probe cap or the deadline cut short is no "no signal": the run is unreadable (strict denies, light allows, as m7)
+        items = cfg.script_items(name, files)                           # a path item against every file found (a file name item in any folder); by file name alone only when no file in the project was found
+        items_paid = cfg.script_items(name, []) if moved else items     # after a folder change the file under the cwd may not be the one that runs: the item is also read by file name, for paid
+        if cfg.cut:                                                     # the file list is incomplete: no `only` freedom (and no free path, below)
+            items_free = []
+        elif sigfiles:                                                  # `only` freedom needs every file that holds a signal to be covered by an item (a path item covers its own file only)
+            per = [cfg.script_items(name, [f]) for f in sigfiles]
+            items_free = [] if any(not x for x in per) else [fl for x in per for fl in x]
+        else:
+            items_free = items if not moved else items_paid
         golisted = name.lower() in cfg.go
         if unread and not sig and cfg.strict:                            # 0.7.0 review fix m7: a script that cannot be read is not "no signal" in strict (light allows, as before)
             out.append((PAID_UNREAD, name, rep))
-        elif sig or items or golisted:
+        elif sig or items_paid or golisted:
             k = toks.index(path) + 1
             args = raws[k:]
             base = len(ms) - len(toks) + k                               # the index of the first argument among the words with their places
             odd = [bool((base + j > 0 and ms[base + j - 1].end() == ms[base + j].start()) or (base + j + 1 < len(ms) and ms[base + j].end() == ms[base + j + 1].start()))
                    for j in range(len(args))]                            # quoted text glued to other text is one word to the shell, two to the splitter
-            if not cfg.blind and paid_run_free(cfg, args, items, files, golisted, odd, ext, moved):
+            if not cfg.blind and paid_run_free(cfg, args, items_free, files, golisted or bool(items_paid) or cfg.cut, odd, ext, moved and bool(own)):
                 out.append((None, name, False, tuple(args)))
             else:
                 out.append((f"{sig} in {name}" if sig else f"{name} is in paid_scripts", name, rep))
@@ -2610,7 +2726,7 @@ def paid_finish(raw):
     return [(h[0], h[1], h[2], tuple(f[3] for f in free if h[1] and f[1].lower() == h[1].lower())) for h in raw if h[0] is not None]
 
 
-def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False, strict=False):
+def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False, strict=False, deadline=None):
     """[(signal, script, repeats, skip)] — EVERY paid signal in the command (stdin-heredoc bodies first, then each segment), [] when none.
     text = the command with data heredocs stripped. blind (V10): the command is one the source check cannot read cleanly (complexity(),
     or over the heredoc scan cap): the HEREDOC pattern is not run (it rescans the text once per opener), and the whole text is searched
@@ -2619,6 +2735,7 @@ def paid_hit(cmd, text, cwd, adapter, blind=False, project=None, ps=False, stric
     hosts = paid_host_re(PAID_HOSTS + tuple(extra)) if extra else PAID_HOST
     cfg = PaidCfg(adapter, project or cwd, blind)
     cfg.strict = strict
+    cfg.deadline = deadline                        # F4b step 1: the folder lookup stops at the hook's deadline (V8)
     cfg.cd_any = bool(PAID_CD_WORD.search(text))   # a loop may run its cd before the run that stands above it in the text
     segs = paid_segments(text, True)   # keep: a segment that ends at a backtick or ( keeps it, so a free flag beside `…` / $(…) is seen as not plain (as paid_seg_args reads it)
     looped = any(PAID_LOOP_OPEN.match(s) for s in segs)   # a body is not tied to a segment: any loop in the command makes it a repeat
@@ -2859,7 +2976,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         text = paid_ps_text(ps_text(paid_ps_blocks(cmd)) if "{" in cmd else text)   # a script block after a pipe or a switch is marked as a loop first
     elif not blind:
         text = strip_comments(text)   # 0.7.0 F8: Bash only, at or under the heredoc cap (blind is the command that was not read cleanly): a quote in a # comment must not hide a paid run
-    hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps, strict)
+    hits = paid_hit(cmd, text, cwd, adapter, blind, project, ps, strict, deadline)
     if not hits:
         return None
     head = lambda h: f"paid call ({clip(h[0])}) — "
