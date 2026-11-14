@@ -223,6 +223,36 @@ O doppler run -- python x.py
 O pdm run
 O op run --
 O pdm install
+# --- 0.7.0 review fix round 2 (follow-up 1): a runner's own options before `run`, with an option's value, hand over to the command it runs
+D hatch -e test run python render.py --n 1
+D hatch --env test run python render.py
+D hatch -v run python render.py
+D hatch -q run test:python render.py
+D dotenv -f .env.local run python render.py --n 1
+D dotenv --file .env run -- python render.py
+D dotenv -q never run -- python render.py
+D op --account me run -- python render.py --n 1
+D op --session tok --config /x run -- python render.py
+D op --cache=false run -- python render.py
+D doppler --token x run -- python render.py --n 1
+D doppler --config-dir /x run -- python render.py
+D doppler -p proj -c dev run -- python render.py
+D doppler run --config-dir /x -- python render.py
+D pdm -v run python render.py
+D pdm -q run python render.py
+D pdm --config /x run python render.py
+D poetry -q run python render.py
+D poetry --no-ansi run python render.py
+D poetry -vvv run python render.py
+D timeout 5 hatch -e test run python render.py
+O hatch -e test run pytest
+O hatch -e test run python x.py
+O dotenv -f .env.local run python x.py
+O op --account me run -- python x.py
+O doppler --token x run -- python x.py
+O pdm -v run pytest
+# a folder flag before `run` is a recorded limit (the run is in another folder, the guard does not unwrap it): allowed
+O pdm -p sub run python render.py --n 1
 # --- 0.7.0 review fix m5: a key spelled before the command is preparation (denied with no go, naming the script; a script with no signal and no key passes)
 D OPENAI_API_KEY=x python render.py
 D OPENAI_API_KEY=x python x.py

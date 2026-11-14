@@ -288,7 +288,9 @@ elif mode == "fxtime":   # fxtime GUARD PROJECT: the F4b fix readers inside the 
     # 0.7.0 review fix round: the runner wrappers (M1) and the inline key before a script (m5)
     check("24 KB of runner words (pdm run, conda run -n e, op run --) around a paid run", "pdm run " * 1500 + "conda run -n e " * 500 + "op run -- " * 500 + "python render.py --n 1", "", False)
     check("PowerShell: 24 KB of runner words around a paid run", "pdm run " * 1500 + "conda run -n e " * 500 + "op run -- " * 500 + "python render.py --n 1", "", False, True)
-    check("1,700 inline key assignments, then a paid run", (("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
+    check("28 KB of runner options before run (hatch -e t run, dotenv -f .e run, doppler --token x run), then a paid run", "hatch -e t run " * 700 + "dotenv -f .e run " * 400 + "doppler --token x run -- " * 300 + "pdm " + "-v " * 1500 + "run python render.py --n 1", "", False)
+    check("PowerShell: 28 KB of runner options before run, then a paid run", "hatch -e t run " * 700 + "dotenv -f .e run " * 400 + "doppler --token x run -- " * 300 + "pdm " + "-v " * 1500 + "run python render.py --n 1", "", False, True)
+    check("1,700 inline key assignments, then a paid run",(("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
     check("1,700 env words with an inline key, then a paid run", "env " + (("OPENAI" + "_API_KEY") + "=x ") * 1700 + "python render.py", "", False)
     print("ok" if not bad else "; ".join(bad))
 PY
@@ -1413,7 +1415,25 @@ allow "32 m5: ... and the first run with one output passes: KEY=x python render.
 # m7: a script that exists but cannot be opened is read as no signal; in strict that is "could not verify", in light it stays allowed
 fresh; mkplain polish; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
 r=$(py "$CW" inproc "$(wp "$G")" "$PW" unread </dev/null 2>&1)
-case "$r" in *'strict '*' deny bash-guard: paid call ('*'could not verify the go (polish.py could not be read)'*'[rule paid]'*) ok "32 m7: strict, a script whose read fails -> denied: could not verify the go (polish.py could not be read)";; *) ko "32 m7 strict: $r";; esac
+case "$r" in *'strict '*' deny bash-guard: could not verify whether polish.py pays'*'it could not be read'*'Make it readable, or run it in light mode.'*'Nothing was spent.'*'[rule paid]'*) ok "32 m7: strict, a script whose read fails -> denied: could not verify whether polish.py pays (make it readable, or light mode)";; *) ko "32 m7 strict: $r";; esac
+case "$r" in *'paid call'*|*'smartuse.local.md'*) ko "32 m7: the reason must not say 'paid call' nor point to the adapter (no go clears it): $r";; *) ok "32 m7: ... and it names no go (no 'paid call', no adapter file)";; esac
 case "$r" in *'light '*' allow'*) ok "32 m7: light, the same script -> allowed (as before)";; *) ko "32 m7 light: $r";; esac
 [ ! -e "$R" ] && ok "32 m7: ... and nothing is counted" || ko "32 m7: state was written: $(cat "$R")"
+
+# ===== 33. 0.7.0 review fix round 2. A runner's own options before `run` (hatch -e test run, dotenv -f .env run, op --account me run --, doppler --token x run --) are skipped, with an option's value
+R1OPT=('hatch -e test run python render.py --n 1' 'dotenv -f .env.local run python render.py --n 1' 'op --account me run -- python render.py --n 1' 'doppler --token x run -- python render.py --n 1' 'pdm -v run python render.py --n 1' 'poetry -q run python render.py --n 1')
+for c in "${R1OPT[@]}"; do wrap "$c" render.py; done
+PGTOOL=PowerShell
+for c in "${R1OPT[@]}"; do wrap "$c" render.py; done
+fresh; mkpaid; mkplain polish
+for c in 'hatch -e test run pytest' 'hatch -e test run python polish.py' 'dotenv -f .env.local run python polish.py' 'op --account me run -- python polish.py' 'doppler --token x run -- python polish.py'; do
+  allow "33 PS: a runner with options before run, around a script with no paid signal, passes: $c" "$c"
+done
+PGTOOL=Bash
+for c in 'hatch -e test run pytest' 'hatch -e test run python polish.py' 'dotenv -f .env.local run python polish.py' 'op --account me run -- python polish.py' 'doppler --token x run -- python polish.py'; do
+  allow "33: a runner with options before run, around a script with no paid signal, passes: $c" "$c"
+done
+nostate "33: ... and those touch no state"
+# a folder flag before run is a recorded limit (SECURITY.md): the run is in another folder, the guard does not unwrap it
+allow "33 limit: pdm -p sub run python render.py is not unwrapped (a folder flag)" 'pdm -p sub run python render.py --n 1'
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

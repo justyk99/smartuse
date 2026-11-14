@@ -1932,7 +1932,12 @@ PAID_WRAP = {"timeout": ("-s -k --signal --kill-after", 1, ""), "nice": ("-n --a
         # 0.7.0 review fix M1: the other runners and secret injectors. `pdm run python x.py`, `conda run -n env python x.py`, `op run -- python x.py`
         "pdm": ("", 0, "run"), "hatch": ("-e --env", 0, "run"), "rye": ("", 0, "run"), "pixi": ("-e --environment --manifest-path", 0, "run"),
         "conda": ("-n -p --name --prefix", 0, "run"), "op": ("--env-file --account --session", 0, "run"), "dotenv": ("-f --file", 0, "run"),
-        "doppler": ("-p -c --project --config --token", 0, "run")}
+        "doppler": ("-p -c --project --config --token -t --config-dir", 0, "run")}
+# 0.7.0 review fix round 2: the runner's OWN options before the subcommand (`hatch -e test run python x.py`, `op --account me run -- python x.py`),
+# name -> the ones that take a value as the NEXT word; any other -word before the subcommand is one word. A folder flag (pdm -p, poetry -C,
+# hatch -p, conda run --cwd) is left out on purpose: that run is in another folder (a stated limit, SECURITY.md).
+PAID_PRE = {"hatch": "-e --env --data-dir --cache-dir --config", "dotenv": "-f --file -q --quote -e --export", "op": "--account --config --encoding --format --session",
+        "doppler": "-p -c -t --project --config --token --config-dir --api-host --scope --timeout --attempts", "pdm": "-c --config", "poetry": ""}
 PAID_REPEAT = frozenset("xargs parallel watch".split())   # these run the command once per input / tick: more than one run in one call
 PAID_LOOP_OPEN = re.compile(r"(?:(?:then|do|else|elif|if|!|\{)\s+)*(?:for|while|until|select)\b")   # a segment that opens a loop …
 PAID_LOOP_END = re.compile(r"done\b")                                                               # … and the one that closes it
@@ -2323,9 +2328,14 @@ def paid_unwrap(toks):
         rep = rep or name in PAID_REPEAT
         i = 1
         if subs:
-            if len(toks) > 1 and toks[1] in subs:
-                i = 2
-            elif len(toks) > 1 and PAID_INTERP.fullmatch(toks[1]):   # yarn node x.js: the interpreter stays
+            j = 1
+            if name in PAID_PRE:                                      # the runner's own options (and their values) before the subcommand
+                pv = PAID_PRE[name].split()
+                while j < len(toks) and len(toks[j]) > 1 and toks[j][0] == "-" and toks[j] != "--":
+                    j += 2 if toks[j] in pv else 1
+            if j < len(toks) and toks[j] in subs:
+                i = j + 1
+            elif j == 1 and len(toks) > 1 and PAID_INTERP.fullmatch(toks[1]):   # yarn node x.js: the interpreter stays
                 toks = toks[1:]
                 continue
             else:
@@ -2862,7 +2872,9 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
     first, rule, miss = hits[0], "", None                    # first = the hit the reason names
     unread = next((h for h in hits if h[0] == PAID_UNREAD), None)   # strict only (paid_hit): a script that exists and could not be opened
     if unread and not why:
-        first, why = unread, f"{clip(unread[1])} could not be read"
+        # No go clears this and the script has no known paid signal: say what is true (the guard cannot tell whether it pays) and the two ways out.
+        return (f"could not verify whether {clip(unread[1])} pays: it could not be read, so the guard cannot see a paid signal in it. "
+                "Make it readable, or run it in light mode. Nothing was spent.")
     try:
         if not why:
             covered = []                                      # [(hit, go_id, go)] once per script
