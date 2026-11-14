@@ -9,7 +9,7 @@ The spec stays `paid-guard-plan.md` §8 (F4b, F5, F10, §8.6, §8.8). This file 
 - Names now: `RULE_NAMES` = the 16 of 0.6.1 + `settings-file`, `owner-file`, `ps-download-exec`, `ps-rm-root` (20). `GATE_NAMES` = `paid`. `FLOOR` = `human-only`, `trust-pin`, `config-switch`, `settings-file`, `owner-file`.
 
 ## What is left, in order
-1. **F4b step 1, the folder lookup (only with D-YK13).** Plan §8.4 F4b step 1. `paid_script_files` returns the found files (one today); step 1 adds the folders a plain word before the script names. About 15 cases.
+1. ~~F4b step 1, the folder lookup~~ done 2026-11-14 (D-YK13 yes): built, two Opus re-checks, every fail-open a red-first case; limits in SECURITY.md ("The folder lookup", "How a found file is matched").
 2. **F5, the typed go (needs E1/E2 from the owner's phone).** Plan §8.4 F5. Shapes known so far are in §8.10 (CLI `origin.kind=human`; headless no `origin`; a subagent carries `agent_id`; a peer report is `origin.kind=peer`).
 3. **F10, names, docs, counts, version.** Plan §8.4 F10, plus:
    - `heartbeat.py` doctor: `rules_off=paid` prints "unknown name: paid"; the compare reads `RULE_NAMES` plus `GATE_NAMES`.
@@ -24,7 +24,7 @@ The spec stays `paid-guard-plan.md` §8 (F4b, F5, F10, §8.6, §8.8). This file 
 - `python -m <module>` and helper modules are not followed; a script over 256 KB is read only in part.
 - The count rule takes exact flags; a shortened flag that argparse accepts is refused only as "no count flag".
 - The counter is matched by file name: a delete of the whole state folder, or a glob over it, resets the count. Same for an owner file named through a wildcard or an odd spelling (`./`, `..`).
-- Folder changes the guard does not count: Start-Process `-WorkingDirectory`, `sudo -D`, tool folder flags (`pnpm -C`, `yarn --cwd`, `uv --directory`). Without step 1, `cd sub && python client.py` is also not followed.
+- Folder changes the guard does not count: Start-Process `-WorkingDirectory`, `sudo -D`, tool folder flags (`pnpm -C`, `yarn --cwd`, `uv --directory`). The folder lookup follows only the 6 nearest named folders; a cut lookup is unreadable.
 - file-guard does not match the counter's own temp file `paid-runs.json.<pid>.tmp`, nor transcripts under a relocated config folder (`CLAUDE_CONFIG_DIR`).
 - ps-download-exec: a gap over 300 characters (150 for the saved-file form) hides a download-then-run; `DownloadFile(...)` and `wget` without `-O` are not followed.
 - ps-rm-root: through the PowerShell tool, flags after the `${env:USERPROFILE}` brace form are not seen; computed paths (`$(...)`, `[Environment]::...`) are not resolved.
