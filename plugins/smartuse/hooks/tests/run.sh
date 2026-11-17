@@ -764,13 +764,16 @@ pcheck allow 'Select-String -Path $HOME\.claude\projects\-p-x\0a1b2c3d.jsonl -Pa
 ocheck deny:'[rule owner-file, always on]' true 'owner-file' "echo x >> $TS"
 ocheck deny:'[rule owner-file, always on]' - - "rm $TS"
 ocheck allow - 'owner-file' "cat $TS"
-# decided within a second inside the process: 800 readers of a transcript then a writer / then `ls`, and 1,700 transcript folder openers with no file name after them
-for shape in transcripts-then-writer transcripts-clean opener-run; do
+# decided within a second inside the process: 800 readers of a transcript then a writer / then `ls`, 1,700 transcript folder openers with no file name after them,
+# and (F5 fix round) a transcript folder followed by 120,000 slashes: the run after `projects` takes one separator, so a run of them is not retried at every length
+for shape in transcripts-then-writer transcripts-clean opener-run slash-run; do
   r=$(py - "$G" "$shape" <<'PY'
 import contextlib, io, json, sys, time, types
 src = open(sys.argv[1], encoding="utf-8").read()
 if sys.argv[2] == "opener-run":
     cmd = "echo " + ".claude/projects/" * 1700
+elif sys.argv[2] == "slash-run":
+    cmd = "echo .claude/projects" + "/" * 120000
 else:
     cmd = "cat ~/.claude/projects/k/s.jsonl; " * 800 + ("dd of=~/.claude/projects/k/s.jsonl" if sys.argv[2] == "transcripts-then-writer" else "ls")
 sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
