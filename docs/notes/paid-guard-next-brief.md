@@ -1,6 +1,6 @@
 # 0.7.0 next brief — after F4b step 1 (2026-11-14)
 
-The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file holds the state the next session starts from. Next session: F5's interactive scenario with the owner, then the settings edit (F2 step 2) by hand, then the release on the owner's word. Update 2026-11-17: the bytecode cache (D-YK15) is merged (`13976b3`); method M passes (Bash 0.357 base · 0.360 light · 0.359 armed, plan §8.10). F5 merged (`cdf5cdb`) with its one review fix round (`fd99875`, plan §8.10); T2 after it 12 of 12.
+The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file holds the state the next session starts from. Next session: the settings edit (F2 step 2) by hand, then the release on the owner's word. Update 2026-11-17: the bytecode cache (D-YK15) is merged (`13976b3`); method M passes (Bash 0.357 base · 0.360 light · 0.359 armed, plan §8.10). F5 merged (`cdf5cdb`) with its one review fix round (`fd99875`, plan §8.10); T2 after it 12 of 12.
 
 ## Start state
 - Dev branch `paid-0.7.0`, local only, every feature merged with `--no-ff`: F0, F1, F2, F9, F3, F4b steps 1–3, F6, the fix round, F7, F8, the small fixes, F10, the review fixes. Last: step 1 merge on `97ca6ba`, docs `049ce4e`. T2 after it: 12 of 12 ALL PASS.
@@ -11,7 +11,7 @@ The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file hol
 
 ## What is left, in order
 1. ~~F4b step 1, the folder lookup~~ done 2026-11-14 (D-YK13 yes): built, two Opus re-checks, every fail-open a red-first case; limits in SECURITY.md ("The folder lookup", "How a found file is matched").
-2. ~~F5, the typed go~~ built and merged 2026-11-17 with one review fix round (plan §8.10). Left: its interactive scenario with the owner (type `paid go:` from the phone, `test ok`, run 4 refused; a go from a second session refused; a subagent after a typed go needs the adapter line).
+2. ~~F5, the typed go~~ built and merged 2026-11-17 with one review fix round (plan §8.10). Live pass done 2026-11-17 (plan §8.10): the phone go ran 3 of 3, run 4 refused; a relayed go and a subagent refused.
 3. ~~F10~~ done (version 0.7.0). 4. ~~Review (§8.8)~~ done, fixes merged.
 5. **T3 (§8.7):** the live pass (every interactive scenario, method M after columns with 3+ runs each), then `term-scan.py --history` with 0 private hits. Then the checklist summary and the push only on the owner's word.
 
