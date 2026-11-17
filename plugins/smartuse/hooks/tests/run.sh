@@ -723,6 +723,68 @@ PY
 )
   case "$r" in ok*) echo "PASS $shape: owner-file decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL owner-file waiver timing: $shape -> '${r:0:120}'"; fail=1;; esac
 done
+# --- 0.7.0 F5: owner-file also covers the session transcripts (.claude/projects/<folder>/<id>.jsonl, and a subagent's below it): the typed go is
+#     read from them, so a forged "typed" line must not be writable from the shell. Readers only, through the same waiver. A memory .md beside
+#     them and the smartuse state files (receipts.jsonl, under .claude/smartuse/projects) are not matched. The file tools already cover them.
+TS='~/.claude/projects/-p-x/0a1b2c3d.jsonl'
+check deny  "echo x >> $TS"
+check deny  "echo x > /home/u/.claude/projects/-p-x/0a1b2c3d.jsonl"
+check deny  "cp /tmp/forged.jsonl $TS"
+check deny  "mv /tmp/forged.jsonl $TS"
+check deny  "rm $TS"
+check deny  "printf x | tee -a $TS"
+check deny  "sed -i s/a/b/ $TS"
+check deny  "dd if=/tmp/forged.jsonl of=$TS"
+check deny  "tee -a ~/.claude/projects/-p-x/0a1b2c3d/subagents/agent-1.jsonl"
+check deny  $'python3 -c "open(\'/home/u/.claude/projects/-p-x/0a1b2c3d.jsonl\',\'a\').write(\'x\')"'
+check deny  $'python3 - <<\'EOF\'\nopen(\'/home/u/.claude/projects/-p-x/0a1b2c3d.jsonl\',\'a\').write(\'x\')\nEOF'
+check deny  'rm C:\Users\x\.claude\projects\-p-x\0a1b2c3d.jsonl'
+check deny  'echo x >> C:\Users\x\.claude\projects\-p-x\0a1b2c3d.jsonl'
+check deny  'echo x >> /c/Users/x/.claude/projects/-p-x/0a1b2c3d.jsonl'
+check deny  'cp /tmp/forged.jsonl /c/Users/x/.claude/projects/-p-x/'"*.jsonl"
+pcheck deny 'Add-Content $HOME\.claude\projects\-p-x\0a1b2c3d.jsonl "x"'
+pcheck deny 'Set-Content C:\Users\x\.claude\projects\-p-x\0a1b2c3d.jsonl "x"'
+pcheck deny 'Remove-Item C:\Users\x\.claude\projects\-p-x\0a1b2c3d.jsonl'
+check allow "cat $TS"
+check allow "tail -n 20 $TS"
+check allow "grep -c 'paid go' $TS"
+check allow "jq -c . $TS"
+check allow "wc -l $TS"
+check allow "ls -la ~/.claude/projects/-p-x/"
+check allow 'cat C:\Users\x\.claude\projects\-p-x\0a1b2c3d.jsonl'
+check allow 'tail -n 5 /c/Users/x/.claude/projects/-p-x/0a1b2c3d.jsonl'
+check allow "cp $TS /tmp/copy.jsonl"
+check allow "echo \"the transcript is $TS\""
+check allow 'git commit -m "note: the transcript .claude/projects/x/y.jsonl is owner-only"'
+check allow "echo x >> ~/.claude/projects/-p-x/memory/MEMORY.md"
+check allow "rm ~/.claude/projects/-p-x/memory/old.md"
+check allow "echo x >> ~/.claude/smartuse/projects/k/receipts.jsonl"
+pcheck allow 'Get-Content C:\Users\x\.claude\projects\-p-x\0a1b2c3d.jsonl'
+pcheck allow 'Select-String -Path $HOME\.claude\projects\-p-x\0a1b2c3d.jsonl -Pattern paid'
+ocheck deny:'[rule owner-file, always on]' true 'owner-file' "echo x >> $TS"
+ocheck deny:'[rule owner-file, always on]' - - "rm $TS"
+ocheck allow - 'owner-file' "cat $TS"
+# decided within a second inside the process: 800 readers of a transcript then a writer / then `ls`, and 1,700 transcript folder openers with no file name after them
+for shape in transcripts-then-writer transcripts-clean opener-run; do
+  r=$(py - "$G" "$shape" <<'PY'
+import contextlib, io, json, sys, time, types
+src = open(sys.argv[1], encoding="utf-8").read()
+if sys.argv[2] == "opener-run":
+    cmd = "echo " + ".claude/projects/" * 1700
+else:
+    cmd = "cat ~/.claude/projects/k/s.jsonl; " * 800 + ("dd of=~/.claude/projects/k/s.jsonl" if sys.argv[2] == "transcripts-then-writer" else "ls")
+sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode()))
+out = io.StringIO()
+t0 = time.monotonic()
+with contextlib.redirect_stdout(out):
+    exec(compile(src, "bash-guard", "exec"), {"__name__": "timing"})
+dt = time.monotonic() - t0
+hit = "[rule owner-file, always on]" in out.getvalue()
+print(("ok %.2f" % dt) if hit == (sys.argv[2] == "transcripts-then-writer") and dt < 1.0 else "bad %.2f %s" % (dt, out.getvalue()[-90:]))
+PY
+)
+  case "$r" in ok*) echo "PASS $shape: owner-file (transcripts) decided in ${r#ok } s inside the process (limit 1 s)";; *) echo "FAIL owner-file transcript timing: $shape -> '${r:0:120}'"; fail=1;; esac
+done
 # --- 0.7.0 review fix M3: a copy whose DESTINATION is a folder writes a file with the source's name there, so a protected name read as "a source,
 #     never the last word" is a write when the destination (a word ending in / or \, `.`, or one that names a folder: no file extension, or a known
 #     folder such as .claude or .claude/smartuse/projects/<key>) joined with the source's file name is itself a protected path. A copy into a
