@@ -1,6 +1,6 @@
 # 0.7.0 next brief — after F4b step 1 (2026-11-14)
 
-The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file holds the state the next session starts from. Next session: the settings edit (F2 step 2) by hand, then the release on the owner's word. Update 2026-11-17: the bytecode cache (D-YK15) is merged (`13976b3`); method M passes (Bash 0.357 base · 0.360 light · 0.359 armed, plan §8.10). F5 merged (`cdf5cdb`) with its one review fix round (`fd99875`, plan §8.10); T2 after it 12 of 12.
+The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file holds the state the next session starts from. Next session: the release on the owner's word (F2 step 2 ran headless 2026-11-17, the guard's side passes; its last click, the owner approving Claude Code's settings prompt, is optional by hand). Update 2026-11-17: the bytecode cache (D-YK15) is merged (`13976b3`); method M passes (Bash 0.357 base · 0.360 light · 0.359 armed, plan §8.10). F5 merged (`cdf5cdb`) with its one review fix round (`fd99875`, plan §8.10); T2 after it 12 of 12.
 
 ## Start state
 - Dev branch `paid-0.7.0`, local only, every feature merged with `--no-ff`: F0, F1, F2, F9, F3, F4b steps 1–3, F6, the fix round, F7, F8, the small fixes, F10, the review fixes. Last: step 1 merge on `97ca6ba`, docs `049ce4e`. T2 after it: 12 of 12 ALL PASS.
