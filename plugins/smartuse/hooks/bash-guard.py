@@ -132,8 +132,8 @@ RULES = [
      r"|(?<![\w-])smartuse\.local\.md(?![\w-]|\.\w)|(?<![\w.-])trusted-checks\.json(?![\w-]|\.\w)"
      r"|\.claude[. ]*[/\\]smartuse[. ]*[/\\]interpreter(?![\w-]|\.\w)"
      # 0.7.0 F5: a session transcript, .claude/projects/<folder>/<id>.jsonl (a subagent's below it): the typed go is read from it. The run between is
-     # bounded (400), so a text of repeated openers costs linear time. smartuse's own state folder (.claude/smartuse/projects) and a memory .md are not matched.
-     r"|\.claude[. ]*[/\\]+projects[. ]*[/\\]+[^\s;&|\"'<>)]{0,400}?\.jsonl(?![\w-]|\.\w)",
+     # bounded (400) and starts after ONE separator (its class takes more), so a text of repeated openers or of a long run of slashes costs linear time. smartuse's own state folder (.claude/smartuse/projects) and a memory .md are not matched.
+     r"|\.claude[. ]*[/\\]+projects[. ]*[/\\][^\s;&|\"'<>)]{0,400}?\.jsonl(?![\w-]|\.\w)",
      "owner-only file (the paid-run counter, the adapter, the trust file or the launcher file): the shell may read it, nothing else. Ask the owner."),
     # ps-download-exec (0.7.0 F7): a download cmdlet or alias (_PS_DL) whose output runs as commands. (1) piped on to iex / Invoke-Expression or
     # powershell / pwsh / cmd (a pipe into bash, sh and the like stays pipe-to-shell's); (2) given to iex / Invoke-Expression, or to [scriptblock]::Create, in the same segment; (3) a script the same command saves with
@@ -2776,7 +2776,7 @@ def paid_typed_text(r):
     """The text of a transcript record only the OWNER can have typed, else None (see the header above), with the injected blocks cut out."""
     if r.get("isMeta") or r.get("isCompactSummary") or r.get("isSidechain") or r.get("isVisibleInTranscriptOnly"):
         return None
-    t, a, src = r.get("type"), r.get("attachment"), r.get("promptSource")
+    t, a, src, midturn = r.get("type"), r.get("attachment"), r.get("promptSource"), False
     if t == "user":
         o, turn, m = r.get("origin"), r.get("turnOrigin"), r.get("message")
         c = m.get("content") if isinstance(m, dict) else None
@@ -2785,9 +2785,10 @@ def paid_typed_text(r):
     elif t == "attachment" and isinstance(a, dict) and a.get("type") == "queued_command" and not a.get("isMeta"):
         o, turn, c = a.get("origin"), a.get("turnOrigin", r.get("turnOrigin")), a.get("prompt")
         src = a.get("promptSource", src)
+        midturn = a.get("commandMode") == "prompt" and a.get("humanTurn") is True   # a prompt typed while Claude works, as the transcripts of Claude Code 2.1.305 to 2.1.326 hold it: no promptSource
     else:
         return None
-    if not isinstance(o, dict) or o.get("kind") != "human" or src not in ("typed", "queued") or turn not in (None, "human"):
+    if not isinstance(o, dict) or o.get("kind") != "human" or turn not in (None, "human") or not (src in ("typed", "queued") or (src is None and midturn)):
         return None
     text = c if isinstance(c, str) else "\n".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)) if isinstance(c, list) else ""
     return None if text.lstrip().lower().startswith(PAID_RELAY) else PAID_BLOCK.sub("", text)
@@ -2837,7 +2838,7 @@ def paid_scan_typed(path, deadline=None):
         raise PaidUnverified("the transcript is missing")
     except OSError:
         raise PaidUnverified("the transcript is unreadable")
-    ev = [(0, "cut")] if size > PAID_TAIL else []
+    ev, prev = [((0, 0), "cut")] if size > PAID_TAIL else [], None
     for i, raw in enumerate(buf.split(b"\n")[1 if size > PAID_TAIL else 0:]):
         if not (i & 63) and time.monotonic() >= deadline:
             raise PaidUnverified("the transcript scan ran over the hook's deadline")
@@ -2850,8 +2851,26 @@ def paid_scan_typed(path, deadline=None):
         text = paid_typed_text(r) if isinstance(r, dict) else None
         if text:
             uuid = r.get("uuid") if isinstance(r.get("uuid"), str) else ""
-            ev += [(i + 1,) + e for e in paid_typed_lines(text, uuid)]
+            new = paid_typed_lines(text, uuid)
+            if not new:
+                continue
+            att, norm = r.get("type") == "attachment", " ".join(text.split())
+            if prev and prev[0] and not att and prev[1] == norm and prev[2] == len(ev):
+                prev = None                                   # the same prompt written twice (an attachment, then a user record, with no typed line between): one go, the first
+                continue
+            ts = paid_ts(r.get("timestamp"))
+            ev += [((i + 1, k),) + e + (ts,) for k, e in enumerate(new)]   # seq = (record, line within it); the last field is the record's own time (None when it has none)
+            prev = (att, norm, len(ev))
     return ev
+
+
+def paid_ts(v):
+    """A record's `timestamp` (ISO 8601, Z or an offset) as seconds since the epoch, else None: a record with no usable time counts for nothing that needs one."""
+    try:
+        s = re.sub(r"\.(\d+)", lambda m: "." + (m.group(1) + "000000")[:6], v.replace("Z", "+00:00"), count=1)
+        return datetime.datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None
 
 
 def paid_typed_events(data, deadline=None):
@@ -2912,24 +2931,33 @@ def paid_find_go(data, project, script, adapter, deadline=None):
         if not found:
             raise
         ev = []
+    # an event is (seq, kind, …, time): seq = (record, line within the record), so a go and a stop typed in one prompt keep their order; time = the record's own `timestamp` (None: it has none)
     mine = lambda e: e[2] is None or paid_basename(e[2]).lower() == me
     gos = [] if sub else [e for e in ev if e[1] == "go" and paid_basename(e[3]["script"]).lower() == me]
-    stops = [e[0] for e in ev if e[1] == "stop" and mine(e)]
+    stops = [e for e in ev if e[1] == "stop" and mine(e)]
     newest = gos[-1] if gos else None
-    t = newest[0] if newest else -1
+    t = newest[0] if newest else (-1, 0)
     stored = paid_stored(project) if (found or newest) else {}
-    held = lambda gid: isinstance(stored.get(gid), dict) and bool(stored[gid].get("stopped"))
-    if found and newest and (stops or held(found[0])) and t > max(stops, default=-1):
-        found = None                                          # the adapter go was stopped and the owner typed a go after the stop: that go is a new counter
+    entry = lambda gid: stored[gid] if isinstance(stored.get(gid), dict) else {}
+    held = lambda gid: bool(entry(gid).get("stopped"))
+    if found and newest and (stops or held(found[0])) and t > max([e[0] for e in stops], default=(-1, 0)):
+        # the adapter go was stopped and the owner typed a go after the stop: that go is a new counter, but only when its record is also LATER IN TIME than the stop
+        # (the stop, seen or stored with its time; a time that is missing on either side means no take-over)
+        times = [e[-1] for e in stops] + ([entry(found[0]).get("stopped_at")] if held(found[0]) else [])
+        if newest[-1] is not None and times and all(isinstance(x, (int, float)) for x in times) and newest[-1] > max(times):
+            found = None
     typed = False
     if not found and newest:
         found, typed = (newest[2], dict(newest[3])), True
     if not found and any(e[1] == "cut" for e in ev):
         raise PaidUnverified("the transcript is longer than the last 4 MB read and holds no go in them")
     if found:
-        g, at = found[1], (t if typed else -1)
-        g["test_ok"] = g["test_ok"] or any(e[1] == "ok" and e[0] > at and mine(e) for e in ev)
-        g["stopped"] = held(found[0]) or any(s > at for s in stops)
+        g, at = found[1], (t if typed else (-1, 0))
+        run1 = entry(found[0]).get("run1_at")                 # a typed test ok counts only when its record is later than this go's run 1 (stored when run 1 was counted): no run yet, no typed ok
+        g["test_ok"] = g["test_ok"] or (isinstance(run1, (int, float)) and any(e[1] == "ok" and mine(e) and e[-1] is not None and e[-1] > run1 for e in ev))
+        seen = [e for e in stops if e[0] > at]
+        g["stopped"] = held(found[0]) or bool(seen)
+        g["stopped_at"] = None if any(e[-1] is None for e in seen) or not seen else max(e[-1] for e in seen)   # kept in the entry with `stopped`
     return found
 
 
@@ -3057,11 +3085,11 @@ def paid_count(data, sdir, items, text, deadline=None):
             used, runs, ok = int(e.get("used") or 0), int(e.get("runs") or go["runs"]), bool(e.get("test_ok") or go["test_ok"])
             if go.get("stopped") or e.get("stopped"):
                 if not e.get("stopped"):                      # F5: the first sight of the stop is written down, so it cannot scroll out of the last 4 MB of the transcript
-                    e["stopped"] = True
+                    e["stopped"], e["stopped_at"] = True, go.get("stopped_at")   # with the stop record's own time: a typed go takes over only when it is later
                     state[go_id] = e
                     if not paid_write_json(f, state):
                         return True, "the counter is not writable", k
-                return False, 'the owner said "paid stop": no more runs of this go. The owner types a new "paid go: …" (or changes the paid: line) to start again.', k
+                return False, 'the owner said "paid stop": no more runs of this go. The owner types a new "paid go: …" to start again.', k
             if used >= runs:
                 return False, f"the go for {clip(script)} is used up ({runs} of {runs}). Ask the owner for a new go.", k
             if used and not ok:
@@ -3086,6 +3114,8 @@ def paid_count(data, sdir, items, text, deadline=None):
                 except Exception:
                     return True, "the counter is not writable", k
                 claimed.append(marker)
+            if not int(e.get("used") or 0):
+                e["run1_at"] = time.time()                    # F5: a typed test ok counts for this go only when its record is later than this (the first run)
             e["used"], e["test_ok"], e["last_at"] = int(e.get("used") or 0) + 1, ok, now
             state[go_id] = e
         if not todo or (not claimed and any(m for *_, m in todo)):

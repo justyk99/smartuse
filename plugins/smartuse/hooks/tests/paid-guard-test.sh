@@ -1752,12 +1752,20 @@ PGTOOL=Bash
 # The transcripts are SYNTHETIC: one mk.py writes every case to $D/t/<name>.jsonl in one start (the shapes of E1-E4, field names only, no real content).
 MK=$(wp "$D/mk.py")
 cat > "$D/mk.py" <<'PY'
-import json, os, sys
+import datetime, json, os, sys
 GO = "paid go: render.py x 3, cap RM1"
 HUMAN = {"kind": "human"}
 MARKERS = ("system-reminder", "cross-session-message", "task-notification", "local-command-stdout", "local-command-stderr", "bash-stdout", "bash-stderr")
-def user(text, uid, src="typed", origin=HUMAN, turn="human", **kw):   # E1: a prompt typed while Claude is idle (origin human, turnOrigin human, promptSource typed)
+PAST = "2026-11-10T00:00:00.000Z"      # every record has a time (the record's own `timestamp`); the default is long before any run of a test
+STOPPED = "2026-11-02T00:00:00.000Z"   # ... the stop and the go of the take-over cases
+FUTURE = "2099-01-01T00:00:00.000Z"    # ... a test ok in a fixed transcript that is later than run 1, whenever the suite runs
+def now():
+    n = datetime.datetime.now(datetime.timezone.utc)
+    return n.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (n.microsecond // 1000)
+def user(text, uid, src="typed", origin=HUMAN, turn="human", ts=PAST, **kw):   # E1: a prompt typed while Claude is idle (origin human, turnOrigin human, promptSource typed)
     r = {"type": "user", "uuid": uid, "parentUuid": None, "isSidechain": False, "userType": "external", "entrypoint": "cli", "message": {"role": "user", "content": text}}
+    if ts is not None:
+        r["timestamp"] = ts
     if origin is not None:
         r["origin"] = origin
     if turn is not None:
@@ -1766,14 +1774,19 @@ def user(text, uid, src="typed", origin=HUMAN, turn="human", **kw):   # E1: a pr
         r["promptSource"] = src
     r.update(kw)
     return r
-def attach(prompt, uid, origin=HUMAN, src="queued", **kw):   # the attachment queued_command: a prompt typed mid-turn, or a message from another session
-    a = {"type": "queued_command", "prompt": prompt}
+def attach(prompt, uid, origin=HUMAN, src=None, mode="prompt", human=True, ts=PAST, **kw):   # the attachment queued_command as 115 real transcripts hold it: a prompt typed mid-turn has origin human, commandMode prompt, humanTurn true and NO promptSource
+    a = {"type": "queued_command", "prompt": prompt, "source_uuid": uid + "-src", "commandMode": mode}
+    if human is not None:
+        a["humanTurn"] = human
     if origin is not None:
         a["origin"] = origin
     if src is not None:
         a["promptSource"] = src
     a.update(kw)
-    return {"type": "attachment", "uuid": uid, "attachment": a}
+    r = {"type": "attachment", "uuid": uid, "attachment": a}
+    if ts is not None:
+        r["timestamp"] = ts
+    return r
 def asst(text, uid):
     return {"type": "assistant", "uuid": uid, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 def write(d, name, recs):
@@ -1786,7 +1799,25 @@ def build(d):
     T = {}
     T["e1"] = [asst("ready", "a0"), user(GO, "u-go1")]
     T["e2"] = [user(GO, "u-go2", src="queued", queueSkipSlashCommands=True)]                  # E2: typed while Claude worked
-    T["att"] = [attach(GO, "u-go3")]
+    T["att"] = [attach(GO, "u-go3")]                                                           # the real mid-turn shape: no promptSource, commandMode prompt, humanTurn true
+    T["att_ps"] = [attach(GO, "u-go3b", src="queued")]                                         # ... and one with a promptSource
+    T["att_stop"] = [user(GO, "u-as1"), attach("paid stop", "u-as2")]                          # a mid-turn paid stop
+    T["att_nohuman"] = [attach(GO, "u-an1", human=False)]                                      # origin human but not a human turn, no promptSource
+    T["att_nohuman2"] = [attach(GO, "u-an2", human=None)]
+    T["att_mode"] = [attach(GO, "u-an3", mode="task-notification")]
+    T["att_peer"] = [attach(GO, "u-an4", origin={"kind": "peer"})]                             # commandMode prompt, humanTurn true, but the origin is a peer
+    T["att_kind"] = [attach(GO, "u-an5", origin={"kind": "humanoid"})]                         # the origin kind stays strictly human
+    T["att_sys"] = [attach(GO, "u-an6", src="system")]
+    T["dup"] = [attach(GO, "u-d1"), user(GO, "u-d2", src="queued")]                            # one prompt written twice: an attachment, then a user record
+    T["dup_a"] = [attach(GO, "u-da")]                                                          # the live case starts with the attachment alone
+    T["dup_stop"] = [attach(GO, "u-r1"), user("paid stop", "u-r2"), user(GO, "u-r3")]          # ... a go retyped after a stop is a new counter
+    T["probe"] = [user("paid go: polish.py x 3, cap RM1", "u-pb1"), user("test ok", "u-pb2", ts=FUTURE)]   # a go for another script, then a bare test ok
+    T["ok_nots"] = [user(GO, "u-on1"), user("test ok", "u-on2", ts=None)]                      # a test ok record with no time
+    T["ok_old"] = [user("test ok", "u-oo2")]                                                   # a test ok from before any run
+    T["go_stop_one"] = [user(GO + "\npaid stop", "u-gs")]                                      # a go and a paid stop in ONE prompt
+    T["st_stop"] = [user("paid stop", "u-st1", ts=STOPPED)]
+    T["go_early"] = [user(GO, "u-ge", ts="2026-11-01T00:00:00.000Z")]                          # a typed go from before the stop above
+    T["go_late"] = [user(GO, "u-gl", ts="2026-11-03T00:00:00.000Z")]                           # ... and one from after it
     T["e3"] = [user(GO, "u-go4", src=None, origin=None, turn="sdk", entrypoint="sdk-cli")]    # E3: a headless -p prompt has no origin object
     T["peer"] = [user(GO, "u-go5", src="system", origin={"kind": "peer"}, turn="peer", isMeta=True)]   # a subagent's report handed back
     T["oldcc"] = [user(GO, "u-go6", src=None, origin=None, turn="human")]                    # an older Claude Code: no origin fields
@@ -1811,15 +1842,15 @@ def build(d):
     T["two"] = [user("paid go: render.py x 2, cap RM1", "u-a"), user("paid go: render.py x 5, cap RM1", "u-b")]
     T["polish"] = [user("paid go: polish.py x 3, cap RM1", "u-pl")]
     T["ok_before"] = [user("test ok", "u-o1"), user(GO, "u-o2")]
-    T["ok_after"] = [user(GO, "u-o3"), user("test ok", "u-o4")]
-    T["ok_other"] = [user(GO, "u-o5"), user("test ok: polish.py", "u-o6")]
-    T["ok_script"] = [user(GO, "u-o7"), user("test ok: render.py", "u-o8")]
-    T["ok_only"] = [user("test ok", "u-oo")]
+    T["ok_after"] = [user(GO, "u-o3"), user("test ok", "u-o4", ts=FUTURE)]
+    T["ok_other"] = [user(GO, "u-o5"), user("test ok: polish.py", "u-o6", ts=FUTURE)]
+    T["ok_script"] = [user(GO, "u-o7"), user("test ok: render.py", "u-o8", ts=FUTURE)]
+    T["ok_only"] = [user("test ok", "u-oo", ts=FUTURE)]
     T["stop"] = [user(GO, "u-s1"), user("paid stop", "u-s2")]
     T["stop_other"] = [user(GO, "u-s3"), user("paid stop: polish.py", "u-s4")]
-    T["stop_only"] = [user("paid stop", "u-s5")]
+    T["stop_only"] = [user("paid stop", "u-s5", ts=STOPPED)]
     T["stop_go"] = [user(GO, "u-s6"), user("paid stop", "u-s7"), user("paid go: render.py x 3, cap RM2", "u-s8")]
-    T["stop_then"] = [user("paid stop", "u-s9"), user("paid go: render.py x 3, cap RM1", "u-sa")]
+    T["stop_then"] = [user("paid stop", "u-s9", ts="2026-11-09T00:00:00.000Z"), user("paid go: render.py x 3, cap RM1", "u-sa")]
     T["garbage"] = ["this is not json, paid go: render.py x 9", "{\"type\":", "\x01\x02 binary paid go: render.py x 9", user(GO, "u-g1")]
     T["relay"] = T["x_attach"] + T["x_user"] + T["x_user_h"] + T["qop"] + T["asst"] + T["toolres"]
     T["slow"] = [user("paid go: polish.py x 1", "u-sl%d" % i) for i in range(200)]
@@ -1830,9 +1861,12 @@ def build(d):
         write(d, k, v)
 if sys.argv[1] == "build":
     build(sys.argv[2])
-elif sys.argv[1] == "add":   # add FILE UUID TEXT: the owner types one more line (E1 shape) at the end of the transcript
+elif sys.argv[1] == "add":   # add FILE UUID TEXT [SRC]: the owner types one more line at the end of the transcript, stamped with the time now (E1 shape, or promptSource SRC)
     with open(sys.argv[2], "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(user(sys.argv[4], sys.argv[3])) + "\n")
+        f.write(json.dumps(user(sys.argv[4], sys.argv[3], src=(sys.argv[5] if len(sys.argv) > 5 else "typed"), ts=now())) + "\n")
+elif sys.argv[1] == "addatt":   # addatt FILE UUID TEXT: the same, as the mid-turn attachment shape
+    with open(sys.argv[2], "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(attach(sys.argv[4], sys.argv[3], ts=now())) + "\n")
 PY
 mkdir -p "$D/t"
 py "$MK" build "$(wp "$D/t")" </dev/null || { echo "FAIL could not build the synthetic transcripts"; exit 1; }
@@ -1997,6 +2031,66 @@ allow "... test ok, then run 2 of the new go passes" 'python render.py --images 
 addl u-l5 'paid stop'
 deny "6: paid stop refuses the next run although 8 are left" 'python render.py --images 6' 'the owner said \"paid stop\"' toolu_L8
 [ "$(ekey session:u-l3 used)" = 2 ] && [ "$(ekey session:u-l3 stopped)" = true ] && ok "... used stays 2, stopped true in paid-runs.json" || ko "after step 6: $(cat "$R" 2>&1)"
+TPATH=
+
+# ===== 38. 0.7.0 F5 fix round (one round). 38a the real mid-turn shape (an attachment with no promptSource), and the same prompt written twice. 38b a typed test ok counts for a go only when its record is later than that go's run 1. 38c a go and a stop in one prompt. 38d a typed go takes over a stopped adapter go only when its record is later than the stop. 38e the stop reason.
+# --- 38a. a queued_command attachment: origin human AND (promptSource typed or queued, OR commandMode prompt with humanTurn true); the origin kind stays strictly human
+fresh; mkpaid
+tallow "38a: a mid-turn prompt as the real transcripts hold it (attachment, origin human, commandMode prompt, humanTurn true, NO promptSource) counts" att 'python render.py --n 1' toolu_n1
+[ "$(field go_from)" = '"session:u-go3"' ] && ok "... go_from session:u-go3" || ko "mid-turn entry: $(cat "$R" 2>&1)"
+fresh; mkpaid
+tallow "38a: the same attachment with a promptSource (queued) still counts" att_ps 'python render.py --n 1' toolu_n2
+fresh; mkpaid
+tdeny "38a: a paid stop typed mid-turn (that shape) after a typed go stops the call" att_stop 'python render.py --n 1' 'the owner said \"paid stop\"' toolu_n3
+ign "38a: origin human but humanTurn false and no promptSource is not a go" att_nohuman
+ign "38a: origin human with no humanTurn and no promptSource is not a go" att_nohuman2
+ign "38a: origin human, humanTurn true, but commandMode task-notification is not a go" att_mode
+ign "38a: commandMode prompt and humanTurn true with origin peer is not a go (the kind stays strictly human)" att_peer
+ign "38a: origin kind humanoid is not a go" att_kind
+ign "38a: a promptSource system with the mid-turn fields is not a go" att_sys
+fresh; mkpaid
+tallow "38a dedupe: an attachment and a user record of the same prompt are one go (the attachment's)" dup 'python render.py --n 1' toolu_n4
+[ "$(ekey session:u-d1 used)" = 1 ] && [ "$(ekey session:u-d2 used)" = missing ] && [ "$(nent)" = 1 ] && ok "... one entry, session:u-d1 used 1; none for the user record" || ko "dedupe: $(cat "$R" 2>&1)"
+fresh; mkpaid; cp "$D/t/dup_a.jsonl" "$D/t/dup_live.jsonl"
+tallow "38a dedupe, live: run 1 passes on the attachment alone" dup_live 'python render.py --n 1' toolu_n5
+py "$MK" add "$(wp "$D/t/dup_live.jsonl")" u-dl2 'paid go: render.py x 3, cap RM1' queued </dev/null
+tdeny "... the same prompt then shows up as a user record: still the one counter (run 2 waits for test ok)" dup_live 'python render.py --n 1' "the batch waits for the owner's " toolu_n6
+[ "$(nent)" = 1 ] && [ "$(ekey session:u-da used)" = 1 ] && ok "... still one entry, used 1" || ko "dedupe, live: $(cat "$R" 2>&1)"
+fresh; mkpaid
+tallow "38a: a go retyped after a stop (attachment, paid stop, the same go again) is a new counter" dup_stop 'python render.py --n 1' toolu_n7
+[ "$(ekey session:u-r3 used)" = 1 ] && [ "$(ekey session:u-r1 used)" = missing ] && ok "... session:u-r3 used 1, no entry for the first go" || ko "retyped go: $(cat "$R" 2>&1)"
+# --- 38b. a typed test ok counts only when its record is later than the go's run 1 (stored in the entry when run 1 is counted)
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+tdeny "38b: the reviewer's probe: a typed go for polish.py, then a bare test ok, does not lift render.py's one-output rule" probe 'python render.py --images 6' 'first run after the go must make ONE output' toolu_o1
+fresh; mkpaid
+tdeny "38b: a typed go, and a test ok in the transcript before its run 1: the first run still makes ONE output" ok_after 'python render.py --images 6' 'first run after the go must make ONE output' toolu_o2
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+tallow "38b: an adapter go, a test ok from before any run: run 1 passes" ok_old 'python render.py --n 1' toolu_o3
+tdeny "... run 2 waits: that test ok is older than run 1" ok_old 'python render.py --n 1' "the batch waits for the owner's " toolu_o4
+fresh; mkpaid
+tallow "38b: a typed go and a test ok record with no time: run 1 passes" ok_nots 'python render.py --n 1' toolu_o5
+tdeny "... run 2 waits: a record with no time does not count (fail closed)" ok_nots 'python render.py --n 1' "the batch waits for the owner's " toolu_o6
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5\n'
+tallow "38b: an adapter go, a test ok typed after run 1: run 1 passes" ok_only 'python render.py --n 1' toolu_o7
+tallow "... run 2 passes" ok_only 'python render.py --images 6' toolu_o8
+adapter 'paid: render.py x 10, cap RM6\n'
+tdeny "... a changed adapter line is a new counter: it does not inherit the old test ok" ok_only 'python render.py --images 6' 'first run after the go must make ONE output' toolu_o9
+fresh; mkpaid
+tallow "38b: a typed go, a test ok typed after run 1: run 1 passes" ok_after 'python render.py --n 1' toolu_o10
+tallow "... run 2 passes" ok_after 'python render.py --images 6' toolu_o11
+[ "$(used)" = 2 ] && [ "$(field test_ok)" = true ] && [ -n "$(field run1_at)" ] && [ "$(field run1_at)" != null ] && ok "... used 2, test_ok true, run1_at stored in the entry" || ko "38b entry: $(cat "$R" 2>&1)"
+# --- 38c. a go and a paid stop in one prompt: the stop is later (record, then line within the record)
+fresh; mkpaid
+tdeny "38c: paid go and paid stop typed in ONE prompt: the call is refused" go_stop_one 'python render.py --n 1' 'the owner said \"paid stop\"' toolu_p1
+# --- 38e. the stop reason says only what is true
+case "$OUT" in *'paid: line'*|*'changes the'*) ko "38e: the stop reason still names changing the paid: line: $OUT";; *'The owner types a new \"paid go:'*) ok "38e: the stop reason says a new typed go starts again, and names no paid: line change";; *) ko "38e: stop reason: $OUT";; esac
+# --- 38d. the stop is stored with its time; a typed go takes over only when its record is later
+fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, test ok\n'
+tdeny "38d: a stop typed in the session stops an adapter go (stored with its time)" st_stop 'python render.py --n 1' 'the owner said \"paid stop\"' toolu_q1
+[ "$(field stopped)" = true ] && [ "$(field stopped_at)" != null ] && [ -n "$(field stopped_at)" ] && ok "... the entry holds stopped true and stopped_at" || ko "38d entry: $(cat "$R" 2>&1)"
+tdeny "... a typed go from BEFORE the stop cannot take over: still stopped" go_early 'python render.py --n 1' 'the owner said \"paid stop\"' toolu_q2
+tallow "... a typed go from AFTER the stop takes over" go_late 'python render.py --n 1' toolu_q3
+[ "$(ekey session:u-gl used)" = 1 ] && ok "... session:u-gl used 1" || ko "38d take-over: $(cat "$R" 2>&1)"
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
