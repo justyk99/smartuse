@@ -1,12 +1,12 @@
 # 0.7.0 next brief — after F4b step 1 (2026-11-14)
 
-The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file holds the state the next session starts from. Next session: T3's live pass, then F5 if the owner's phone records (E1/E2) have arrived, then the release on the owner's word.
+The spec stays `paid-guard-plan.md` §8 (F5, §8.6, §8.7, §8.8). This file holds the state the next session starts from. Next session: F5 (E1/E2 are recorded), then the settings edit (F2 step 2) by hand, then the release on the owner's word. Update 2026-11-17: the bytecode cache (D-YK15) is merged (`13976b3`); T2 12 of 12 (heartbeat 203); method M passes (Bash 0.357 base · 0.360 light · 0.359 armed, plan §8.10).
 
 ## Start state
 - Dev branch `paid-0.7.0`, local only, every feature merged with `--no-ff`: F0, F1, F2, F9, F3, F4b steps 1–3, F6, the fix round, F7, F8, the small fixes, F10, the review fixes. Last: step 1 merge on `97ca6ba`, docs `049ce4e`. T2 after it: 12 of 12 ALL PASS.
-- Counts now (floors): run 1299 · file-guard 107 · ledger 46 · until-done 50 · watch 63 · heartbeat 179 · wait-gate 196 · recall 203 · fresh-gate 758 · paid 1221 · ab 36 · term-scan 6.
-- T3 done so far: both `claude plugin validate --strict` pass; `term-scan.py --history` 0 private hits (rerun it before the push; the tree scan on 049ce4e has 192 generic hits, 0 private). Left: the live pass (every interactive scenario of §8.7) and method M (3+ runs per column, laptop otherwise idle), then `scratch/baseline.json`.
-- Worktree `.claude/worktrees/pg7-a` (branch `pg7-a`) is at `97ca6ba`, one merge behind the dev branch. Method D tools: `.claude/worktrees/pg7-scratch/f3/replay.py` with the F2 `events.jsonl`; never pass `--monitor` now that F3 is the base.
+- Counts now (floors): run 1299 · file-guard 107 · ledger 46 · until-done 50 · watch 63 · heartbeat 203 · wait-gate 196 · recall 203 · fresh-gate 758 · paid 1221 · ab 36 · term-scan 6.
+- T3 done so far: both `claude plugin validate --strict` pass; `term-scan.py --history` 0 private hits (rerun it before the push; the tree scan on 049ce4e has 192 generic hits, 0 private). Left: the settings edit (F2 step 2) by hand; the live pass and method M are done (2026-11-14 and 2026-11-17); `baseline.json` stays in the session scratchpad (`scratch/` is not gitignored here).
+- Worktree `.claude/worktrees/pg7-a` (branch `pg7-a`) is at `13976b3`, level with the dev branch. Method D tools: `.claude/worktrees/pg7-scratch/f3/replay.py` with the F2 `events.jsonl`; never pass `--monitor` now that F3 is the base.
 - Names now: `RULE_NAMES` = the 16 of 0.6.1 + `settings-file`, `owner-file`, `ps-download-exec`, `ps-rm-root` (20). `GATE_NAMES` = `paid`. `FLOOR` = `human-only`, `trust-pin`, `config-switch`, `settings-file`, `owner-file`.
 
 ## What is left, in order

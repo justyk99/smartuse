@@ -103,6 +103,8 @@ flowchart LR
 
 The plan's target for Bash was 0.35 s or less; it is 0.41 s, because one guard start still costs about 0.4 s on this laptop (starting Python alone is 0.17 s). Stop is unchanged: its four hooks still run side by side.
 
+**0.7.0** (method M, Claude Code 2.1.326, the same laptop, 2026-11-17, 4 runs per setup, pooled medians): Bash 0.357 s on 0.6.1, 0.360 s on 0.7.0 with no paid line, 0.359 s with a paid line; Edit 0.289, 0.304, 0.307 s; Read 0.00 s. The guard grew to about 3,100 lines in 0.7.0; `py.sh` now keeps each hook's compiled bytecode, so a call no longer recompiles it.
+
 Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --scaffold --allow-tools Bash Skill Read Grep Glob Agent Write` (`--scaffold` runs the `scaffold.sh` of the two one-session cases, which stage a small repo and a task folder in the case's working directory; Linux needs `bubblewrap` + `socat` for the sandbox, and `TMPDIR` set to a directory outside `/tmp`: the eval sandbox denies writes to `/tmp`, where it would otherwise put its own temp dir, and every skill's `!` line then fails with "Read-only file system") and `bench/run.sh` (a sample repo with a planted rounding bug + 5 asks). The regression suites: `bash plugins/smartuse/hooks/tests/all.sh` — every hook suite plus the bench A/B dry run, one summary line, nothing spent.
 
 ## Honest limits
