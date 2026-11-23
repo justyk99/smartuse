@@ -3053,6 +3053,9 @@ def paid_count_flags(args, extra=""):
     return out
 
 
+PAID_SDIR = "the state folder cannot be written"   # 0.7.1 F2: paid_count's `why` when the state folder cannot be made; paid_verdict names /smartuse:doctor for it, not the adapter
+
+
 def paid_counter_lock(sdir, deadline=None):
     """Hold paid-runs.lock (an O_EXCL file) for the read-modify-write of the counter: wait up to ~1 s for another holder (never past
     `deadline`, a time.monotonic() value: V8, one deadline for the whole hook), take over a lock older than 10 s (its holder died).
@@ -3087,7 +3090,10 @@ def paid_count(data, sdir, items, text, deadline=None):
     -> None when allowed, else (True, why the run cannot be counted, item index: the caller says "could not verify the go") or
     (False, the reason's tail, item index: a rule denies it). A corrupt counter file is never reset silently. F5: a go the owner stopped
     (go["stopped"], or the entry's stopped) is denied first, and the stop is written into the entry the first time it is seen."""
-    sdir.mkdir(parents=True, exist_ok=True)
+    try:
+        sdir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return True, PAID_SDIR, 0                             # 0.7.1 F2: a named cause (a file where the folder goes, no permission), not "the check failed"
     try:
         lock = paid_counter_lock(sdir, deadline)
     except OSError:
@@ -3125,6 +3131,8 @@ def paid_count(data, sdir, items, text, deadline=None):
             if used >= runs:
                 return False, f"the go for {clip(script)} is used up ({runs} of {runs}). Ask the owner for a new go.", k
             if used and not ok:
+                if str(go.get("go_from") or "").startswith("session:"):   # 0.7.1 F2: a typed go has no paid: line to add to
+                    return False, f"run {used} of {runs} is done; the batch waits for the owner's \"test ok\": the owner types \"test ok\" in this session. Show the owner the one output first.", k
                 return False, f"run {used} of {runs} is done; the batch waits for the owner's \"test ok\": ask the owner to add \", test ok\" to that paid: line. Show the owner the one output first. The owner can also type \"test ok\" in this session.", k
             if not ok and go["count"] != "none":
                 raw = paid_seg_args(text, script, 0, skip) or []
@@ -3256,6 +3264,8 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         why = str(e)
     except Exception:
         why = "the check failed"
+    if why == PAID_SDIR:                                      # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written
+        return head(first) + f"could not verify the go ({why}); run /smartuse:doctor. Nothing was spent."
     if why:
         return head(first) + f"could not verify the go ({why}); put it in .claude/smartuse.local.md. Nothing was spent."
     if rule:

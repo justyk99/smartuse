@@ -525,6 +525,8 @@ printf '[1,2]' > "$R"
 deny "a counter file that is JSON but not an object -> deny" 'python render.py' 'could not verify the go (paid-runs.json is unreadable)' toolu_3
 fresh; adapter 'paid: render.py x 10, cap RM5\n'; mkpaid; mkdir -p "$HOME/.claude/smartuse/projects"; : > "$P"
 deny "the state dir cannot be created (a file sits where it goes) -> deny: could not verify the go" 'python render.py' 'could not verify the go (' toolu_4
+case "$OUT" in *'could not verify the go (the state folder cannot be written); run /smartuse:doctor. Nothing was spent.'*) ok "... 0.7.1 F2: the reason names the state folder and /smartuse:doctor";; *) ko "state folder reason: $OUT";; esac
+case "$OUT" in *'smartuse.local.md'*) ko "0.7.1 F2: a state folder that cannot be written must not point at the adapter: $OUT";; *) ok "... and does not send the owner to smartuse.local.md (the adapter is not the fix)";; esac
 fresh; mkpaid
 guard 'python polish.py'; [ -z "$OUT" ] && [ -z "$ERR" ] && ok "a call that is not paid is let through whatever the state (detection errors fail open as before)" || ko "plain call: $OUT $ERR"
 printf '{"tool_name":"Bash","tool_input":' | py "$G" > "$D/out" 2>&1; [ ! -s "$D/out" ] && ok "garbage on stdin -> silent, no deny (fail open, as before)" || ko "garbage stdin: $(cat "$D/out")"
@@ -865,6 +867,8 @@ fresh; mkpaid; adapter 'paid_guard: on\n'
 r=$(py "$CW" inproc "$(wp "$G")" "$PW" deterr </dev/null 2>&1)
 case "$r" in *'light '*' allow'*) ok "a forced detection error in light: the call is allowed (as every check does)";; *) ko "detection error, light: $r";; esac
 case "$r" in *'strict '*' deny '*'[rule paid]'*) ok "... and in strict it denies, [rule paid]";; *) ko "detection error, strict: $r";; esac
+fresh; adapter 'paid: render.py x 10, cap RM5\n'; mkpaid; mkdir -p "$HOME/.claude/smartuse/projects"; : > "$P"
+inlight deny "0.7.1 F2: light, a file where the state folder goes: still a deny, naming the state folder and doctor" 'python render.py' 'could not verify the go (the state folder cannot be written); run /smartuse:doctor. Nothing was spent.' toolu_4l
 
 # ===== 21. order (V7, V8): the paid check runs last; the counter is touched only by a call every other check allowed; one deadline
 fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
@@ -1882,7 +1886,8 @@ fresh; mkpaid
 tallow "E1: the owner types the go (a user record, origin human, promptSource typed): run 1 (--n 1) passes silently" e1 'python render.py --n 1' toolu_f1
 [ "$(used)" = 1 ] && [ "$(field go_from)" = '"session:u-go1"' ] && [ "$(field script)" = '"render.py"' ] && [ "$(field runs)" = 3 ] && [ "$(field cap)" = '"RM1"' ] && ok "... paid-runs.json: used 1, go_from session:u-go1 (the record's uuid), render.py, runs 3, cap RM1" || ko "typed go entry: $(cat "$R" 2>&1)"
 tdeny "... run 2 waits for the owner's test ok, as for an adapter go" e1 'python render.py --n 1' "the batch waits for the owner's " toolu_f2
-case "$OUT" in *'The owner can also type \"test ok\" in this session.'*) ok "... and the reason says the owner can type test ok in this session";; *) ko "wait reason: $OUT";; esac
+case "$OUT" in *'the owner types \"test ok\" in this session. Show the owner the one output first.'*) ok "... 0.7.1 F2: the reason leads with the typed instruction (the owner types test ok in this session)";; *) ko "wait reason: $OUT";; esac
+case "$OUT" in *'to that paid: line'*) ko "0.7.1 F2: a typed go has no paid: line, the reason must not send the owner to it: $OUT";; *) ok "... and does not mention a paid: line";; esac
 fresh; mkpaid
 tallow "E2: typed while Claude worked (promptSource queued, queueSkipSlashCommands true) counts" e2 'python render.py --n 1' toolu_f3
 [ "$(field go_from)" = '"session:u-go2"' ] && ok "... go_from session:u-go2" || ko "E2 entry: $(cat "$R" 2>&1)"
