@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.7.0 — 2026-11-23, "the paid-call guard"
-A script that calls a per-call billed API is denied until the owner's go, and several older gaps close with it. Plan and decisions: `docs/notes/paid-guard-plan.md` (§8). Built on the 0.6.1 code, one feature at a time. Reviewed (§8.8, its findings fixed); the live pass ran and method M passes (2026-11-17); the settings edit (F2 step 2) is still to be checked by hand: this entry is the build, not the release.
+A script that calls a per-call billed API is denied until the owner's go, and several older gaps close with it. Plan and decisions: `docs/notes/paid-guard-plan.md` (§8). Built on the 0.6.1 code, one feature at a time. Reviewed (§8.8, its findings fixed); the live pass ran and method M passes (2026-11-17); the settings edit (F2 step 2) passed headless on the guard's side (2026-11-17).
 - **Changed defaults.**
   - **Settings files: readers allowed, the rest denied** (F2). The new always-on rule `settings-file` replaces the 0.6.1 list of writers, which was never complete. A command that names a Claude Code settings file is allowed when it is a plain reader (`cat`, `grep`, `git diff` and the like, a copy from the file, `python -m json.tool <one file>` with flags only) and denied otherwise. `config-switch` is unchanged. Over-denies are listed in `SECURITY.md`.
   - **PowerShell rules** (F7). `ps-download-exec` (a download cmdlet or alias whose output runs as commands, or a script the same command saves and runs) and `ps-rm-root` (`Remove-Item -Recurse -Force` of a root, the home folder, `.` or `*`). Both are on in light and Strict, can be switched off by name, and also apply to the Bash tool. A pipe into `bash`, `sh` or `zsh` stays `pipe-to-shell`'s.
