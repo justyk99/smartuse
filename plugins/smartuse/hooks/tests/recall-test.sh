@@ -214,7 +214,7 @@ if mode == "imports":      # imports <recall.py>: stdlib only, no subprocess, no
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    allowed = {"collections", "datetime", "json", "os", "pathlib", "posixpath", "re", "stat", "sys", "time"}
+    allowed = {"collections", "datetime", "hashlib", "json", "os", "pathlib", "posixpath", "re", "stat", "sys", "time"}   # hashlib: 0.7.1 F1, imported inside fit_key only
     print("ok" if set(mods) <= allowed and not calls else "imports %s, process calls %s" % (mods, calls))
 elif mode == "plain":      # plain <recall.py>: plain_local_target() on gitdir: values (the file runs main() on import; stdin is empty here, so it prints nothing)
     import runpy

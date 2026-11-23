@@ -21,7 +21,7 @@ set -u
 H="$(cd "$(dirname "$0")/.." && pwd)"; GATE="$H/wait-gate.py"
 D=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-wait.XXXXXX") && [ -d "$D" ] || { echo "FAIL could not create a temp dir under ${TMPDIR:-/tmp}"; exit 1; }
 trap 'case "$D" in */smartuse-wait.*) rm -rf "$D" 2>/dev/null;; esac' EXIT   # removes this run's own dir and nothing else
-export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/proj" "$D/t"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
+REAL_HOME="${HOME:-}"; export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/proj" "$D/t"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
 export CLAUDE_PLUGIN_OPTION_STRICT=true; unset CLAUDE_PLUGIN_OPTION_WAIT_GATE   # 0.6.1 F6: the gate is on in strict (and with the wait_gate option), off in light, which is the default; every case below this line is the strict bar, the light block near the end sets the options itself
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
@@ -979,7 +979,7 @@ elif mode == "imports":  # imports <wait-gate.py>: stdlib only, no subprocess, t
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "pathlib", "datetime"} and not calls
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "pathlib", "datetime", "hashlib"} and not calls   # hashlib: 0.7.1 F1, imported inside fit_key only
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "hooks":    # hooks <hooks.json>: the Stop entry runs ledger, until-done, wait-gate (timeout 10), heartbeat, in that order
     d = json.load(open(sys.argv[2], encoding="utf-8"))
@@ -1236,7 +1236,7 @@ for badhead in 'ref: refs/heads/a$(touch x)' 'ref: refs/heads/a;b' 'ref: refs/he
   mkdir -p "$D/bad/.git"; printf '%s\n' "$badhead" > "$D/bad/.git/HEAD"; c=$(brcase "$D/bad")
   case "$c" in *" --git origin <branch> --path "*) ok "HEAD '$badhead' -> the placeholder <branch>, never the text (it goes into a command)";; *) ko "HEAD '$badhead' -> $c";; esac
 done
-r=$(py "$D/chk.py" imports "$GATE" </dev/null); [ "$r" = ok ] && ok "wait-gate.py: stdlib only (json os re sys time pathlib datetime), no subprocess / socket / urllib, parses as the Python 3.9 grammar" || ko "wait-gate.py imports: $r"
+r=$(py "$D/chk.py" imports "$GATE" </dev/null); [ "$r" = ok ] && ok "wait-gate.py: stdlib only (json os re sys time pathlib datetime, hashlib inside fit_key), no subprocess / socket / urllib, parses as the Python 3.9 grammar" || ko "wait-gate.py imports: $r"
 
 # ===== 10. the state dir is the one ledger.py, until-done.py and heartbeat.py use (project_key copied, tested equal)
 for sub in "plain" "with space.v1/x y" "a+b/c_d (e)"; do
@@ -1246,6 +1246,134 @@ for sub in "plain" "with space.v1/x y" "a+b/c_d (e)"; do
   lk=$(CLAUDE_PROJECT_DIR="$pw" py "$H/ledger.py" --state-dir </dev/null); lk=${lk##*[/\\]}; lk=${lk%$'\r'}
   got=$(ls "$HOME/.claude/smartuse/projects" 2>/dev/null); [ -n "$lk" ] && [ "$got" = "$lk" ] && [ -f "$HOME/.claude/smartuse/projects/$lk/wait.json" ] && ok "state dir for '$sub' equals ledger.py's --state-dir ($lk)" || ko "state dir for '$sub': the gate wrote '$got', ledger.py says '$lk'"
 done
+
+# ===== 10b. 0.7.1 F1: a long Windows path keeps its state. fit_key (one helper copied into the six hooks, tested equal below) keeps today's key while
+# the state folder plus its longest file name fit (259 characters for a whole path on Windows, E1; 255 for one name elsewhere) and past that names the
+# folder with the last 40 characters of the key, "-", and 12 hex of the sha1 of the whole key. A project path is keyed, never made: a path that does
+# not exist reaches the limit without a deep folder. Every case runs in the temp HOME; the real ~/.claude/smartuse is checked at the end.
+NT=$(py -c 'import os, sys; sys.stdout.write("1" if os.name == "nt" else "0")' </dev/null)   # the rule reads os.name: the long-path cases below are Windows-only where the key is under 255, the 300-character ones run everywhere
+BL=$(py -c 'import os, sys, pathlib; sys.stdout.write(str(len(str(pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~")) / ".claude" / "smartuse" / "projects"))))' </dev/null)   # the length of <HOME>/.claude/smartuse/projects as the hooks see it
+PROJ10=$HOME/.claude/smartuse/projects
+lp() { # $1 = a key length -> a project path (forward slashes, never made) whose key is that long: C:/p/xxx -> C--p-xxx (Windows), /p/xxx -> p-xxx
+  local n s; if [ "$NT" = 1 ]; then n=$(( $1 - 5 )); else n=$(( $1 - 2 )); fi
+  s=$(printf '%*s' "$n" ''); s=${s// /x}; if [ "$NT" = 1 ]; then printf 'C:/p/%s' "$s"; else printf '/p/%s' "$s"; fi
+}
+fname() { # $1 = a project path -> the folder name ledger.py --state-dir prints for it
+  local o; o=$(CLAUDE_PROJECT_DIR="$1" py "$H/ledger.py" --state-dir </dev/null); o=${o##*[/\\]}; printf '%s' "${o%$'\r'}"
+}
+fire() { # $1 = hook (heartbeat|recall|wait-gate|until-done), $2 = a project path -> runs it once; FILE = the file it leaves in its state folder (until-done: it leaves none, it blocks on a routing.json put there)
+  local hook=$1 pw=$2 ev o; FILE=""
+  case "$hook" in
+    heartbeat) FILE=status.json; ev="{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"source\":\"startup\",\"cwd\":\"$pw\"}";;
+    recall)    FILE=recall.json; ev="{\"hook_event_name\":\"SessionStart\",\"session_id\":\"sid-test\",\"source\":\"compact\",\"cwd\":\"$pw\"}";;
+    wait-gate) FILE=wait.json;   ev="{\"hook_event_name\":\"Stop\",\"session_id\":\"sid-test\",\"transcript_path\":\"$(wp "$D/t/send_message_block.jsonl")\",\"cwd\":\"$pw\"}";;
+    until-done) FILE=routing.json; ev="{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"cwd\":\"$pw\",\"stop_hook_active\":false}"
+      o=$(CLAUDE_PROJECT_DIR="$pw" py "$H/ledger.py" --state-dir --create </dev/null 2>/dev/null) && [ -d "$o" ] && echo '{"active":true,"until_done":true,"units":[{"id":1,"title":"u","status":"pending"}]}' > "$o/routing.json";;
+  esac
+  printf '%s' "$ev" | CLAUDE_PROJECT_DIR="$pw" py "$H/$hook.py" > "$D/o10b" 2>&1
+}
+wrote() { # $1 = hook, $2 = a project path -> the folder name where the hook left its file ("" when nowhere); the state is reset first
+  local d n; rm -rf "$PROJ10"; fire "$1" "$2"
+  for d in "$PROJ10"/*/; do
+    if [ -f "${d}$FILE" ]; then
+      if [ "$1" = until-done ] && ! grep -q '"block"' "$D/o10b"; then continue; fi   # until-done proves its folder by reading routing.json there and blocking
+      n=${d%/}; printf '%s' "${n##*/}"; return
+    fi
+  done
+}
+same6() { # $1 = label, $2 = a project path: every hook that writes a state file names the folder ledger.py --state-dir names, and its file is there
+  local want h got bad=""; want=$(fname "$2")
+  for h in heartbeat recall wait-gate until-done; do got=$(wrote "$h" "$2"); [ -n "$want" ] && [ "$got" = "$want" ] || bad="$bad $h:'$got'"; done
+  [ -z "$bad" ] && ok "$1: ledger.py, heartbeat.py, recall.py, until-done.py and wait-gate.py name one folder ($want)" || ko "$1: ledger.py names '$want' (${#want} characters), but these wrote elsewhere or nowhere:$bad"
+}
+if [ "$NT" = 1 ]; then LONGK=$(( 239 - BL )); FULLEDGE=$(( 194 - BL - 1 )); else LONGK=240; FULLEDGE=255; fi   # a key that puts the state folder at 240 characters (E1: no file reaches it on Windows) · the longest key that keeps its full name (dirlen 194 on Windows, 255 elsewhere)
+# b: the same folder for a short, a long and a 300-character path
+SHORTP=$(wp "$D/keys/plain"); [ -d "$D/keys/plain" ] || SHORTP=$(wp "$D/proj")
+same6 "b short path" "$SHORTP"
+if [ "$LONGK" -ge 20 ]; then same6 "b long path (key $LONGK, state folder $(( BL + 1 + LONGK )) characters)" "$(lp "$LONGK")"; else ok "b long path skipped: HOME is $BL characters, too long to build a folder of 240"; fi
+same6 "b 300-character path" "$(lp 300)"
+# c: a short path, and a path at the edge of the limit, give today's key byte for byte (the suite's key() helper); one character more gives the short key
+for p in "$SHORTP" "$(wp "$D/keys/with space.v1/x y")" "$(lp "$FULLEDGE")"; do
+  [ "$(fname "$p")" = "$(key "$p")" ] && ok "c key unchanged for a ${#p}-character path: $(key "$p" | cut -c1-30)... (${#p}) = key() byte for byte" || ko "c key changed for '$p': ledger.py '$(fname "$p")', key() '$(key "$p")'"
+done
+EP=$(lp $(( FULLEDGE + 1 ))); EK=$(key "$EP"); EXP=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write(k[-40:].lstrip('-') + '-' + hashlib.sha1(k.encode()).hexdigest()[:12])" "$EK" </dev/null)
+[ "$(fname "$EP")" = "$EXP" ] && [ "$(fname "$EP")" != "$EK" ] && ok "c one character past the edge ($(( FULLEDGE + 1 )) -> ${#EXP}): the last 40 characters, -, 12 hex of the sha1 of the whole key" || ko "c past the edge: wanted '$EXP', ledger.py says '$(fname "$EP")'"
+# d: two long paths that differ only in the middle get two folders, each with its state
+A=$(lp 300); B=${A:0:150}y${A:151}; rm -rf "$PROJ10"; fire wait-gate "$A"; fire wait-gate "$B"; na=$(fname "$A"); nb=$(fname "$B")
+[ "$na" != "$nb" ] && [ "${na:0:$(( ${#na} - 13 ))}" = "${nb:0:$(( ${#nb} - 13 ))}" ] && [ "$(ls "$PROJ10" 2>/dev/null | wc -l | tr -d ' ')" = 2 ] && [ -f "$PROJ10/$na/wait.json" ] && [ -f "$PROJ10/$nb/wait.json" ] \
+  && ok "d two 300-character paths that differ in the middle: two folders, the same last 40 characters, two hashes, each holds its wait.json" || ko "d middle-differing paths: ledger.py says '$na' and '$nb', folders: $(ls "$PROJ10" 2>&1 | tr '\n' ' ')"
+# e: an existing full-key folder is still used while a file fits in it (232 characters on Windows), and left behind beyond (a longer one was made by mkdir and no file reached it, E1)
+if [ "$NT" = 1 ]; then
+  for L in 220 232 233; do
+    ep=$(lp $(( L - BL - 1 ))); full=$(key "$ep"); rm -rf "$PROJ10"; before=$(fname "$ep"); mkdir -p "$PROJ10/$full"; after=$(fname "$ep"); fire wait-gate "$ep"
+    if [ "$L" -le 232 ]; then
+      [ "$before" != "$full" ] && [ "$after" = "$full" ] && [ -f "$PROJ10/$full/wait.json" ] && ok "e state folder of $L characters: new without its folder it gets the short key, with its folder it keeps the full key and the state goes there" || ko "e folder of $L: before '$before', after '$after', wait.json in the full folder: $([ -f "$PROJ10/$full/wait.json" ] && echo yes || echo no)"
+    else
+      [ "$after" != "$full" ] && [ -f "$PROJ10/$after/wait.json" ] && [ ! -f "$PROJ10/$full/wait.json" ] && ok "e an existing folder of $L characters (no file fits in it) is left behind empty, the short key is used" || ko "e folder of $L: ledger.py says '$after', wait.json: short $([ -f "$PROJ10/$after/wait.json" ] && echo yes || echo no), full $([ -f "$PROJ10/$full/wait.json" ] && echo yes || echo no)"
+    fi
+  done
+else ok "e skipped here (not Windows: only the 255-character name limit applies and an existing folder cannot be longer than it; fit_key's rules 2 and 3 are in case f)"; fi
+rm -rf "$PROJ10"
+# f: fit_key is one helper, byte for byte in the six hooks (read with ast, no hook imported), and agrees with the rule on a table, for nt True and False
+cat > "$D/fk.py" <<'PY'
+import ast, hashlib, os, shutil, sys, tempfile
+H = sys.argv[1]
+FILES = ["heartbeat.py", "ledger.py", "recall.py", "until-done.py", "wait-gate.py", "bash-guard.py"]
+srcs = {}
+for f in FILES:
+    text = open(os.path.join(H, f), encoding="utf-8").read()
+    tree = ast.parse(text, feature_version=(3, 9))
+    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "fit_key"]
+    if len(fns) != 1:
+        print("%s: %d module-level fit_key (wanted 1)" % (f, len(fns))); sys.exit()
+    for n in tree.body:
+        if isinstance(n, (ast.Import, ast.ImportFrom)) and "hashlib" in ast.dump(n):
+            print("%s: hashlib imported at the top level" % f); sys.exit()
+    if not any(isinstance(n, ast.Import) and any(a.name == "hashlib" for a in n.names) for n in ast.walk(fns[0])):
+        print("%s: fit_key does not import hashlib inside itself" % f); sys.exit()
+    srcs[f] = ast.get_source_segment(text, fns[0])
+if len(set(srcs.values())) != 1:
+    print("fit_key differs: %s" % [f for f in FILES if srcs[f] != srcs[FILES[0]]]); sys.exit()
+ns = {"os": os}
+exec(srcs[FILES[0]], ns)
+fit_key = ns["fit_key"]
+tmp = tempfile.mkdtemp(prefix="fitkey")
+try:
+    base = os.path.join(tmp, "projects"); os.makedirs(base); B = len(base)
+    def full_of(dirlen, ch="x"):   # a key that makes the state folder dirlen characters
+        return ch * (dirlen - B - 1)
+    def short_of(full):
+        return full[-40:].lstrip("-") + "-" + hashlib.sha1(full.encode()).hexdigest()[:12]
+    bad = []
+    def want(label, nt, full, exists, expect):
+        if exists:
+            os.makedirs(os.path.join(base, full), exist_ok=True)
+        got = fit_key(full, base, nt)
+        exp = full if expect == "full" else short_of(full)
+        if got != exp:
+            bad.append("%s nt=%s: got %r wanted the %s key" % (label, nt, got[:30] + "..." + str(len(got)), expect))
+    for nt in (True, False):
+        want("20 characters", nt, "C--p-" + "a" * 15, False, "full")
+        want("dirlen 194", nt, full_of(194, "a"), False, "full")
+        want("dirlen 195", nt, full_of(195, "b"), False, "short" if nt else "full")
+        want("255 characters", nt, "c" * 255, False, "short" if nt else "full")
+        want("256 characters", nt, "d" * 256, False, "short")
+        want("dash tail", nt, "e" * 200 + "-" * 40, False, "short" if nt else "full")
+    want("existing, dirlen 232", True, full_of(232, "f"), True, "full")
+    want("existing, dirlen 233", True, full_of(233, "g"), True, "short")
+    want("existing, dirlen 233", False, full_of(233, "h"), True, "full")
+    want("existing, dirlen 220", True, full_of(220, "i"), True, "full")
+    s = fit_key("j" * 300, base, True)
+    if len(s) != 53 or s != short_of("j" * 300):
+        bad.append("short key shape: %r" % s)
+    if fit_key("k" * 300, None, True) != "k" * 300 or fit_key("k" * 300, 5, False) != "k" * 300:
+        bad.append("fit_key must not raise: an error returns the full key")
+    print("ok" if not bad else "; ".join(bad))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+PY
+r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233)" || ko "f fit_key: $r"
+[ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && ok "F1: the real ~/.claude/smartuse gained no folder from these cases (the temp HOME took them all)" || ko "F1: a test folder reached the real ~/.claude/smartuse/projects"
 
 # ===== 11. what the owner's session gets: the Stop-hook JSON until-done.py prints; the hook is registered
 gate incident; py -c "import json,sys; d=json.loads(sys.argv[1]); assert d['decision']=='block' and isinstance(d['reason'],str) and sorted(d)==['decision','reason'] and all(ord(c)<128 for c in sys.argv[1]), d" "$OUT" 2>/dev/null \
