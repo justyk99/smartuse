@@ -108,7 +108,8 @@ Steps that need the maintainer: 1 the tap on Card A, once. 2 the release word af
 - A full T2 is about an hour on the laptop, so five merges are five hours of suites. F2 and F3 are small enough to share one T2 if time is short.
 
 ## 10. Results (filled during the build)
-E1: · E2: · T2 counts: · T3:
+E1 (2026-11-23, Windows 11 laptop, `LongPathsEnabled` = 0, temp `HOME` of 110 characters, one `SessionStart` into `heartbeat.py` through `py.sh`, project paths keyed but never made): state folder of 238 characters → `status.json` written; 240 → missing, nothing printed. `mkdir` still made folders of 242 and 246 characters (empty): the folder is made, then every file write fails. The failing call is the temp file `status.json.<pid>.tmp` (21 characters with a 5-digit pid): the whole file path may hold at most 259 characters (MAX_PATH 260 with its NUL). The raw error, `mkdir` of a 373-character folder: `FileNotFoundError` errno 2, winerror 3. Longest names the hooks write in the folder: `paid.<tool_use_id>.<8>.done` 49 (a real `tool_use_id` is 30, measured), `paid-runs.json.<pid>.tmp` up to 29, `status.json.<pid>.tmp` up to 26; `runs/<started_at>_<task>.json` up to 186 (two `safe_name` parts of 80, `ledger.py:192`, `:206`) is not covered, see §12 F1 limits.
+E2: · T2 counts: · T3:
 
 ## 11. Card A
 FINISH LINE: smartuse 0.7.1, the hardening release
@@ -120,3 +121,39 @@ Unknown: the failing length and error → experiment E1 · the ledger race's cau
 Not in this: any change to how a command is parsed · the README rewrite, template, grants, evals CI · the listing, gif and post
 Alt: 0.8.0 "first 1.0 items" (README rewrite, make-prompt template, narrowed grants, evals CI): closer to 1.0, but needs your lead line, a README read and CI runs on your token
 Tap: 1 yes · 2 send a reference · 3 no
+
+## 12. Contract (phase 3, 2026-11-23)
+Line numbers are of `f882756` (the plan commit on `fix-0.7.1`; the hooks are as at `8a38454`). New names are marked *new*. A name the builder cannot find → stop and ask.
+
+### F1 · the key rule (D2 made exact by E1; D7)
+- **One helper, *new* `fit_key(full, base, nt)`**, copied byte for byte into `heartbeat.py`, `ledger.py`, `recall.py`, `until-done.py`, `wait-gate.py` and `bash-guard.py`. `import hashlib` sits inside `fit_key` in all six (as `until-done.py:121` and `bash-guard.py:2801` do): no new top-level import anywhere. `wait-gate-test.sh`'s import check (§9, "stdlib only (json os re sys time pathlib datetime)") may need `hashlib` added to its list: the builder shows that diff and says why. `full` is today's key; `base` is `str(<HOME>/.claude/smartuse/projects)`; `nt` is `os.name == "nt"`. Returns the key to use. Never raises (any error → `full`).
+- **Today's `project_key()` / `paid_project_key()` keep their names and callers**; each computes `full` exactly as today (`heartbeat.py:168`) and returns `fit_key(full, base, os.name == "nt")`. `state_dir()`, `paid_state_dir()`, `ledger.py --state-dir` and `legacy_dir()` change no line.
+- **Constants (*new*, same in all six):** `WIN_PATH_MAX = 259` (E1) · `NAME_ROOM = 64` (the longest fixed name, 49, plus room) · `KEPT_ROOM = 26` (`status.json.<pid>.tmp` with a 10-digit pid) · `KEY_MAX = 255` (one name on Linux and macOS) · `TAIL = 40` · `HASH = 12`.
+- **Rule, in this order:**
+  1 `short = full[-TAIL:].lstrip("-") + "-" + sha1(full.encode()).hexdigest()[:HASH]`; `dirlen = len(base) + 1 + len(full)`.
+  2 `nt` and `os.path.isdir(base + os.sep + full)` and `dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX` → `full` (a folder that works today keeps working: D7a).
+  3 not `nt` and `os.path.isdir(…)` → `full`.
+  4 `len(full) > KEY_MAX` → `short`.
+  5 `nt` and `dirlen + 1 + NAME_ROOM > WIN_PATH_MAX` → `short`.
+  6 else `full`.
+- **D7 (made here, inside D2).** a An existing full-key folder is kept only where `status.json` could be written in it (≤ 232 characters on Windows); a longer one, which `mkdir` made but no file reached (E1: 242, 246), is left behind empty and the short key is used. b "Longest file name" means the fixed names (≤ 49), not `runs/` archives: counting those (186) would move the limit to about 72 characters and give new short keys to ordinary repos. c On Linux and macOS only the 255-byte name limit applies (the key is ASCII, so characters = bytes).
+- **Limits written into `SECURITY.md` / ROADMAP (F5), not fixed:** a `runs/` archive with a long task name can still fail in a folder near the limit (`ledger.py:206`, as today); a `HOME` so long that even the short key leaves no room (base over 140 characters on Windows) still fails, and doctor's `state folder:` line is the only sign; on Windows the rule is `os.name`, so WSL keys as Linux (its own HOME, as today).
+- **Tests the builder adds (red first, on `f882756`):** the plan's a–e in §4 F1, plus f: a Python check that pulls `fit_key` out of all six files with `ast` (no import of the hooks) and asserts the six sources are identical and agree on a table of inputs, both `nt` values: a 20-character key, a key making `dirlen` 194 and 195 on Windows (the edge of rule 5), 256 and 255 characters (rule 4), an existing folder at 232 and at 233 (rule 2). Fixtures in files with forward slashes; `HOME` a temp folder; assert the real `~/.claude/smartuse` gains nothing.
+- **Watch:** every suite's own `key()` helper (`ledger-test.sh:10` and its copies) still names the folder, because test paths are short; a suite that builds a path past 194 characters on Windows must say so and use `ledger.py --state-dir`.
+
+### F2 · the reason texts
+- **a Typed go.** At `bash-guard.py:3096`, when `go["go_from"]` starts with `session:` (`:2811`): `run {used} of {runs} is done; the batch waits for the owner's "test ok": the owner types "test ok" in this session. Show the owner the one output first.` Any other `go_from` (`adapter`, `:2921`): today's text, byte for byte.
+- **b State folder.** `:3058` `sdir.mkdir(…)` moves inside `try … except OSError: return True, PAID_SDIR, 0` with *new* `PAID_SDIR = "the state folder cannot be written"`. At `:3227`: `why == PAID_SDIR` → `head(first) + "could not verify the go (the state folder cannot be written); run /smartuse:doctor. Nothing was spent."`; every other `why` keeps today's tail. Outcome unchanged: a deny at both levels.
+- **Not changed (minor, noted):** `"the counter is not writable"` (`:3061`, `:3091`) keeps its `.claude/smartuse.local.md` tail, though a long path can cause it too; after F1 it should not happen. Change it only on the maintainer's word.
+
+### F3 · the scan
+- `:66` and `:91`: `encoding="utf-8", errors="replace"` added to both `subprocess.run` calls (`text=True` stays). First line of `main()` (`:70`): `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` inside `try/except (AttributeError, ValueError)`. Nothing else moves.
+
+### F4 · only after E2
+- E2's loop script lives in the session scratchpad, prints the `OSError` errno and winerror of each failed claim, and runs only when no other suite runs. No contract until E2 shows a cause.
+
+### F5 · the claim list
+- The builder writes, before any README text, a list `claim → file:line` for every file the six hooks read or write (grep `write_json\|os.open\|open(\|read_text\|\.mkdir` in the hooks) and every network call (`subprocess` in `watch.py`, `until-done.py`); the README tables are built from that list, and it goes in the commit message.
+
+### Order (changed from §5, one line)
+- Builders run one at a time, not lanes side by side: §5's "one suite at a time on the laptop" holds across builders, and each builder runs its own T1. Order: F1 → F2 → F3 → E2 (→ F4) → F5, T2 after each merge (F2 and F3 may share one T2, §9).
