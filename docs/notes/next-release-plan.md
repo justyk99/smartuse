@@ -1,0 +1,122 @@
+# smartuse 0.7.1 — the hardening release (plan, 2026-11-23)
+
+Base: public main = dev branch `paid-0.7.0` = `8a38454` (0.7.0, released 2026-11-23 at `3c7c92d`; `8a38454` fixed three release lines that still said not released). Line numbers below are of `3c7c92d`; five were spot-checked on `8a38454` and hold.
+Work branch (proposed): `fix-0.7.1` from it; every feature merged `--no-ff`. Five features, three lanes, each feature one day or less.
+
+## 1. Brief
+- **What the owner gets.** A long Windows path no longer drops state. The paid refusals say what to do. The term scan runs on Windows as `CLAUDE.md` types it. The two-Stop ledger race is traced. The README tells a stranger how to remove smartuse and what it touches.
+- **Why this scope.** Each item is a finding somebody already hit (`docs/STATUS.md`, Unknowns). None changes how a command is parsed, so the 0.6.2 rule holds and no merge reopens the guard's review rounds (`docs/notes/paid-guard-next-brief.md`, Lessons).
+- **Maintainer clicks: two.** The yes on this plan and the release word. Two optional checks, 3 minutes together (§8).
+- **Version.** 0.7.1: fixes and docs; no new rule, gate, adapter key or option.
+
+## 2. Not in this (said once)
+- 0.6.2 "On a report" items (other-shell hand-offs, PowerShell tokenisation, runner unwrapping): no report yet.
+- Every rule linear · removing the round C–F parsing paths · the `command_segments` line-join: each re-reads shell text in `bash-guard.py`, each is more than a day, and a slip is a wrong deny for every user. Own plan, on a report or the maintainer's word.
+- The staged settings copy (`SECURITY.md:50`): a new pattern in an always-on rule, see D-YK17.
+- The 1.0 items that are not docs-only: README rewrite and lead line, make-prompt template, `Bash(bash *)` grants, evals CI, one ledger and receipts view; the listing form, the demo gif and the 30-days post (the maintainer's).
+- `docs/STATUS.md` lows not taken: the two-valued Stop wait (method M); recall-test 210 against 203 (F5 quotes only numbers this release's T2 prints).
+
+## 3. Rules for every feature
+- Frozen: `RULE_NAMES` (`bash-guard.py:162`), `GATE_NAMES` (`:167`), `FLOOR` (`:171`), `KNOWN_RULES` (`heartbeat.py:79`), `hooks/hooks.json`, `all.sh` NAMES, `ci.yml` steps. No feature needs them changed.
+- Never touched: `.claude/*.local.md`, the private terms file, `.agents/`, `.codex/`. Stage by file name.
+- A bug gets its failing case first, shown red on `3c7c92d`, then the fix. Every "as today" claim in a builder brief carries a file:line.
+- Fixtures with Windows paths, a paid host or a settings path go in a file, written with forward slashes. Tests set `HOME` to a temp folder and assert the real state folder is untouched.
+- After a merge's automated security review: classify each finding against the next-brief's class list first. Build only a finding in new code that moves a run toward paid. One fix round, then stop and report.
+
+## 4. Features
+
+### F1 · a long Windows path keeps its state (lane A · 1 day)
+- **Evidence.** The key is the whole project path: `heartbeat.py:164–168`, copied in `ledger.py:214`, `recall.py:81`, `until-done.py:73`, `wait-gate.py:130`, `bash-guard.py:2021`. `heartbeat.py:177` makes the folder; `:439` swallows the error. Past the Windows limit nothing is written and nothing says so.
+- **E1 first (unknown → experiment).** A project folder whose state path passes 230 characters, in the session scratchpad; one `SessionStart` event into `heartbeat.py`. Record the length that fails and the error in §10. No code before that.
+- **Rule (D2).** The key stays as today while the state folder plus its longest file name fits (the limit E1 measures on Windows; 255 bytes for the key elsewhere). Past it: the last 40 characters of the key, `-`, 12 hex of the sha1 of the whole key. A project whose full-key folder already exists keeps it. One helper, copied into the six files and tested equal, as today (`wait-gate-test.sh:1241`).
+- **Acceptance (the user does).** 1 Opens Claude Code on Windows in a repo with a 200+ character path, sends one prompt, runs `/smartuse:status`: a live line, not "no event". 2 Runs `/smartuse:doctor` there: `state folder: writable`. 3 In a repo used before the upgrade: `/smartuse:receipts` still lists the old runs and a paid go keeps its used count.
+- **Unit (red first).** a `heartbeat-test.sh`: `SessionStart` in the long folder writes `status.json` (red on Windows today). b The six hooks name the same folder for a short, a long and a 300-character path (through `ledger.py --state-dir`, the `wait-gate-test.sh:1246` shape). c A short path gives the old key byte for byte (the suites' `key()` helper, `ledger-test.sh:10`, unchanged). d Two long paths that differ only in the middle get two folders. e An existing full-key folder is still used.
+- **Integration.** `paid-guard-test.sh`: long folder plus an adapter go → run 1 allowed, the counter sits in the short-key folder, and `file-guard` (`file-guard.py:27`) and `owner-file` (`bash-guard.py:126`) still refuse a write to it.
+- **Interactive.** Headless Claude Code with the worktree's plugin, as the 0.7.0 live pass ran (`paid-guard-plan.md` §8.10), in the E1 folder: one Bash call, then the status and doctor lines of acceptance 1 and 2.
+- **Must not change.** The key of any path that works today. The printed shape of `ledger.py --state-dir` (the skills read it, `make-prompt/SKILL.md:41`). `legacy_dir` (`ledger.py:231`). No shared module; no new top-level import in `bash-guard.py` (`:2024`). One Python start per hook. The rule reads folder names only, never file content.
+
+### F2 · paid refusals say what to do (lane A, after F1 · half a day)
+- **Evidence.** a `bash-guard.py:3096`: run 2 of a typed go is told to "add `, test ok` to that paid: line", and a typed go has no such line. `go["go_from"]` already tells the two apart (`:2921` adapter, `:2812` session). b `:3058` `mkdir` raises outside the `try`; `:3226` turns it into "the check failed", and `:3228` adds "put it in .claude/smartuse.local.md", which is not the fix.
+- **Fix.** a Typed go: the reason leads with `the owner types "test ok" in this session`. Adapter go and subagent calls: today's text. b A named cause, `the state folder cannot be written`, with `run /smartuse:doctor`; still a deny at both levels.
+- **Acceptance.** 1 The owner types `paid go: render.py x 3`, lets run 1 finish and asks for run 2: the refusal's first instruction is to type `test ok`. 2 With the go in the adapter, the refusal reads as in 0.7.0. 3 With a state folder that cannot be written, a paid run is refused and the reason names the state folder and doctor.
+- **Unit (red first).** `paid-guard-test.sh` §37a (`:1884`): typed go, the reason leads with the typed instruction and lacks "to that paid: line" (red today). `:587–588`: the adapter text pinned as it is. `:527` (a file sits where the folder goes): the reason holds "state folder" (red today).
+- **Integration.** The existing typed flow, go → run 1 → `test ok` → run 2, green with the new text; the text-only paid cases of `run.sh` unchanged.
+- **Interactive.** Headless, adapter go `render.py x 2` on a fixture script that names a host and calls nothing: run 1 passes, run 2 shows the adapter wording. The typed wording stays synthetic (a headless prompt is never a go); optional live check in §8.
+- **Must not change.** Every other reason text (`paid-guard-test.sh:520–632` pins them). Allow and deny outcomes: only words move. The `[rule paid]` ending.
+
+### F3 · the term scan runs on Windows as typed (lane B · 2 hours)
+- **Evidence.** `scripts/term-scan.py:66` and `:91` read git with `text=True` (the ANSI code page on Windows; git writes UTF-8). `:104–113` print `·`, `…` and file text to that console. The suite stays green because it runs through `py.sh` (`term-scan-test.sh:6`), which exports `PYTHONUTF8=1` (`py.sh:22`); `CLAUDE.md`'s publish line and `.github/workflows/ci.yml:55` call the script directly.
+- **Fix.** `encoding="utf-8", errors="replace"` on both `subprocess.run` calls; stdout set to UTF-8 with replace at the top of `main()` (`:70`).
+- **Acceptance.** 1 On Windows, with no `PYTHONUTF8`, the maintainer types `python scripts/term-scan.py --history --max-hits 1000000`: the summary line prints, no traceback, exit code by the documented rule. 2 A private term is still never printed.
+- **Unit (red first).** `term-scan-test.sh`: a tracked file and a commit that hold `中文 → Á`, the script run without the launcher's UTF-8 mode and with a cp1252 console: summary line, no traceback (red today on Windows; the print half red everywhere). The six existing cases unchanged.
+- **Integration.** The script over this repo's whole history, plain `python`, no variables: the same hit counts as the `PYTHONUTF8=1` run.
+- **Interactive.** The publish command of `CLAUDE.md`, typed as written, on the laptop.
+- **Must not change.** Exit codes 0, 1, 2 (`:118`), `mask()` (`:48`), the patterns, the hit lines, `--no-private`.
+
+### F4 · two Stop hooks at once: one ledger line, never none (lane B, after F1's merge · half a day)
+- **Evidence.** `ledger.py:263–267` claims `pending.json` by rename and returns on any `OSError`. `ledger-test.sh:52` failed once and passed on a rerun. The cause is a guess.
+- **E2 first (unknown → experiment).** Loop `ledger-test.sh:49–52` 200 times on the laptop with the error's number printed. Not reproduced in 200: close it in `docs/STATUS.md`, build nothing.
+- **Fix, only if E2 shows it.** A sharing error while `pending.json` still exists: retry the rename 5 times, 20 ms apart (the `write_json` shape, `heartbeat.py:200`). File gone: the other hook won, return.
+- **Acceptance.** With a user-level copy of the hook beside the plugin's, the user runs a skill that writes a receipt, then `/smartuse:ledger`: exactly one line for it.
+- **Unit (red first).** The E2 loop as a 50-round case, under 60 s (red at E2's rate); a `pending.json` held open and then released → one line.
+- **Integration.** `ledger-test.sh` whole, three runs in a row green on the laptop.
+- **Interactive.** In a temp `HOME`: `ledger.py --put pending.json …` as the skill types it, two real `Stop` events at once, then the `/smartuse:ledger` table: one line.
+- **Must not change.** One line per run; the claim file's name; the receipt fields; `--put`, `--unit`, `--run`, `--get`.
+
+### F5 · README: uninstall, what it reads and writes, release lines made true (lane C, last · half a day)
+- **Evidence.** No uninstall or privacy section (only `README.md:61`, `SECURITY.md:13`, `:32`); the state list is one paragraph, `README.md:163`. Stale since today's release: the three "not released" lines were fixed in `8a38454`; left: `README.md:7` badge 3632 against a release sum of 4,322 (`CHANGELOG.md:28`).
+- **Build.** `## Uninstall`: the documented plugin commands, typed by the owner in their own terminal because `config-switch` refuses them to Claude (`bash-guard.py:99–104`); then what stays and how to remove it (the state folder, a copied output style and its `outputStyle` key, the `statusLine` entry, each repo's adapter, the Linux trust file). `## What it reads and writes`: reads (the event, the session transcript, the adapter, the first 256 KB of a script a command runs); writes (the `README.md:163` list as a table); network (the hooks: none; `watch.py` runs git against your remote when a session arms it; `until-done` runs your `check:`). Then the stale lines, CHANGELOG 0.7.1, one `SECURITY.md` line for F1, both manifests, ROADMAP boxes.
+- **Acceptance.** 1 A stranger follows `## Uninstall`: the state folder is gone and a new session prints no smartuse line. 2 The same stranger can say, from the README alone, which files smartuse reads and whether it uses the network. 3 The README says 0.7.0 was released on 2026-11-23, and the badge equals this release's T2 sum.
+- **Unit.** Greps, output pasted: the three stale strings gone; `0.7.1` in `plugins/smartuse/.claude-plugin/plugin.json:3`, `.claude-plugin/marketplace.json:14` and the CHANGELOG head; every state file name the six hooks write appears in the new table (the claim → file:line list goes in the commit message).
+- **Integration.** A removal dry run in a temp `HOME` (a scratchpad script, not committed): one event through each hook; every file made lies under `.claude/smartuse/` and is in the table; delete that folder; nothing of smartuse is left.
+- **Interactive.** A fresh agent that sees only the two sections answers "what do I type to remove everything, and what does it read?"; its answer matches the claim list.
+- **Must not change.** Every other README section (the first-time-reader rewrite and the lead line are 1.0, in the maintainer's words). The `SECURITY.md` classes. Release text states only what was fixed and measured, and never an open gap's method. Counts come from this release's T2 output.
+
+## 5. Lanes and order
+- Lane A (state and paid): F1 → F2. Lane B (tools): F3 → F4, with F4 rebased on F1's merge (both edit `ledger.py`). Lane C (docs): F5, after A and B are merged.
+- Lanes A and B may build side by side. Suites never do: one suite at a time on the laptop, across all lanes.
+
+## 6. Test tiers
+- **T1:** the suites the feature names, one at a time. F1: heartbeat, ledger, until-done, wait-gate, recall, paid-guard, file-guard. F2: paid-guard, run. F3: term-scan-test. F4: ledger.
+- **T2 (after each merge), one at a time, in this order:** `file-guard-test.sh`, `ledger-test.sh`, `until-done-test.sh`, `watch-test.sh`, `heartbeat-test.sh`, `wait-gate-test.sh`, `recall-test.sh`, `run.sh`, `fresh-gate-test.sh`, `paid-guard-test.sh` (each `bash plugins/smartuse/hooks/tests/<name>`), then `bash bench/tests/ab-test.sh`, then `bash scripts/term-scan-test.sh`. Twelve suites, never two at once, never `all.sh` on the laptop. Counts only grow from the 0.7.0 floors (`CHANGELOG.md:28`).
+- **T3 (before the push):** `claude plugin validate --strict plugins/smartuse` and `claude plugin validate --strict .`; the five interactive scenarios; a fresh review of the merged code and a security review of the release diff; then `PYTHONUTF8=1 python scripts/term-scan.py --repo <repo> --history --max-hits 1000000` with 0 private hits. The push waits for the maintainer's word.
+
+## 7. Reuse before build
+| Need | Candidates | Pick |
+|---|---|---|
+| Long path | 1 shorten the key past the limit (stdlib `hashlib`, about 10 lines, ours) · 2 the extended-length path prefix (stdlib, but `pathlib` does not add it, and Git Bash and the skills read the same folder) · 3 the OS long-path switch (needs admin; not ours to set) · 4 hash every key (orphans every user's receipts and restarts every paid count) | 1 |
+| Saying a write failed | `can_write()` (`heartbeat.py:553`) and doctor's `state folder:` line (`:603`): own code, tested (`heartbeat-test.sh:627`) | reuse as-is |
+| Term scan encoding | stdlib `encoding=` and `reconfigure` · "always run through `py.sh`" (changes the documented command and CI) | stdlib |
+| Rename race | the `write_json` retry (`heartbeat.py:200`), own code | adapt |
+| Uninstall steps | Claude Code's official plugin commands reference (`claude plugin uninstall`, `claude plugin marketplace remove`) | reuse the documented commands |
+
+All stdlib or the repo's own MIT code: no new dependency, nothing downloaded.
+Own lessons applied: a path guard matches every reading (F1 integration) · release text claims only what was measured (F5) · review before the push and a security review before main (T3) · one heavy job at a time (§5) · a from-zero reader tests a guide (F5 interactive) · writable state never supplies a command (F1 rule).
+
+## 8. Decisions
+Made here: D1 this scope, 0.7.1. D2 the key rule of F1. D3 the helper stays copied in six files (`bash-guard.py` imports no other hook, `:2022–2023`). D4 the term scan is fixed in the script, not by changing the documented command. D5 F4 builds only what E2 reproduces. D6 no new suite; F5's checks are greps and a scratch dry run.
+For the maintainer (recommendation first):
+- **D-YK16 · scope.** Yes to this plan. The other scope is Card A's `Alt:` line. **Decided 2026-11-23: yes (the maintainer's tap 1).**
+- **D-YK17 · the staged settings copy (`SECURITY.md:50`).** Keep it out; it leads the next guard batch. It is a new pattern in an always-on rule, and each guard merge has drawn a review round. Silence means agreed. **Taken as agreed 2026-11-23 (the tap on Card A, no objection).**
+
+Steps that need the maintainer: 1 the tap on Card A, once. 2 the release word after T3, once. 3 optional, once, 2 minutes: type the uninstall commands in a throwaway config folder (the guard refuses them to Claude). 4 optional, once, 1 minute: type a `paid go:` and read the run-2 wording live.
+
+## 9. Risks
+- F1 edits six hooks. A wrong key orphans receipts or restarts a paid count: cases c and e are the gate, and the review reads the rule against the published limit "a delete of the state folder resets the count".
+- Interactive runs set `HOME` to a scratch folder so no state lands in the real one (assumed: the variable reaches the hooks on Windows; if not, one leftover state folder is listed for the maintainer).
+- F3's red case needs an interpreter without the launcher's UTF-8 mode on every CI system; if that cannot be had portably, the case runs on Windows only and says so.
+- A full T2 is about an hour on the laptop, so five merges are five hours of suites. F2 and F3 are small enough to share one T2 if time is short.
+
+## 10. Results (filled during the build)
+E1: · E2: · T2 counts: · T3:
+
+## 11. Card A
+FINISH LINE: smartuse 0.7.1, the hardening release
+So you want: the bugs already hit fixed, with two taps from you and no new guard parsing
+Sample: before `could not verify the go (the check failed)` and no status in a long folder | after: state written, the reason names the fix, `python scripts/term-scan.py --history` runs bare
+Done when: 1 in a 200+ character Windows folder `/smartuse:status` shows a live line and doctor says `state folder: writable` 2 the publish scan typed as in `CLAUDE.md`, no `PYTHONUTF8`, ends with its summary line and 0 private hits 3 the README has `## Uninstall` and `## What it reads and writes` and says 0.7.0 was released
+Proven on: this repo's own git history (the scan) and a 230-character project folder on the maintainer's Windows laptop through real Claude Code | synthetic: the typed-go wording (only the owner's typing is a go)
+Unknown: the failing length and error → experiment E1 · the ledger race's cause → experiment E2 · the uninstall commands end to end → assumed: the official commands reference
+Not in this: any change to how a command is parsed · the README rewrite, template, grants, evals CI · the listing, gif and post
+Alt: 0.8.0 "first 1.0 items" (README rewrite, make-prompt template, narrowed grants, evals CI): closer to 1.0, but needs your lead line, a README read and CI runs on your token
+Tap: 1 yes · 2 send a reference · 3 no
