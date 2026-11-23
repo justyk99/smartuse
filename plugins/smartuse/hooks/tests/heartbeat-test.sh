@@ -3,7 +3,7 @@
 # the until-done exception on Stop (stop_hook_active ignored, max_blocks honoured), session reset, the three renderers (--line /
 # --statusline / --subagent-statusline), the state dir keyed by the full path (never the 0.3.0 folder-name dir), a failed os.replace,
 # non-ASCII events under cp1252, garbage input -> silent exit 0. Every hook invocation must print nothing. Exit 1 on failure.
-set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
+REAL_HOME="${HOME:-}"; set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
 key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-" (~/.claude/smartuse/projects/<key>/)
@@ -721,4 +721,30 @@ chmod u+w "$K/ro" 2>/dev/null || true
 # the repo ignores the cache folder, and py.sh stays bash 3.2 safe (nothing from bash 4+ was added)
 if [ -f "$H/../../../.gitignore" ]; then grep -qx '__pycache__/' "$H/../../../.gitignore" && echo "PASS D15 .gitignore ignores __pycache__/" || { echo "FAIL D15 .gitignore lacks __pycache__/"; fail=1; }; fi
 if grep -nE 'declare -[Aan]|mapfile|readarray|\|&|&>>|coproc|;;&' "$H/py.sh" >/dev/null; then echo "FAIL D15 py.sh uses a bash 4 feature: $(grep -nE 'declare -[Aan]|mapfile|readarray|\|&|&>>|coproc' "$H/py.sh" | head -2)"; fail=1; else echo "PASS D15 py.sh has no bash 4 feature (declare -A/-n, mapfile, readarray, |&, &>>, coproc, ;;&)"; fi
+# ===== 0.7.1 F1 (a): a long Windows path keeps its state. A project whose state folder passes the limit (240 characters on Windows, E1: the folder is made, then
+# no file reaches it; 300 characters of key elsewhere too: one name past 255) must still get a status.json and a live line, not "no activity recorded". The project path
+# is keyed, never made. Own temp HOME, so the cases above are not touched; the real ~/.claude/smartuse is checked after.
+NT=$(py -c 'import os, sys; sys.stdout.write("1" if os.name == "nt" else "0")' </dev/null)
+H2="$D/h2"; mkdir -p "$H2/.claude/smartuse"
+BL2=$(HOME="$H2" py -c 'import os, sys, pathlib; sys.stdout.write(str(len(str(pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~")) / ".claude" / "smartuse" / "projects"))))' </dev/null)
+lpath() { # $1 = a key length -> a project path (forward slashes, never made) whose key is that long: C:/p/xxx -> C--p-xxx (Windows), /p/xxx -> p-xxx
+  local n s; if [ "$NT" = 1 ]; then n=$(( $1 - 5 )); else n=$(( $1 - 2 )); fi
+  s=$(printf '%*s' "$n" ''); s=${s// /x}; if [ "$NT" = 1 ]; then printf 'C:/p/%s' "$s"; else printf '/p/%s' "$s"; fi
+}
+longcase() { # $1 = label, $2 = key length
+  local pw ln sd nf; pw=$(lpath "$2"); rm -rf "$H2/.claude/smartuse/projects"
+  printf '%s' "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\"source\":\"startup\",\"cwd\":\"$pw\"}" | HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" >/dev/null 2>&1 || true
+  ln=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --line </dev/null 2>&1) || true
+  sd=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/ledger.py" --state-dir </dev/null 2>&1) || true; sd=${sd%$'\r'}
+  nf=$(ls "$H2/.claude/smartuse/projects"/*/status.json 2>/dev/null | wc -l | tr -d ' ')
+  case "$ln" in *"waiting on you · no prompt yet"*) if [ "$nf" = 1 ] && [ -f "$sd/status.json" ]; then echo "PASS F1a $1: SessionStart writes status.json in the folder ledger.py names, the line is live: $ln"; else echo "FAIL F1a $1: the line is live but status.json is not in '$sd'"; fail=1; fi;;
+    *) echo "FAIL F1a $1: SessionStart in a project whose key is $2 characters left no state (line: $ln; status.json files: $nf)"; fail=1;; esac
+}
+if [ "$NT" = 1 ]; then
+  if [ $(( 239 - BL2 )) -ge 20 ]; then longcase "a state folder of 240 characters (key $(( 239 - BL2 )), Windows)" $(( 239 - BL2 )); else echo "PASS F1a skipped: HOME is $BL2 characters, too long to build a folder of 240"; fi
+else echo "PASS F1a the 240-character state folder is Windows-only (skipped here: one name may be 255 characters)"; fi
+longcase "a key of 300 characters" 300
+rm -rf "$H2/.claude/smartuse/projects"
+[ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && echo "PASS F1a the real ~/.claude/smartuse gained no folder from these cases" || { echo "FAIL F1a a test folder reached the real ~/.claude/smartuse/projects"; fail=1; }
+
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

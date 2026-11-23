@@ -31,7 +31,7 @@ H="$(cd "$(dirname "$0")/.." && pwd)"; G="$H/bash-guard.py"
 D=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-paid-guard.XXXXXX") && [ -d "$D" ] || { echo "FAIL could not create a temp dir under ${TMPDIR:-/tmp}"; exit 1; }
 trap 'case "$D" in */smartuse-paid-guard.*) rm -rf "$D" 2>/dev/null;; esac' EXIT   # removes this run's own dir and nothing else
 unset CLAUDE_PROJECT_DIR
-export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/proj"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
+REAL_HOME="${HOME:-}"; export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/proj"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it (cygpath -m -> C:/Users/...); elsewhere unchanged
 key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-"
@@ -2091,6 +2091,37 @@ tdeny "38d: a stop typed in the session stops an adapter go (stored with its tim
 tdeny "... a typed go from BEFORE the stop cannot take over: still stopped" go_early 'python render.py --n 1' 'the owner said \"paid stop\"' toolu_q2
 tallow "... a typed go from AFTER the stop takes over" go_late 'python render.py --n 1' toolu_q3
 [ "$(ekey session:u-gl used)" = 1 ] && ok "... session:u-gl used 1" || ko "38d take-over: $(cat "$R" 2>&1)"
+
+# ===== 39. 0.7.1 F1, a long Windows path keeps its paid counter. A real project folder whose state folder passes the limit (240 characters on Windows, E1: the
+# folder is made, then no file reaches it; a 300-character key elsewhere) plus an adapter go: run 1 is allowed (it was denied "the counter is not writable"),
+# the counter and its claim marker sit in the short-key folder, it is the folder ledger.py names, and the two owner-file guards still refuse a write to it.
+TPATH=; XEV=; PGTOOL=Bash
+NT=$(py -c 'import os, sys; sys.stdout.write("1" if os.name == "nt" else "0")' </dev/null)
+BL=$(py -c 'import os, sys, pathlib; sys.stdout.write(str(len(str(pathlib.Path(os.environ.get("HOME") or os.path.expanduser("~")) / ".claude" / "smartuse" / "projects"))))' </dev/null)
+mklong() { # $1 = a key length -> makes a project folder (two parts, so none passes 255 characters) whose key is that long and prints its path
+  local pre k0 rest a b; pre="$D/lp"; k0=$(key "$(wp "$pre")"); rest=$(( $1 - ${#k0} - 2 )); a=$(( rest / 2 )); b=$(( rest - a ))
+  a=$(printf '%*s' "$a" ''); b=$(printf '%*s' "$b" ''); mkdir -p "$pre/${a// /a}/${b// /b}" && printf '%s' "$pre/${a// /a}/${b// /b}"
+}
+if [ "$NT" = 1 ]; then LK=$(( 239 - BL )); else LK=300; fi
+if [ "$LK" -lt 60 ]; then ok "39 skipped: HOME is $BL characters, too long to build a state folder of 240"; else
+  rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW")
+  fresh; mkdir -p "$LP/.claude"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+  [ "${#LKEY}" = "$LK" ] && ok "39 the project folder's key is $LK characters (state folder $(( BL + 1 + LK )) on this HOME)" || ko "39 the key is ${#LKEY} characters, wanted $LK"
+  guard 'python render.py --images 1' toolu_L1 "$LPW"
+  [ -z "$OUT" ] && [ -z "$ERR" ] && ok "39 run 1 in the long folder with an adapter go: allowed, nothing printed" || ko "39 run 1 in the long folder: stdout '${OUT:0:300}' stderr '$ERR'"
+  LS=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/ledger.py" --state-dir </dev/null); LS=${LS%$'\r'}; LN=${LS##*[/\\]}; LR="$HOME/.claude/smartuse/projects/$LN/paid-runs.json"
+  [ -n "$LN" ] && [ "$LN" != "$LKEY" ] && [ "${#LN}" -le 53 ] && ok "39 ledger.py --state-dir names the short key ($LN), not the $LK-character full key" || ko "39 ledger.py names '$LN' (${#LN} characters)"
+  [ "$(ls "$HOME/.claude/smartuse/projects" 2>/dev/null | tr '\n' ' ')" = "$LN " ] && [ -f "$LR" ] && [ -f "$HOME/.claude/smartuse/projects/$LN/paid.toolu_L1.done" ] && ok "39 the counter and the claim marker sit in the short-key folder, and no other folder was made" || ko "39 state: $(ls "$HOME/.claude/smartuse/projects" 2>&1 | tr '\n' ' ') (wanted '$LN' holding paid-runs.json and paid.toolu_L1.done)"
+  [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 1 ] && [ "$(py "$CW" entry "$(wp "$LR")" go_from </dev/null 2>/dev/null)" = '"adapter"' ] && ok "39 ... used 1, go_from adapter" || ko "39 counter: $(cat "$LR" 2>&1)"
+  guard 'python render.py --images 1' toolu_L2 "$LPW"
+  [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 2 ] && ok "39 run 2 is allowed (test ok) and the same counter holds used 2" || ko "39 run 2: stdout '${OUT:0:300}' stderr '$ERR' counter: $(cat "$LR" 2>&1)"
+  FGOUT=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"{}"}}' "$(wp "$LR")" | py "$H/file-guard.py" 2>&1)
+  [ -n "$FGOUT" ] && ok "39 file-guard still refuses a Write to the short-key folder's paid-runs.json" || ko "39 file-guard let a Write to $LR through"
+  guard "echo '{}' > $(wp "$LR")" toolu_L3 "$LPW"
+  case "$OUT" in *"owner-only file"*) ok "39 bash-guard's owner-file rule still refuses a shell write to it";; *) ko "39 owner-file: stdout '${OUT:0:300}' stderr '$ERR'";; esac
+  [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39 the real ~/.claude/smartuse gained no folder from these cases" || ko "39 a test folder reached the real ~/.claude/smartuse/projects"
+  rm -rf "$D/lp"
+fi
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
