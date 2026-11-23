@@ -63,11 +63,15 @@ def scan_text(label, text, patterns, hits, max_hits):
 
 
 def tracked_files(repo):
-    out = subprocess.run(["git", "ls-files", "-z"], cwd=repo, capture_output=True, text=True).stdout
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     return [p for p in out.split("\0") if p]
 
 
 def main():
+    try:  # typed with no launcher: Windows would print through the ANSI code page and fail on · … or any non-ASCII text
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=".")
     ap.add_argument("--history", action="store_true", help="also scan git log -p --all")
@@ -88,7 +92,7 @@ def main():
             continue
         scan_text(rel, text, patterns, hits, a.max_hits)
     if a.history:
-        log = subprocess.run(["git", "log", "-p", "--all", "--format=commit %h %s"], cwd=repo, capture_output=True, text=True).stdout
+        log = subprocess.run(["git", "log", "-p", "--all", "--format=commit %h %s"], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
         cur = "?"
         for ln, line in enumerate(log.splitlines(), 1):
             if line.startswith("commit "):
