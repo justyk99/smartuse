@@ -979,7 +979,7 @@ elif mode == "imports":  # imports <wait-gate.py>: stdlib only, no subprocess, t
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "pathlib", "datetime", "hashlib"} and not calls   # hashlib: 0.7.1 F1, imported inside fit_key only
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "pathlib", "datetime", "hashlib", "winreg"} and not calls   # hashlib: 0.7.1 F1, winreg: 0.7.1 D8, both imported inside fit_key only
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "hooks":    # hooks <hooks.json>: the Stop entry runs ledger, until-done, wait-gate (timeout 10), heartbeat, in that order
     d = json.load(open(sys.argv[2], encoding="utf-8"))
@@ -1236,7 +1236,7 @@ for badhead in 'ref: refs/heads/a$(touch x)' 'ref: refs/heads/a;b' 'ref: refs/he
   mkdir -p "$D/bad/.git"; printf '%s\n' "$badhead" > "$D/bad/.git/HEAD"; c=$(brcase "$D/bad")
   case "$c" in *" --git origin <branch> --path "*) ok "HEAD '$badhead' -> the placeholder <branch>, never the text (it goes into a command)";; *) ko "HEAD '$badhead' -> $c";; esac
 done
-r=$(py "$D/chk.py" imports "$GATE" </dev/null); [ "$r" = ok ] && ok "wait-gate.py: stdlib only (json os re sys time pathlib datetime, hashlib inside fit_key), no subprocess / socket / urllib, parses as the Python 3.9 grammar" || ko "wait-gate.py imports: $r"
+r=$(py "$D/chk.py" imports "$GATE" </dev/null); [ "$r" = ok ] && ok "wait-gate.py: stdlib only (json os re sys time pathlib datetime, hashlib and winreg inside fit_key), no subprocess / socket / urllib, parses as the Python 3.9 grammar" || ko "wait-gate.py imports: $r"
 
 # ===== 10. the state dir is the one ledger.py, until-done.py and heartbeat.py use (project_key copied, tested equal)
 for sub in "plain" "with space.v1/x y" "a+b/c_d (e)"; do
@@ -1304,9 +1304,16 @@ A=$(lp 300); B=${A:0:150}y${A:151}; rm -rf "$PROJ10"; fire wait-gate "$A"; fire 
   && ok "d two 300-character paths that differ in the middle: two folders, the same last 40 characters, two hashes, each holds its wait.json" || ko "d middle-differing paths: ledger.py says '$na' and '$nb', folders: $(ls "$PROJ10" 2>&1 | tr '\n' ' ')"
 # e: an existing full-key folder is still used while a file fits in it (232 characters on Windows), and left behind beyond (a longer one was made by mkdir and no file reached it, E1)
 if [ "$NT" = 1 ]; then
+  LPON=$(py -c 'import sys
+try:
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+        sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
+except Exception:
+    sys.stdout.write("0")' </dev/null)   # D8: this machine's long-path switch (read only): with it on, the 233-character folder is kept too
   for L in 220 232 233; do
     ep=$(lp $(( L - BL - 1 ))); full=$(key "$ep"); rm -rf "$PROJ10"; before=$(fname "$ep"); mkdir -p "$PROJ10/$full"; after=$(fname "$ep"); fire wait-gate "$ep"
-    if [ "$L" -le 232 ]; then
+    if [ "$L" -le 232 ] || [ "$LPON" = 1 ]; then
       [ "$before" != "$full" ] && [ "$after" = "$full" ] && [ -f "$PROJ10/$full/wait.json" ] && ok "e state folder of $L characters: new without its folder it gets the short key, with its folder it keeps the full key and the state goes there" || ko "e folder of $L: before '$before', after '$after', wait.json in the full folder: $([ -f "$PROJ10/$full/wait.json" ] && echo yes || echo no)"
     else
       [ "$after" != "$full" ] && [ -f "$PROJ10/$after/wait.json" ] && [ ! -f "$PROJ10/$full/wait.json" ] && ok "e an existing folder of $L characters (no file fits in it) is left behind empty, the short key is used" || ko "e folder of $L: ledger.py says '$after', wait.json: short $([ -f "$PROJ10/$after/wait.json" ] && echo yes || echo no), full $([ -f "$PROJ10/$full/wait.json" ] && echo yes || echo no)"
@@ -1316,7 +1323,7 @@ else ok "e skipped here (not Windows: only the 255-character name limit applies 
 rm -rf "$PROJ10"
 # f: fit_key is one helper, byte for byte in the six hooks (read with ast, no hook imported), and agrees with the rule on a table, for nt True and False
 cat > "$D/fk.py" <<'PY'
-import ast, hashlib, os, shutil, sys, tempfile
+import ast, hashlib, os, shutil, sys, tempfile, types
 H = sys.argv[1]
 FILES = ["heartbeat.py", "ledger.py", "recall.py", "until-done.py", "wait-gate.py", "bash-guard.py"]
 srcs = {}
@@ -1337,13 +1344,34 @@ if len(set(srcs.values())) != 1:
 ns = {"os": os}
 exec(srcs[FILES[0]], ns)
 fit_key = ns["fit_key"]
+# D8: fit_key reads HKLM\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled through `import winreg`. A fake winreg module stands in for the real one
+# for the whole run (the table must not depend on this machine's switch, and nothing here reads or writes the real registry): .value is what the value says,
+# .boom makes any read raise, .reads counts the reads.
+class FakeReg(types.ModuleType):
+    HKEY_LOCAL_MACHINE = 1
+    value, boom, reads, path = 0, False, 0, None
+    class _Key:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def OpenKey(self, root, sub, *a):
+        self.reads += 1; self.path = (root, sub)
+        if self.boom: raise OSError("registry read refused")
+        return self._Key()
+    def QueryValueEx(self, key, name):
+        if self.boom: raise OSError("registry read refused")
+        if name != "LongPathsEnabled": raise FileNotFoundError(name)
+        return (self.value, 4)
+reg = FakeReg("winreg"); reg.value = 0
+real_winreg = sys.modules.get("winreg"); sys.modules["winreg"] = reg
+real_hashlib = sys.modules["hashlib"]
+real_isdir = os.path.isdir
 tmp = tempfile.mkdtemp(prefix="fitkey")
 try:
     base = os.path.join(tmp, "projects"); os.makedirs(base); B = len(base)
     def full_of(dirlen, ch="x"):   # a key that makes the state folder dirlen characters
         return ch * (dirlen - B - 1)
     def short_of(full):
-        return full[-40:].lstrip("-") + "-" + hashlib.sha1(full.encode()).hexdigest()[:12]
+        return (full[-40:] + "-" + hashlib.sha1(full.encode()).hexdigest()[:12]).lstrip("-")   # never starts with "-" (an all-dash tail gives the 12 hex alone)
     bad = []
     def want(label, nt, full, exists, expect):
         if exists:
@@ -1368,11 +1396,65 @@ try:
         bad.append("short key shape: %r" % s)
     if fit_key("k" * 300, None, True) != "k" * 300 or fit_key("k" * 300, 5, False) != "k" * 300:
         bad.append("fit_key must not raise: an error returns the full key")
+    # D8: Windows long paths on keeps an existing full-key folder of any length (the fake winreg above; the folder is faked through os.path.isdir, a 248-character folder cannot be made without the switch)
+    def exists_only(path):
+        os.path.isdir = lambda p: p == path or real_isdir(p)
+    def lp_case(label, value, boom, full, expect, reads=None):
+        reg.value, reg.boom, reg.reads = value, boom, 0
+        exists_only(base + os.sep + full)
+        got = fit_key(full, base, True)
+        os.path.isdir = real_isdir
+        exp = full if expect == "full" else short_of(full)
+        if got != exp:
+            bad.append("%s: got %r wanted the %s key" % (label, got[:30] + "..." + str(len(got)), expect))
+        if reads is not None and reg.reads != reads:
+            bad.append("%s: the registry was read %d times, wanted %d" % (label, reg.reads, reads))
+    f248 = full_of(248, "m")
+    lp_case("long paths on, existing folder of 248", 1, False, f248, "full", 1)
+    lp_case("long paths off, existing folder of 248", 0, False, f248, "short", 1)
+    lp_case("registry read raises, existing folder of 248", 1, True, f248, "short", 1)
+    lp_case("long paths on, existing folder of 233", 1, False, full_of(233, "n"), "full", 1)
+    lp_case("long paths on, existing folder of 232 (fits: the switch is not read)", 1, False, full_of(232, "o"), "full", 0)
+    reg.value, reg.boom, reg.reads = 1, False, 0
+    if fit_key(f248, base, True) != short_of(f248) or reg.reads != 0:
+        bad.append("long paths on but no folder: the short key, and the switch is not read")
+    reg.value, reg.boom, reg.reads = 1, False, 0
+    exists_only(base + os.sep + "p" * 300)
+    got = fit_key("p" * 300, base, False); os.path.isdir = real_isdir
+    if got != "p" * 300 or reg.reads != 0:
+        bad.append("not Windows: the existing folder is kept and the registry is not read")
+    reg.value, reg.boom, reg.reads = 0, False, 0
+    # the common path imports no hashlib and runs no sha1; the short path does (a recording stand-in for hashlib)
+    calls = []
+    stub = types.ModuleType("hashlib")
+    stub.sha1 = lambda b: (calls.append(1), real_hashlib.sha1(b))[1]
+    sys.modules["hashlib"] = stub
+    try:
+        got_full = fit_key("C--p-" + "a" * 15, base, True)
+        n_full = len(calls)
+        got_short = fit_key("t" * 300, base, True)
+        n_short = len(calls)
+    finally:
+        sys.modules["hashlib"] = real_hashlib
+    if got_full != "C--p-" + "a" * 15 or n_full != 0:
+        bad.append("a short key must come back as itself with no sha1 run (sha1 calls: %d)" % n_full)
+    if got_short != short_of("t" * 300) or n_short != 1:
+        bad.append("a long key must come back shortened by one sha1 run (calls: %d)" % n_short)
+    # the short key never starts with "-": an all-dash tail leaves the 12 hex alone
+    dk = "u" * 200 + "-" * 60
+    for nt in (True, False):
+        got = fit_key(dk, base, nt)
+        if got.startswith("-") or got != hashlib.sha1(dk.encode()).hexdigest()[:12]:
+            bad.append("all-dash tail nt=%s: got %r" % (nt, got))
     print("ok" if not bad else "; ".join(bad))
 finally:
+    sys.modules["hashlib"] = real_hashlib
+    os.path.isdir = real_isdir
+    if real_winreg is None: sys.modules.pop("winreg", None)
+    else: sys.modules["winreg"] = real_winreg
     shutil.rmtree(tmp, ignore_errors=True)
 PY
-r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233)" || ko "f fit_key: $r"
+r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233); D8: with a fake winreg, Windows long paths on keeps an existing folder of 248 and off, or a read that raises, gives the short key; the switch is read only when the length test fails; no hashlib on the common path; a short key never starts with -" || ko "f fit_key: $r"
 [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && ok "F1: the real ~/.claude/smartuse gained no folder from these cases (the temp HOME took them all)" || ko "F1: a test folder reached the real ~/.claude/smartuse/projects"
 
 # ===== 11. what the owner's session gets: the Stop-hook JSON until-done.py prints; the hook is registered

@@ -74,27 +74,39 @@ def fit_key(full, base, nt):
     """The state-dir name to use for the project key `full` (the whole resolved path, as project_key() has always built it), under `base`
     (<HOME>/.claude/smartuse/projects); nt = os.name == "nt". `full` itself while the folder and its longest file name fit (a whole path may hold
     259 characters on Windows, E1; one name 255 elsewhere), else the last 40 characters of it, "-", and 12 hex of the sha1 of the whole key. A folder
-    that already exists under the full key is kept while a file fits in it (D7a). Reads folder names only. Never raises: any error returns `full`.
+    that already exists under the full key is kept while a file fits in it (D7a), or whatever its length when Windows long paths are on (D8: the
+    LongPathsEnabled switch is read, only when the length test fails). Reads folder names and one registry value. Never raises: any error returns `full`.
     The same text is copied into heartbeat.py, ledger.py, recall.py, until-done.py, wait-gate.py and bash-guard.py (the tests assert it equal)."""
     try:
-        import hashlib   # inside the function: no new top-level import
         WIN_PATH_MAX = 259   # the longest whole file path on Windows without long-path support (MAX_PATH 260 with its NUL, measured by E1)
         NAME_ROOM = 64       # the longest fixed file name in the folder (paid.<tool_use_id>.<8>.done, 49) plus room
-        KEPT_ROOM = 26       # status.json.<pid>.tmp with a 10-digit pid: the longest name a hook writes in a folder that already exists
+        KEPT_ROOM = 26       # status.json.<pid>.tmp with a 10-digit pid: the bound for status.json, the file every hook start writes (not the longest name: paid-runs.json.<pid>.tmp is 29, a claim marker 40 to 49)
         KEY_MAX = 255        # one name on Linux and macOS (the key is ASCII, so characters = bytes)
         TAIL = 40            # characters of the full key kept in the short key
         HASH = 12            # hex digits of the sha1 of the whole key
-        short = full[-TAIL:].lstrip("-") + "-" + hashlib.sha1(full.encode()).hexdigest()[:HASH]
+
+        def long_paths():    # Windows long paths on? (only asked when the length test fails; any error -> no)
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+                    return winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1
+            except Exception:
+                return False
+
+        def short():         # built only when returned: no hashlib import or sha1 on the common path; never starts with "-"
+            import hashlib
+            return (full[-TAIL:] + "-" + hashlib.sha1(full.encode()).hexdigest()[:HASH]).lstrip("-")
+
         dirlen = len(base) + 1 + len(full)
         have = os.path.isdir(base + os.sep + full)
-        if nt and have and dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX:
+        if nt and have and (dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX or long_paths()):
             return full
         if not nt and have:
             return full
         if len(full) > KEY_MAX:
-            return short
+            return short()
         if nt and dirlen + 1 + NAME_ROOM > WIN_PATH_MAX:
-            return short
+            return short()
         return full
     except Exception:
         return full
