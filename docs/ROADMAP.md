@@ -84,11 +84,12 @@ Released 2026-11-23 (review §8.8, live pass T3 and the F5 phone go done). The r
 - [x] F10 names, docs, counts, version 0.7.0 (`heartbeat.py` knows `paid`; the owner-file reason names the four kinds of file) · [x] F4b step 1, the folder lookup (D-YK13; two Opus re-checks, their findings fixed) · [x] F5 the typed `paid go:`, `test ok` and `paid stop` lines (E1–E4 shapes, plan §8.10; one review fix round) · [x] the review (§8.8): 3 majors and 4 minors fixed, re-check passed, its follow-ups fixed · [x] T3 and the live pass (2026-11-14 to 2026-11-17) · [x] released 2026-11-23
 
 ## 0.7.1 — hardening (plan `docs/notes/next-release-plan.md`; approved 2026-11-23; fixes and docs, no new rule, gate, adapter key or option)
+Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, the suite covers it).
 - [x] F1 a long Windows path keeps its state: the key is shortened past the limit E1 measured (a 259-character whole file path); a folder that exists keeps its name
 - [x] F2 the paid refusals say what to do: a typed go says the owner types `test ok`; a state folder that cannot be written is named, with `/smartuse:doctor`
 - [x] F3 the term scan runs on Windows as `CLAUDE.md` types it, with no `PYTHONUTF8`
 - [x] F5 README `## Uninstall` and `## What it reads and writes`, the badge, the CHANGELOG head, the `SECURITY.md` line, both manifests at 0.7.1
-- [ ] T3, the release word, tag (the maintainer's)
+- [x] T3 (2026-11-24) · [x] released 2026-11-24 · [ ] tag (the maintainer's)
 - Not built: F4, see the next release below
 
 ## Next release (after 0.7.1) — open items
