@@ -4,7 +4,7 @@
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img alt="Claude Code 2.1.300+" src="https://img.shields.io/badge/Claude%20Code-2.1.300%2B-black">
 <img alt="plugin evals 10/10 (0.5.0)" src="https://img.shields.io/badge/plugin%20evals-10%2F10%20%280.5.0%29-brightgreen">
-<img alt="tests 3632 hook + 36 bench cases" src="https://img.shields.io/badge/tests-3632%20hook%20%2B%2036%20bench-brightgreen">
+<img alt="tests 4351 hook + 36 bench cases" src="https://img.shields.io/badge/tests-4351%20hook%20%2B%2036%20bench-brightgreen">
 <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/justyk99/smartuse/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
@@ -34,7 +34,7 @@ Or from your shell: `claude plugin marketplace add justyk99/smartuse && claude p
 | `receipts` | `/smartuse:receipts [task]` | one row per plan step of a run: `# · step · tier · model · override · outcome · esc · verify · calls · in · out · check`, plus each model's share of agent output. Tokens come from the SubagentStop hook, never estimated; closed runs are archived so a task's receipts survive the next run. 0 model tokens |
 | `status` | `/smartuse:status` (add `install` for the terminal status line) | one deterministic line from the heartbeat hook: `working · waiting on agent: general-purpose 4m12s · step 3/6 build·opus "tests"`, `waiting on you · 3m`, `NEEDS YOU: which rounding rule?`, `STOPPED · handed off 20:41 (builder) — nothing will wake this session`, `stalled? no activity 6m`. Hooks on every tool call, agent start/stop, prompt, stop and notification write `status.json`; 0 model tokens, one Python start per event (~55 ms on Linux; on Windows a start can take seconds, see Windows). Since 0.6.1 the three tool-event handlers run in the background, so Claude does not wait for them. The plugin also ships a `subagentStatusLine` that names the plan step on each agent row |
 | `doctor` | `/smartuse:doctor` | proof that the hooks are live: Python, hooks registered, heartbeat, bash-guard and file-guard each PASS or FAIL with the fix, plus the guard level and any rules switched off. Claude tries one harmless canary per guard; a guard that is live denies it. 0 model tokens to compute the report |
-| `bash-guard` | on in the light level (default) and in Strict; see Switches | denies pipe-to-shell, `sudo`, recursive deletes of a tree, world-writable chmod, credential-file reads, destructive SQL through shell tools, force-push, svn revert, writes to the human-only files, and (0.7.0) **a script that calls a per-call billed API until the owner gave a go** — and names the safe alternative. It covers the Bash, PowerShell and Monitor tools (the same rules read the PowerShell text; 0.7.0 adds PowerShell download-then-run, `Remove-Item -Recurse -Force` of a root, and the owner's files, see Switches and Honest limits). 1,340 regression cases in `run.sh`, 1,356 more for the paid check. `file-guard` keeps the adapter, the pin file, the launcher's remembered interpreter, the paid-run counter and the session transcripts read-only for the model |
+| `bash-guard` | on in the light level (default) and in Strict; see Switches | denies pipe-to-shell, `sudo`, recursive deletes of a tree, world-writable chmod, credential-file reads, destructive SQL through shell tools, force-push, svn revert, writes to the human-only files, and (0.7.0) **a script that calls a per-call billed API until the owner gave a go** — and names the safe alternative. It covers the Bash, PowerShell and Monitor tools (the same rules read the PowerShell text; 0.7.0 adds PowerShell download-then-run, `Remove-Item -Recurse -Force` of a root, and the owner's files, see Switches and Honest limits). 1,340 regression cases in `run.sh`, 1,369 more for the paid check. `file-guard` keeps the adapter, the pin file, the launcher's remembered interpreter, the paid-run counter and the session transcripts read-only for the model |
 | `recall` | always on; the gate needs `sources:` plus `publish:` or `publish_tools:` in `.claude/smartuse.local.md`, the session-start note needs `handoff:` | **the fresh-source gate:** a send command (`publish: python send.py`, typed in Bash or PowerShell) or an upload tool (`publish_tools: mcp__*__file_upload`) is denied until every source file has a Read after the last compaction — `bash-guard: fresh-source — 2 of 3 sources not opened since the last compaction (14:02): photos/a.jpg, photos/b.jpg. Open each with Read, then retry. Nothing was sent.` **At the squeeze:** the summarizer is told to keep the source paths and your last prompts verbatim; right after it, Claude is told "the summary is not a source" and which files to reopen; the status line counts squeezes (`· squeezed 2× (last 14:02)`). **At session start:** the first lines of your `handoff:` note and a stale line when it is older than the last commit. 0 model tokens; nothing is stored but counts and paths |
 
 ## Switches
@@ -88,7 +88,7 @@ flowchart LR
 | `run-plan --until-done`, bench repo, one line in | kickoff 14/14 → endpoint + 4 tests built (11/11 pass) → verified end to end → stopped with a precise human question (pre-existing lint gap). $1.30, 5.6 min, 19 turns. `bench/results-example/` |
 | **0.3.0 run (2026-10-21, 2.1.306), same ask, headless** | kickoff 14/14 ($1.57, 2.4 min) → 6 steps, no "go" in between: router + mount + 4 tests (6/6), live curl, three fresh-agent reviews "no gaps", docs on haiku, step 6 blocked by rule (never commits). **A receipt per step with hook-attached tokens**: agent out 10.0k (fable 40% · haiku 45% · sonnet 13%). $3.72, 6.4 min, 22 turns. `bench/results-example/2026-10-21-csv-export/` |
 | **A/B, routed vs not, 2026-10-22, model pinned to Opus, 4 bench asks** | same kickoff per ask, then `run-plan --until-done` per dial: median cost `off` $1.35 · `safe` $1.10 · `aggressive` $1.26 — **−24 % median per ask on both routed dials**; agent output not lower (cheaper models wrote more); tests green in 11 of 12 runs (one aggressive run left 3 failing tests); 3 of 4 asks ended on a real human question on every dial. n=4 on one fixture repo: a direction, not a claim. `bench/results-example/2026-10-22-ab-run3/` (and run 2, n=1: −17 % / −31 %) |
-| bash-guard · ledger + receipts · until-done · file-guard · heartbeat hooks · bench A/B dry run · the watcher · the wait gate · the fresh-source gate · recall · the paid check | `bash plugins/smartuse/hooks/tests/all.sh` prints `run 1178 · ledger 46 · until-done 50 · file-guard 107 · heartbeat 179 · ab 36 · watch 63 · wait 196 · fresh 758 · recall 203 · paid 852` (PASS lines per suite, every one green, each suite run alone on the author's Windows laptop, 2026-11-14, 0.7.0 before release; the badge's 3632 is the ten hook suites, `ab` left out) |
+| bash-guard · ledger + receipts · until-done · file-guard · heartbeat hooks · bench A/B dry run · the watcher · the wait gate · the fresh-source gate · recall · the paid check | `bash plugins/smartuse/hooks/tests/all.sh` prints `run 1178 · ledger 46 · until-done 50 · file-guard 107 · heartbeat 179 · ab 36 · watch 63 · wait 196 · fresh 758 · recall 203 · paid 852` (PASS lines per suite, every one green, each suite run alone on the author's Windows laptop, 2026-11-14, 0.7.0 before release; the badge counts the ten hook suites, `ab` left out: 3632 on this run) |
 | The fresh-source gate's cost (0.6.0, the author's Windows laptop) | the transcript pass takes 84 ms on a 13 MB session and 1.65 s (median of 5) on the largest local transcript, 270 MB; a Python start ~350 ms. The check has one 4 s deadline that starts when the hook starts; past it a matched send is denied, never let through |
 | A command built to be slow (0.6.0, the author's Windows laptop) | 8,000 unclosed `<<` openers (48 KB) followed by `git push`: the security review measured 4.84 s + 5.39 s in the two heredoc scans, past the 10 s hook timeout, which lets a call through. Now the heredoc scan is capped, the deadline starts with the hook, and a command too big or too tangled to read counts as a send while the sources are unopened: the same command is denied in 0.31 s (median wall of 5 runs, interpreter start included; the maintainer's laptop, 2026-11-10) |
 
@@ -160,7 +160,72 @@ paid_guard: on
 
 `check` accepts exactly these shapes, verbatim: `npm test` · `pnpm test` · `yarn test` · `bun test` · `pytest [paths]` · `make test` · `make check` · `cargo test` · `go test ./...` · `dotnet test` · `mvn test` · `gradle test`. Anything else is refused and the gate says so: `npm run x`, `npx …`, `python -m pytest`, flags, pipes, `&&`. A `bash <script>` check runs only when you pin it by hash with `until-done.py --trust "bash <script>"` (run from the repo; it prints the `sudo` commands, you run them) in a root-owned `/etc/smartuse/trusted-checks.json`: Linux/macOS only, needs sudo, not on Windows.
 
-Everything the hooks write lives under `~/.claude/smartuse/`, never inside your repo: `ledger.jsonl` (one line per run, all repos) and, per repo under `projects/<key>/`, `routing.json` (the active or latest run-plan run) · `receipts.jsonl` (one line per agent) · `runs/` (closed runs, archived) · `status.json` (the heartbeat) · `status.lock` (the heartbeat's write lock) · `wait.json` (the wait gate's outcome at the last Stop with a hand-off open, shown by the status line) · `wait-block.json` (the scopes the wait gate has already blocked once) · `pending.json` (a skill's hand-off, consumed by the Stop hook) · `recall.json` (recall's squeeze count, the last squeeze time and the sources that were unopened then: counts and paths, never a command) · `paid-runs.json` (the paid check's counter, 0.7.0: per go line, the script, the runs allowed and used, the cap text; never a command) · `paid-runs.lock` (its lock while it is written) · `paid.<id>.done` (one empty marker per counted call, so a run is counted once; the shell may read these three and nothing else, and the file tools refuse them; delete the whole `projects/<key>/` folder and the count starts again, so the way to stop for good is to remove the go line) · `interpreter` (the Python the launcher proved, so later events skip the probe) · `receipt.<agent>.done` (one empty marker per agent so its receipt is written once; removed when run-plan closes the run; an aborted run leaves them behind, which is harmless: delete them, or the whole `projects/<key>/` dir, to clean up). State lives under `~/.claude/smartuse/projects/<key>/`, where `<key>` comes from the repository's full path (so two folders with the same name never share it). 0.3.0 used the folder name; 0.4.0 never writes there, and `/smartuse:receipts` still shows those older runs, marked as shared. Delete `~/.claude/smartuse/projects/<folder name>/` when you no longer need them.
+Everything the hooks write lives under `~/.claude/smartuse/`, never inside your repo. The file-by-file list is in **What it reads and writes** below, and how to remove it all is in **Uninstall**.
+
+## Uninstall
+Type these two commands in your own terminal. Claude cannot run them for you: the guard's always-on `config-switch` rule refuses the plugin command's uninstall and marketplace-remove verbs for smartuse, so the switch stays yours.
+
+```text
+claude plugin uninstall smartuse@smartuse
+claude plugin marketplace remove smartuse
+```
+They are Claude Code's own plugin commands (`claude plugin --help` lists them). They take out the plugin: its hooks, skills and styles. Restart Claude Code afterwards.
+
+What stays, because Claude Code does not know about it. Delete what you want gone:
+
+| What | Where | How |
+|---|---|---|
+| **The state folder**: every file in the table below | `~/.claude/smartuse/` (under `HOME`; on Windows your user folder, or the `HOME` you set) | `rm -r ~/.claude/smartuse` in a Bash shell (Git Bash on Windows, macOS, Linux) · `Remove-Item -Recurse $HOME\.claude\smartuse` in PowerShell |
+| A reply style you installed with `/smartuse:reply-style` | `~/.claude/output-styles/<name>.md` (`.claude/output-styles/` in a repo, if you used `--project`); `<name>` is one of `lcd` · `bluf` · `engineer` · `teacher` · `minimal` · `plain` · `memo` | delete the file you chose, and delete the `"outputStyle"` key in `~/.claude/settings.json` (in `.claude/settings.local.json` for `--project`) or run `/output-style Default` |
+| The status line, if you ran `/smartuse:status install` and said yes | the `statusLine` key of `~/.claude/settings.json`, its command names `heartbeat.py --statusline` | delete that key |
+| Each repo's adapter | `.claude/smartuse.local.md` | you wrote it (smartuse never creates it): delete it, or leave it, nothing reads it without the plugin |
+| The trust file, only if you pinned a `bash <script>` check (Linux and macOS; Windows has none) | `/etc/smartuse/trusted-checks.json` | `sudo rm /etc/smartuse/trusted-checks.json`, then `sudo rmdir /etc/smartuse` |
+
+The kickoffs, `DEV.md` and `USER.md` that the skills wrote into your repo on request are your documents; smartuse leaves them. Nothing re-creates the state folder once the plugin is gone: only its hooks and its `ledger.py` write there.
+
+## What it reads and writes
+The hooks are small Python files that import no network library; this is their whole list, checked against the code for 0.7.1. The limits of what the guards see are in `SECURITY.md`.
+
+**Reads.** Every hook reads the event Claude Code sends it (tool name and input, session id, project folder, transcript path). Beyond that:
+
+| Hook | Reads |
+|---|---|
+| `heartbeat` | its own state folder: `status.json`, `routing.json`, `wait.json`. Of an event it keeps the tool name, ids, agent type and times, never a tool's arguments, file contents or prompts. `--doctor` also reads the plugin's `plugin.json` and `hooks.json` |
+| `ledger` | the session transcript and the session's agent transcripts (to sum token usage since the skill's `started_at`), `pending.json`, `routing.json` |
+| `until-done` | `routing.json`; the `check:` line of the adapter; on Linux and macOS `/etc/smartuse/trusted-checks.json` and the pinned script |
+| `wait-gate` | the session transcript (one pass); `wait_gate:` in the adapter; `.git/HEAD` for the branch name |
+| `recall` | the session transcript (your last prompts, the compaction records); `sources:`, `publish:`, `publish_tools:` and `handoff:` in the adapter; the first 15 lines of the `handoff:` file; `.git/logs/HEAD` for the time of the last commit |
+| `bash-guard` | the command's text; the adapter; the session transcript (Reads since the last compaction for the fresh-source gate, the last 4 MB for a typed `paid go:`); the names of the files `sources:` lists (never their content); `paid-runs.json`; and, for the paid check (on with a paid line in the adapter, or in Strict), the first 256 KB of a script a command runs and the folders the command names |
+| `file-guard` | the settings file Claude is about to change (to compare its three switch values) and it resolves the path being written (links, short names); it opens no other file |
+
+**Writes.** The hooks write only under `~/.claude/smartuse/`, never inside your repo. `<key>` is the repository's full path with every character outside `A-Z a-z 0-9 . _ -` replaced by `-`, so two folders with the same name never share a state folder. A path too long for its state folder to hold its files (a whole file path may hold 259 characters on Windows, one name 255 elsewhere) gets a shorter name: its last 40 characters, `-`, and 12 hex digits of a hash of the whole path. 0.3.0 keyed the folder by name alone; nothing writes `projects/<folder name>/` any more, and `/smartuse:receipts` still lists its old runs, marked as shared.
+
+| File | Holds | Written by |
+|---|---|---|
+| `ledger.jsonl` | one line per run, all repos | `ledger` (Stop) |
+| `projects/<key>/status.json` | the heartbeat: what Claude is doing now | `heartbeat` (every event) |
+| `projects/<key>/status.lock` | the heartbeat's write lock | `heartbeat` |
+| `projects/<key>/routing.json` | the active or latest run-plan run | `ledger.py --put` (run-plan); `ledger` adds agent tokens, `until-done` the block count |
+| `projects/<key>/receipts.jsonl` | one line per agent | `ledger` (SubagentStop) |
+| `projects/<key>/runs/` | closed runs, archived | `ledger` when run-plan closes |
+| `projects/<key>/receipt.<agent>.done` | one empty marker per agent, so its receipt is written once; removed when run-plan closes (an aborted run leaves them: harmless) | `ledger` |
+| `projects/<key>/pending.json` | a skill's hand-off, consumed at Stop | `ledger.py --put` (a skill); `ledger` claims it by renaming it to `pending.<pid>.claimed`, then deletes it |
+| `projects/<key>/recall.json` | recall's squeeze count, the last squeeze time and the sources unopened then: counts and paths, never a command | `recall` |
+| `projects/<key>/wait.json` | the wait gate's outcome at the last Stop with a hand-off open, shown by the status line | `wait-gate` |
+| `projects/<key>/wait-block.json` | the scopes the wait gate has already blocked once | `wait-gate` |
+| `projects/<key>/paid-runs.json` | the paid check's counter: per go line, the script, the runs allowed and used, the cap text; never a command | `bash-guard` |
+| `projects/<key>/paid-runs.lock` | its lock while it is written | `bash-guard` |
+| `projects/<key>/paid.<id>.done` | one empty marker per counted call, so a run is counted once | `bash-guard` |
+| `*.tmp` beside a file above | the temporary name of an atomic write, renamed at once; a crash can leave one | the same hook |
+| `interpreter` | the name of the Python the launcher proved (`python3`, `python` or `py -3`), so later events skip the probe | `py.sh` |
+
+The shell may read the paid counter, its lock and the markers, and nothing else, and the file tools refuse them. Delete the whole `projects/<key>/` folder and the paid count starts again, so the way to stop paid runs for good is to remove the go line. Outside `~/.claude/smartuse/`, two things are written, neither by a hook's own logic: Python's compiled bytecode of the hooks, in `hooks/__pycache__/` inside the plugin's folder (a speed-up; with `PYTHONDONTWRITEBYTECODE` or a folder that cannot be written, none), and, when a session runs `watch.py`, what `git fetch` writes in your clone (`FETCH_HEAD` and `refs/remotes/<remote>/<branch>`).
+
+**Network.**
+- The seven hooks make no network call and start no process of their own except `until-done`, below. The paid check reads a script's text for host names and never connects to them.
+- `until-done` runs the `check:` line of your adapter in your repo: one of the fixed shapes (`npm test`, `pytest`, and so on) or a script you pinned by hash, with no shell and a 5-minute limit. What that command does is its own.
+- `watch.py` is not a hook: a session starts it in the background after a hand-off (the wait gate's reason suggests the command). With `--git` it runs `git ls-remote` against the remote you name, every 60 seconds by default, and `git fetch` of that one branch when its head changes. With `--file` it only looks for a file. It stops on a signal or at `--max` (4 hours by default).
+- The skills are instructions to Claude, not code. What Claude does for them (a `living-docs publish` pushes a page, for example) goes through Claude Code's own tools and your permission prompts, and is not in this list.
 
 ## Repository map
 ```
