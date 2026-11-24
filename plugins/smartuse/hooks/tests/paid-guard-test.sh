@@ -77,7 +77,7 @@ elif mode == "imports":  # imports bash-guard.py: stdlib only, no subprocess / n
         elif isinstance(x, ast.ImportFrom):
             top.add((x.module or "").split(".")[0])
     assert top == {"base64", "datetime", "fnmatch", "json", "os", "posixpath", "re", "stat", "sys", "threading", "time"}, top
-    assert names <= top | {"hashlib", "pathlib"} and {"hashlib", "pathlib"} <= names, names
+    assert names <= top | {"hashlib", "pathlib", "winreg"} and {"hashlib", "pathlib"} <= names, names   # winreg: 0.7.1 D8, imported inside fit_key only
     print("ok")
 elif mode == "rules":    # rules bash-guard.py: until-done.py's way of reusing RULES (exec the source without its main() call)
     import io, contextlib
@@ -2120,8 +2120,8 @@ if [ "$LK" -lt 60 ]; then ok "39 skipped: HOME is $BL characters, too long to bu
   [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 1 ] && [ "$(py "$CW" entry "$(wp "$LR")" go_from </dev/null 2>/dev/null)" = '"adapter"' ] && ok "39 ... used 1, go_from adapter" || ko "39 counter: $(cat "$LR" 2>&1)"
   guard 'python render.py --images 1' toolu_L2 "$LPW"
   [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 2 ] && ok "39 run 2 is allowed (test ok) and the same counter holds used 2" || ko "39 run 2: stdout '${OUT:0:300}' stderr '$ERR' counter: $(cat "$LR" 2>&1)"
-  FGOUT=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"{}"}}' "$(wp "$LR")" | py "$H/file-guard.py" 2>&1)
-  [ -n "$FGOUT" ] && ok "39 file-guard still refuses a Write to the short-key folder's paid-runs.json" || ko "39 file-guard let a Write to $LR through"
+  FGOUT=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s","content":"{}"}}' "$(wp "$LR")" | py "$H/file-guard.py" 2>/dev/null); FGRC=$?
+  case "$FGOUT" in *'"permissionDecision": "deny"'*"this file is human-only"*"how many paid runs"*) [ "$FGRC" = 0 ] && ok "39 file-guard still refuses a Write to the short-key folder's paid-runs.json (exit 0, the human-only deny JSON on stdout)" || ko "39 file-guard exit code $FGRC";; *) ko "39 file-guard did not deny a Write to $LR: stdout '${FGOUT:0:300}'";; esac
   guard "echo '{}' > $(wp "$LR")" toolu_L3 "$LPW"
   case "$OUT" in *"owner-only file"*) ok "39 bash-guard's owner-file rule still refuses a shell write to it";; *) ko "39 owner-file: stdout '${OUT:0:300}' stderr '$ERR'";; esac
   [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39 the real ~/.claude/smartuse gained no folder from these cases" || ko "39 a test folder reached the real ~/.claude/smartuse/projects"
