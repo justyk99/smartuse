@@ -96,7 +96,7 @@ Released 2026-11-23 (review §8.8, live pass T3 and the F5 phone go done). The r
 - [ ] The `runs/` archive name: `runs/<started_at>_<task>.json` can be 186 characters (two names cut at 80), so in a state folder near the Windows limit a closed run may fail to archive, as before 0.7.1. 0.7.1's key rule counts only the fixed file names (49 at most); counting the archive would give ordinary repos new short keys
 - [ ] A `HOME` so long that even the short key leaves no room (a base folder over 140 characters on Windows) still fails to write state; doctor's `state folder:` line is the only sign
 - [ ] On Windows the key rule follows `os.name`, so WSL keys as Linux (its own `HOME`, as before)
-- [ ] A kept state folder of 219 to 232 characters denies every paid run: the claim marker (`paid.<tool_use_id>.<8>.done`, 40 to 49 characters) passes 259 characters once the adapter tail is added, and `/smartuse:doctor`'s probe name is about 17 characters, so it still says writable. Pre-existing; 0.7.1 keeps such a folder (D7a) so no paid count moves
+- [ ] A kept state folder of 219 to 232 characters denies every paid run: the claim marker (`paid.<tool_use_id>.<8>.done`, 40 to 49 characters) passes 259 characters, the refusal then points at the adapter instead of the folder, and `/smartuse:doctor`'s probe name is about 17 characters, so it still says writable. Pre-existing; 0.7.1 keeps such a folder (D7a) so no paid count moves
 - [ ] Skipped test cases print `PASS` and count toward each suite's floor, so a suite that skips cases can still meet its floor
 
 ## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches

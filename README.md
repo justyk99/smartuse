@@ -198,6 +198,8 @@ The hooks are small Python files that import no network library; this is their w
 | `bash-guard` | the command's text; the adapter; the session transcript (Reads since the last compaction for the fresh-source gate, the last 4 MB for a typed `paid go:`); the names of the files `sources:` lists (never their content); `paid-runs.json`; and, for the paid check (on with a paid line in the adapter, or in Strict), the first 256 KB of a script a command runs and the folders the command names |
 | `file-guard` | the settings file Claude is about to change (to compare its three switch values) and it resolves the path being written (links, short names); it opens no other file |
 
+On Windows, the six hooks that name the state folder may also read one registry value, `LongPathsEnabled`, read only, and only when a state folder of more than 232 characters already exists under the full key (it decides whether that folder is kept, see `SECURITY.md`).
+
 **Writes.** The hooks write only under `~/.claude/smartuse/`, never inside your repo. `<key>` is the repository's full path with every character outside `A-Z a-z 0-9 . _ -` replaced by `-`, so two folders with the same name never share a state folder. A path too long for its state folder to hold its files (a whole file path may hold 259 characters on Windows, one name 255 elsewhere) gets a shorter name: its last 40 characters, `-`, and 12 hex digits of a hash of the whole path. 0.3.0 keyed the folder by name alone; nothing writes `projects/<folder name>/` any more, and `/smartuse:receipts` still lists its old runs, marked as shared.
 
 | File | Holds | Written by |

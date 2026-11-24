@@ -1170,7 +1170,7 @@ elif mode == "imports":  # imports <bash-guard.py>: stdlib only, no process or n
                   {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module})
     calls = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"
                     and (n.attr in ("system", "popen", "fork", "startfile") or n.attr.startswith(("exec", "spawn")))})
-    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading", "base64", "hashlib", "pathlib"} and not calls   # hashlib and pathlib: 0.7.0 F3, imported inside the paid path only
+    ok = set(mods) <= {"json", "os", "re", "sys", "time", "stat", "posixpath", "glob", "fnmatch", "datetime", "itertools", "threading", "base64", "hashlib", "pathlib", "winreg"} and not calls   # hashlib and pathlib: 0.7.0 F3, imported inside the paid path only; winreg: 0.7.1 D8, inside fit_key only (a read of LongPathsEnabled)
     print("ok" if ok else "imports %s, process calls %s" % (mods, calls))
 elif mode == "execsilent":   # execsilent <bash-guard.py>: until-done.py's way of reusing RULES prints nothing, and the file has one main() line to cut
     src = rd(sys.argv[2])
