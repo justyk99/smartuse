@@ -98,6 +98,7 @@ Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, 
 - [ ] A `HOME` so long that even the short key leaves no room (a base folder over 140 characters on Windows) still fails to write state; doctor's `state folder:` line is the only sign
 - [ ] On Windows the key rule follows `os.name`, so WSL keys as Linux (its own `HOME`, as before)
 - [ ] A kept state folder of 219 to 232 characters denies every paid run: the claim marker (`paid.<tool_use_id>.<8>.done`, 40 to 49 characters) passes 259 characters, the refusal then points at the adapter instead of the folder, and `/smartuse:doctor`'s probe name is about 17 characters, so it still says writable. Pre-existing; 0.7.1 keeps such a folder (D7a) so no paid count moves
+- [ ] The paid count resets when a state folder is made or deleted (`SECURITY.md`, the state folder's name): a shell `mkdir` of the full-key folder moves a short-key project to a fresh count, as a delete always could. Fix: keep an existing full-key folder only if it already holds `paid-runs.json`, and let `owner-file` deny making, renaming or removing folders under `~/.claude/smartuse/projects/` (flagged by an automated security review after the 0.7.1 push, 2026-11-24)
 - [ ] Skipped test cases print `PASS` and count toward each suite's floor, so a suite that skips cases can still meet its floor
 
 ## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches
