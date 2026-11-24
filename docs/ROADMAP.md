@@ -70,7 +70,7 @@ Rule: more shell parsing waits for a real reported miss. The two items marked "o
 - [ ] Bash `command_segments`: the line-join for a trailing backslash does not check what precedes that backslash, so the line after an escaped backslash, or after a comment that ends in a backslash, can be misread (present before the security batch)
 - [ ] On a report: recognise the remaining ways of handing a command to another shell (review rounds 6–7), each with a linear check and a timing case
 - [ ] On a report: an adversarial pass over PowerShell tokenisation (the round-3 attempt was cut short, so it was never done)
-- [ ] Windows long path: a very long project path pushes the state directory past the 248-character limit and state is silently not written; shorten the key or use the extended-length form, and say so when a write fails
+- [x] Windows long path: a very long project path pushes the state directory past the 248-character limit and state is silently not written; shorten the key or use the extended-length form, and say so when a write fails. Done in 0.7.1 (F1) by shortening the key; the measured limit is a 259-character whole file path, and doctor's `state folder:` line says when a write fails
 - [ ] bash-guard `settings-file`: a settings file staged elsewhere and copied or moved into `.claude/` (`cp /tmp/settings.json .claude/`) is not seen, because the pattern needs `.claude/` written before the file name (0.6.1 the same; found by the 0.7.0 review re-check)
 - [ ] On a report: paid scan, a known runner that cannot be unwrapped cleanly (an option not on its list, or no subcommand after the options) fails closed when the segment holds an interpreter or a script word; folder flags count as a folder change
 
@@ -82,6 +82,20 @@ Released 2026-11-23 (review §8.8, live pass T3 and the F5 phone go done). The r
 - [x] F8 a quote in a `#` comment no longer hides the lines after it (`strip_comments`; fresh-source gate and paid scan, Bash only; released 2026-11-23)
 - [ ] bash-guard: a quoted word that spans lines outside a comment is still read whole on Bash, at or under the heredoc cap (a pinned known limit: `echo it's` then `git push` on the next line is allowed). Fixing it needs quote-aware per-line handling: reading every Bash text line by line turned seven quoted commit-message and PR-body allows into denies. The comment case of this limit is fixed by F8
 - [x] F10 names, docs, counts, version 0.7.0 (`heartbeat.py` knows `paid`; the owner-file reason names the four kinds of file) · [x] F4b step 1, the folder lookup (D-YK13; two Opus re-checks, their findings fixed) · [x] F5 the typed `paid go:`, `test ok` and `paid stop` lines (E1–E4 shapes, plan §8.10; one review fix round) · [x] the review (§8.8): 3 majors and 4 minors fixed, re-check passed, its follow-ups fixed · [x] T3 and the live pass (2026-11-14 to 2026-11-17) · [x] released 2026-11-23
+
+## 0.7.1 — hardening (plan `docs/notes/next-release-plan.md`; approved 2026-11-23; fixes and docs, no new rule, gate, adapter key or option)
+- [x] F1 a long Windows path keeps its state: the key is shortened past the limit E1 measured (a 259-character whole file path); a folder that exists keeps its name
+- [x] F2 the paid refusals say what to do: a typed go says the owner types `test ok`; a state folder that cannot be written is named, with `/smartuse:doctor`
+- [x] F3 the term scan runs on Windows as `CLAUDE.md` types it, with no `PYTHONUTF8`
+- [x] F5 README `## Uninstall` and `## What it reads and writes`, the badge, the CHANGELOG head, the `SECURITY.md` line, both manifests at 0.7.1
+- [ ] T3, the release word, tag (the maintainer's)
+- Not built: F4, see the next release below
+
+## Next release (after 0.7.1) — open items
+- [ ] The ledger race (was 0.7.1 F4): with two Stop hooks at once, a run's ledger line can be missed. Measured on the author's Windows laptop (2026-11-24): 4 rounds with no line in 1,000, none with two lines. Untraced: no failed rename ever saw `pending.json` still there, so a retry while it exists would not have fired. Needs a file-handle trace of the claim (`ledger.py`, the rename of `pending.json`) before any fix
+- [ ] The `runs/` archive name: `runs/<started_at>_<task>.json` can be 186 characters (two names cut at 80), so in a state folder near the Windows limit a closed run may fail to archive, as before 0.7.1. 0.7.1's key rule counts only the fixed file names (49 at most); counting the archive would give ordinary repos new short keys
+- [ ] A `HOME` so long that even the short key leaves no room (a base folder over 140 characters on Windows) still fails to write state; doctor's `state folder:` line is the only sign
+- [ ] On Windows the key rule follows `os.name`, so WSL keys as Linux (its own `HOME`, as before)
 
 ## 0.4.0 also carries the audit's list (`docs/notes/audit-2026-10-22.md`: 42 confirmed, 7 refuted) — in three batches
 - [x] hooks core (worker): the until-done gate holds until done or max_blocks (it yielded after one push per prompt); check runner finds npm/pnpm/yarn on Windows and stops after one "not found" block; state dir keyed by full path (two same-named repos shared one routing.json); UTF-8 stdin; Windows-safe status.json replace; no receipts after a run closed
@@ -101,7 +115,7 @@ Rule 1's open-before-done gate ships in 0.6.0 as the fresh-source gate (opened =
 - [ ] "30 days of receipts": the measured post with the A/B table and the ledger medians
 - [ ] README rewrite for a first-time reader
 - [ ] The owner's personal rules out of the make-prompt template
-- [ ] Uninstall and privacy sections in the README: what the hooks read, what they write, how to remove the state under `~/.claude/smartuse/`
+- [x] Uninstall and privacy sections in the README: what the hooks read, what they write, how to remove the state under `~/.claude/smartuse/` (0.7.1, F5)
 - [ ] Merge the ledger and the receipts into one view
 - [ ] The skills' broad `Bash(bash *)` grants narrowed to the commands each skill runs
 - [ ] The evals CI fix: slash-command cases score 0 in CI on Claude Code 2.1.322, so the evals workflow (`.github/workflows/evals.yml`) is run by hand until this is fixed
