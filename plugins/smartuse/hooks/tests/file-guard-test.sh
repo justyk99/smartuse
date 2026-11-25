@@ -28,7 +28,7 @@ chk deny  '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smart
 chk deny  '{"tool_name":"Write","tool_input":{"file_path":"C:\\Users\\u\\.claude\\smartuse\\q\\... \\interpreter","content":"python"}}' "Write under smartuse through a part of only dots and spaces ('... ' may be read as a name, . or ..: fail closed)"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/docs/.../notes.md","content":"x"}}' "Write a path with a '...' part that names no smartuse file"
 case "$OSTYPE" in   # the path the OS resolves is matched too (links here; Windows short 8.3 names the same way)
-  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)"; echo "PASS (skipped on Windows: no symlinks; a leading //)";;
+  msys*|cygwin*) echo "SKIP the interpreter file through a symlinked folder: Windows, no symlinks"; echo "SKIP the same with a leading //: Windows, no symlinks";;
   *) T=$(mktemp -d); mkdir -p "$T/h/.claude/smartuse"; : > "$T/h/.claude/smartuse/interpreter"; ln -s "$T/h/.claude/smartuse" "$T/lnk"
      chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$T/lnk/interpreter\",\"content\":\"python\"}}" "Write the interpreter file through a symlinked folder (the resolved path is matched)"
      chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/$T/lnk/interpreter\",\"content\":\"python\"}}" "the same with a leading // (a local path on POSIX: resolved too)"; rm -rf "$T";;
@@ -160,7 +160,7 @@ PY
 )
 [ "$CI5" = "True False" ] && echo "PASS F5b the config folder is compared case-insensitively on macOS-like systems and exactly on Linux ($CI5)" || { echo "FAIL F5b case-insensitive folder compare: darwin/linux gave '$CI5', expected 'True False'"; fail=1; }
 case "$OSTYPE" in   # a link to the folder: the resolved path is the settings file
-  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  msys*|cygwin*) echo "SKIP F5b settings.json through a symlinked .claude folder, and a link to a settings file: Windows, no symlinks";;
   *) ln -s "$T5/proj/.claude" "$T5/lnk"; chk deny "$(swj Write "$T5/lnk/settings.json" '{"disableAllHooks":true}')" "F5b Write: settings.json through a symlinked .claude folder"
      ln -s "$T5/proj/.claude/settings.json" "$T5/docs/linked.json"; chk deny "$(swj Write "$T5/docs/linked.json" '{"disableAllHooks":true}')" "F5b Write: a link whose target is a settings file";;
 esac
@@ -205,7 +205,7 @@ chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smart
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/home/u/.claude/smartuse/projects/k1/receipt.agent1.done","content":""}}' "F9 Write the ledger's receipt.<agent>.done marker"
 chk allow '{"tool_name":"Write","tool_input":{"file_path":"/repo/data/events.jsonl","content":"x"}}' "F9 Write a .jsonl outside .claude/projects"
 case "$OSTYPE" in   # a link that resolves to a transcript (the resolved path is matched; Windows has no symlinks here)
-  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  msys*|cygwin*) echo "SKIP F9 Write through a link that resolves to a session transcript: Windows, no symlinks";;
   *) T9=$(mktemp -d); mkdir -p "$T9/h/.claude/projects/p1" "$T9/docs"; : > "$T9/h/.claude/projects/p1/s1.jsonl"; ln -s "$T9/h/.claude/projects/p1/s1.jsonl" "$T9/docs/notes.md"
      chk deny "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$T9/docs/notes.md\",\"content\":\"x\"}}" "F9 Write through a link that resolves to a session transcript"; rm -rf "$T9";;
 esac

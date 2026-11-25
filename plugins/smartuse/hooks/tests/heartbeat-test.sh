@@ -380,7 +380,7 @@ mkdir -p "$D/WindowsApps"; cp "$D/stub/python3" "$D/WindowsApps/python3"; chmod 
 OUT=$(PATH="$D/WindowsApps:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
 [ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias (WindowsApps) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WindowsApps alias: out '$OUT', cached '$P5'"; fail=1; }
 case "$OSTYPE" in
-  msys*|cygwin*) echo "PASS (skipped on Windows: no symlinks)";;
+  msys*|cygwin*) echo "SKIP the launcher never writes through a symlinked cache file: Windows, no symlinks";;
   *) printf 'junk\n' > "$D/target"; rm -f "$CF"; ln -s "$D/target" "$CF"
      OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); T5=""; read -r T5 < "$D/target"
      [ "$OUT" = ran ] && [ "$T5" = junk ] && echo "PASS the launcher never writes through a symlinked cache file" || { echo "FAIL symlinked cache: out '$OUT', target '$T5'"; fail=1; };;
@@ -397,7 +397,7 @@ OUT=$(python=/usr/bin/python3.11 PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$
 [ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an env var named python does not abort the launcher (bash $BASH_VERSION; on bash >= 4 it passes either way, the bash 3.2 check runs on macOS /bin/bash in CI)" || { echo "FAIL env var named python: out '$OUT', rc $RC"; fail=1; }
 # N8: the cache path is a FIFO: reading it is skipped ([ -f ] is false) and the write must not open it (a write to a FIFO with no reader blocks for ever). A watchdog turns a hang into a FAIL.
 case "$OSTYPE" in
-  msys*|cygwin*) echo "PASS (skipped on Windows: no FIFOs)";;
+  msys*|cygwin*) echo "SKIP the launcher never opens a FIFO cache path: Windows, no FIFOs";;
   *) rm -f "$CF"; mkfifo "$CF"; n=0
      (PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" > "$D/fifo.out" 2>&1) & W8=$!
      while kill -0 "$W8" 2>/dev/null && [ $n -lt 100 ]; do sleep 0.2; n=$((n + 1)); done   # up to 20 s
@@ -558,7 +558,7 @@ else:
     print("BAD only in heartbeat.py: %s; only in bash-guard.py: %s" % (sorted(set(mine) - set(theirs)), sorted(set(theirs) - set(mine))))
 PY
 )
-case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; SKIP*) echo "PASS (skipped) F5b KNOWN_RULES vs RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
+case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; SKIP*) echo "SKIP F5b KNOWN_RULES vs RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
 # --- 0.6.1 F6: --guard, the second optional first word of py.sh, on the three guard commands. No interpreter and Strict guards on (the option
 # text is anything but empty / off / false / no / 0) -> a fixed sentence on stderr and exit 2: the call is blocked and Claude is told why.
 # Light (the default, also when no option is set) -> silent exit 0 as before. With an interpreter nothing changes.
@@ -716,7 +716,7 @@ mkdir -p "$K/ro"; cp "$K/hooks/py.sh" "$K/hooks/bash-guard.py" "$K/ro/"; chmod a
 if ! ( : > "$K/ro/.w" ) 2>/dev/null; then
   OUT=$(printf '%s' "$BGEV" | CLAUDE_PLUGIN_OPTION_STRICT=true bash "$K/ro/py.sh" --guard "$K/ro/bash-guard.py" 2>&1; echo "rc=$?")
   case "$OUT" in *deny*"rc=0") echo "PASS D15 R4 a read-only hooks folder: the guard still denies, exit 0, no noise";; *) echo "FAIL D15 R4 read-only folder: $OUT"; fail=1;; esac
-else echo "PASS D15 R4 (skipped: chmod does not block writes here, so a read-only folder cannot be made; the unwritable-path case above stands in)"; fi
+else echo "SKIP D15 R4 (chmod does not block writes here, so a read-only folder cannot be made; the unwritable-path case above stands in)"; fi
 chmod u+w "$K/ro" 2>/dev/null || true
 # the repo ignores the cache folder, and py.sh stays bash 3.2 safe (nothing from bash 4+ was added)
 if [ -f "$H/../../../.gitignore" ]; then grep -qx '__pycache__/' "$H/../../../.gitignore" && echo "PASS D15 .gitignore ignores __pycache__/" || { echo "FAIL D15 .gitignore lacks __pycache__/"; fail=1; }; fi
@@ -741,8 +741,8 @@ longcase() { # $1 = label, $2 = key length
     *) echo "FAIL F1a $1: SessionStart in a project whose key is $2 characters left no state (line: $ln; status.json files: $nf)"; fail=1;; esac
 }
 if [ "$NT" = 1 ]; then
-  if [ $(( 239 - BL2 )) -ge 20 ]; then longcase "a state folder of 240 characters (key $(( 239 - BL2 )), Windows)" $(( 239 - BL2 )); else echo "PASS F1a skipped: HOME is $BL2 characters, too long to build a folder of 240"; fi
-else echo "PASS F1a the 240-character state folder is Windows-only (skipped here: one name may be 255 characters)"; fi
+  if [ $(( 239 - BL2 )) -ge 20 ]; then longcase "a state folder of 240 characters (key $(( 239 - BL2 )), Windows)" $(( 239 - BL2 )); else echo "SKIP F1a HOME is $BL2 characters, too long to build a folder of 240"; fi
+else echo "SKIP F1a the 240-character state folder is Windows-only (one name may be 255 characters)"; fi
 longcase "a key of 300 characters" 300
 rm -rf "$H2/.claude/smartuse/projects"
 [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && echo "PASS F1a the real ~/.claude/smartuse gained no folder from these cases" || { echo "FAIL F1a a test folder reached the real ~/.claude/smartuse/projects"; fail=1; }
@@ -759,8 +759,8 @@ try:
         sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
 except Exception:
     sys.stdout.write("0")' </dev/null)   # the same read as wait-gate-test.sh section e: this machine's long-path switch (read only)
-  if [ "$LPON" = 1 ]; then echo "PASS (skipped) F3 doctor, a kept state folder too long for paid runs: Windows long paths are on here (LongPathsEnabled = 1), the 40-character file is made"
-  elif [ $(( 224 - BL2 )) -lt 20 ]; then echo "PASS (skipped) F3 doctor, a kept state folder of 225 characters: HOME is $BL2 characters, too long to build it"
+  if [ "$LPON" = 1 ]; then echo "SKIP F3 doctor, a kept state folder too long for paid runs: Windows long paths are on here (LongPathsEnabled = 1), the 40-character file is made"
+  elif [ $(( 224 - BL2 )) -lt 20 ]; then echo "SKIP F3 doctor, a kept state folder of 225 characters: HOME is $BL2 characters, too long to build it"
   else
     rm -rf "$H2/.claude/smartuse/projects"
     for L in 225 200; do
@@ -775,6 +775,6 @@ except Exception:
     done
     rm -rf "$H2/.claude/smartuse/projects"
   fi
-else echo "PASS (skipped) F3 doctor, a kept state folder too long for paid runs: Windows only"; fi
+else echo "SKIP F3 doctor, a kept state folder too long for paid runs: Windows only"; fi
 
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

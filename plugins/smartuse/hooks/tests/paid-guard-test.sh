@@ -39,6 +39,7 @@ jstr() { local s=$1; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s/
 fail=0; n=0
 ok() { n=$((n+1)); echo "PASS $1"; }
 ko() { n=$((n+1)); echo "FAIL $1"; fail=1; }
+skip() { n=$((n+1)); echo "SKIP $1"; }   # a case that did not run on this machine: never a PASS, never sets fail
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
 PW=$(wp "$D/proj"); K=$(key "$PW"); P="$HOME/.claude/smartuse/projects/$K"; R="$P/paid-runs.json"   # the state dir of the project every case runs in
 cat > "$D/chk.py" <<'PY'
@@ -537,7 +538,7 @@ allow "a script path that does not exist is no error: with the go it passes" 'py
 case "$PW" in [A-Za-z]:/*)   # Windows: the cwd as Git Bash writes it, /c/Users/... (a JSON string the hook must convert; "/tmp/..." has no drive and stays)
   fresh; mkpaid; U="/$(printf '%s' "${PW:0:1}" | tr 'A-Z' 'a-z')${PW:2}"
   guard 'python render.py' toolu_u "$U"; case "$OUT" in *"$IMP in render.py"*) ok "cwd $U (the Git Bash form) still finds the script: converted by native_path";; *) ko "cwd in the MSYS form $U: '$OUT' '$ERR'";; esac;;
-*) ok "cwd in the Git Bash form: skipped (not a Windows drive path on this OS)";; esac
+*) skip "cwd in the Git Bash form: skipped (not a Windows drive path on this OS)";; esac
 fresh; mkpaid; mkdir -p "$D/elsewhere"
 guard "python $PW/render.py" toolu_v "$(wp "$D/elsewhere")"; case "$OUT" in *"$IMP in render.py"*) ok "an absolute script path is read from any cwd";; *) ko "absolute path: '$OUT' '$ERR'";; esac
 fresh; mkplain plain; printf 'OPENAI_%s=sk-synthetic\n' API_KEY > "$D/proj/.env"
@@ -623,7 +624,7 @@ guard 'python render.py --n 1' toolu_w1
 chmod a-w "$R" "$P" 2>/dev/null   # POSIX: the read-only dir blocks the lock / marker; Windows: the read-only counter file blocks os.replace
 guard 'python render.py --n 1' toolu_w2
 if [ -n "$OUT" ]; then case "$OUT" in *'could not verify the go (the counter is not writable); put it in .claude/smartuse.local.md. Nothing was spent.'*) ok "an unwritable counter -> deny: could not verify the go (the counter is not writable)";; *) ko "unwritable reason: $OUT";; esac
-elif [ "$(id -u 2>/dev/null)" = 0 ]; then ok "an unwritable counter: skipped (root ignores read-only)"; else ko "an unwritable counter let the call through: '$OUT' '$ERR'"; fi
+elif [ "$(id -u 2>/dev/null)" = 0 ]; then skip "an unwritable counter: skipped (root ignores read-only)"; else ko "an unwritable counter let the call through: '$OUT' '$ERR'"; fi
 chmod u+w "$P" "$R" 2>/dev/null
 [ "$(used)" = 1 ] && [ ! -e "$P/paid.toolu_w2.done" ] && ok "... nothing counted (used 1) and the claim marker released" || ko "after the unwritable deny: used $(used), $(ls "$P")"
 allow "writable again: the same call passes" 'python render.py --n 1' toolu_w2
@@ -993,7 +994,7 @@ deny "a script that is listed but not found is never free by path" 'python tests
 case "$PW" in [A-Za-z]:/*)   # a \ in a path needs the Windows file system rules (the same word on POSIX is an escape)
   fresh; mkf4; adapter 'paid_free: tests\\check_*.py\n'
   allow "a \\ in the item and in the script word (Windows spelling)" 'python tests\check_a.py' toolu_p2;;
-*) ok "a \\ in the item and the script word: skipped (not Windows)";; esac
+*) skip "a \\ in the item and the script word: skipped (not Windows)";; esac
 fresh; mkf4; adapter "paid_free: $PW/tests/check_*.py, ../tests/check_*.py, ~/tests/check_*.py\n"
 deny "an absolute, a climbing and a ~ item are ignored: nothing is freed" 'python tests/check_a.py' 'no go from the owner for check_a.py'
 fresh; mkf4; adapter 'paid_free: tests/check_*.py\n'
@@ -1004,7 +1005,7 @@ fresh; mkf4; adapter 'paid_free: tests/*.py\n'
 rm -f "$D/proj/tests/link.py"; ln -s "$D/proj/tools/check_a.py" "$D/proj/tests/link.py" 2>/dev/null
 if [ -L "$D/proj/tests/link.py" ]; then
   deny "a link under tests/ to a paying script elsewhere is not freed (resolved, it is outside the pattern)" 'python tests/link.py' 'no go from the owner for link.py'
-else ok "a link to a paying script: skipped (no link can be made here)"; fi
+else skip "a link to a paying script: skipped (no link can be made here)"; fi
 rm -f "$D/proj/tests/link.py"
 fresh; mkf4; adapter 'paid_scripts: check_p.py\npaid_free: tests/check_*.py\n'
 deny "a script that is also listed in paid_scripts: stays paid" 'python tests/check_p.py' 'check_p.py is in paid_scripts'
@@ -1984,7 +1985,7 @@ fresh; mkpaid
 tdeny "a 6 MB transcript, the go only in the first 2 MB, no adapter go: could not verify the go" big_head 'python render.py --n 1' 'could not verify the go (the transcript is longer than the last 4 MB read and holds no go in them)' toolu_j4
 fresh; mkpaid
 tp e1
-case "$(wp "$D/t/e1.jsonl")" in [A-Za-z]:/*) q=$(wp "$D/t/e1.jsonl"); l=$(printf '%s' "${q:0:1}" | tr 'A-Z' 'a-z'); TPATH="/$l${q:2}"; allow "a /c/Users/... transcript_path (the Git Bash spelling of a Windows path) is read" 'python render.py --n 1' toolu_j5;; *) ok "a /c/... transcript_path: skipped (not a Windows path here)";; esac
+case "$(wp "$D/t/e1.jsonl")" in [A-Za-z]:/*) q=$(wp "$D/t/e1.jsonl"); l=$(printf '%s' "${q:0:1}" | tr 'A-Z' 'a-z'); TPATH="/$l${q:2}"; allow "a /c/Users/... transcript_path (the Git Bash spelling of a Windows path) is read" 'python render.py --n 1' toolu_j5;; *) skip "a /c/... transcript_path: skipped (not a Windows path here)";; esac
 TPATH=
 fresh; mkpaid
 r=$(py "$CW" scandl "$(wp "$G")" "$PW" "$(wp "$D/t/slow.jsonl")" </dev/null 2>&1)
@@ -2108,7 +2109,7 @@ mklong() { # $1 = a key length -> makes a project folder (two parts, so none pas
   a=$(printf '%*s' "$a" ''); b=$(printf '%*s' "$b" ''); mkdir -p "$pre/${a// /a}/${b// /b}" && printf '%s' "$pre/${a// /a}/${b// /b}"
 }
 if [ "$NT" = 1 ]; then LK=$(( 239 - BL )); else LK=300; fi
-if [ "$LK" -lt 60 ]; then ok "39 skipped: HOME is $BL characters, too long to build a state folder of 240"; else
+if [ "$LK" -lt 60 ]; then skip "39 skipped: HOME is $BL characters, too long to build a state folder of 240"; else
   rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW")
   fresh; mkdir -p "$LP/.claude"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
   [ "${#LKEY}" = "$LK" ] && ok "39 the project folder's key is $LK characters (state folder $(( BL + 1 + LK )) on this HOME)" || ko "39 the key is ${#LKEY} characters, wanted $LK"
@@ -2131,9 +2132,9 @@ fi
 # folder yet: a file would not fit with room to spare). Run 1 is counted in the short folder. A shell then makes the full-key folder (a file fits in it, so
 # 0.7.1's rule moved to it and the count restarted at used 1). Now the folder that already holds the counter wins: run 2 shows used 2 in the short folder, and
 # the made folder stays empty. Windows only: elsewhere a short key arises past 255 characters, where its full-key folder cannot be made.
-if [ "$NT" != 1 ]; then ok "39b skipped here (not Windows: no short key can meet a full-key folder that can be made)"; else
+if [ "$NT" != 1 ]; then skip "39b skipped here (not Windows: no short key can meet a full-key folder that can be made)"; else
   LK=$(( 219 - BL ))
-  if [ "$LK" -lt 60 ]; then ok "39b skipped: HOME is $BL characters, too long to build a state folder of 220"; else
+  if [ "$LK" -lt 60 ]; then skip "39b skipped: HOME is $BL characters, too long to build a state folder of 220"; else
     rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW")
     fresh; mkdir -p "$LP/.claude"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
     [ "${#LKEY}" = "$LK" ] && ok "39b the project folder's key is $LK characters (state folder $(( BL + 1 + LK )) on this HOME)" || ko "39b the key is ${#LKEY} characters, wanted $LK"
@@ -2154,7 +2155,7 @@ fi
 # of 26 characters fits in it (up to 232), but a real 30-character tool_use_id makes the claim marker paid.<id>.done 40 characters: in a folder of 219 to 232 characters,
 # with Windows long paths off, that marker cannot be made, so no paid run was ever counted there, and the reason sent the owner to the adapter, which is not the fix. Now
 # the reason says the folder's path is too long and names /smartuse:doctor; nothing is counted, no marker is left. Windows only, and only with LongPathsEnabled = 0.
-if [ "$NT" != 1 ]; then ok "39c skipped here (not Windows: the 259-character path limit is Windows-only)"; else
+if [ "$NT" != 1 ]; then skip "39c skipped here (not Windows: the 259-character path limit is Windows-only)"; else
   LPON=$(py -c 'import sys
 try:
     import winreg
@@ -2163,8 +2164,8 @@ try:
 except Exception:
     sys.stdout.write("0")' </dev/null)   # the same read as wait-gate-test.sh section e: this machine's long-path switch (read only)
   LK=$(( 224 - BL )); LID=toolu_01ABCDEFGHIJKLMNOPQRSTUV
-  if [ "$LPON" = 1 ]; then ok "39c skipped: Windows long paths are on here (LongPathsEnabled = 1), so a marker in a 225-character folder is made; the deny text is the only proof"
-  elif [ "$LK" -lt 60 ]; then ok "39c skipped: HOME is $BL characters, too long to build a state folder of 225"; else
+  if [ "$LPON" = 1 ]; then skip "39c skipped: Windows long paths are on here (LongPathsEnabled = 1), so a marker in a 225-character folder is made; the deny text is the only proof"
+  elif [ "$LK" -lt 60 ]; then skip "39c skipped: HOME is $BL characters, too long to build a state folder of 225"; else
     rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); LF="$HOME/.claude/smartuse/projects/$LKEY"
     fresh; mkdir -p "$LP/.claude" "$LF"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
     [ "${#LID}" = 30 ] && [ "${#LKEY}" = "$LK" ] && ok "39c the kept state folder is $(( BL + 1 + LK )) characters, the tool_use_id 30 (marker 40)" || ko "39c key ${#LKEY} (wanted $LK), id ${#LID} (wanted 30)"
@@ -2173,7 +2174,7 @@ except Exception:
     case "$OUT" in *'smartuse.local.md'*) ko "39c the reason must not send the owner to the adapter: $OUT";; "") ko "39c no deny at all";; *) ok "39c ... and does not send the owner to smartuse.local.md (the adapter is not the fix)";; esac
     [ -z "$(ls -A "$LF" 2>/dev/null)" ] && ok "39c nothing counted and no claim marker or lock left in the folder" || ko "39c the folder holds: $(ls -A "$LF" 2>&1 | tr '\n' ' ')"
     rm -rf "$D/lp"; LK=$(( 209 - BL ))   # pin: a kept folder of 210 characters still counts (the marker path is 251)
-    if [ "$LK" -lt 60 ]; then ok "39c pin skipped: HOME is $BL characters, too long to build a state folder of 210"; else
+    if [ "$LK" -lt 60 ]; then skip "39c pin skipped: HOME is $BL characters, too long to build a state folder of 210"; else
       LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); LF="$HOME/.claude/smartuse/projects/$LKEY"
       fresh; mkdir -p "$LP/.claude" "$LF"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
       guard 'python render.py --images 1' "$LID" "$LPW"

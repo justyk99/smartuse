@@ -29,6 +29,7 @@ key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pa
 fail=0
 ok() { echo "PASS $1"; }
 ko() { echo "FAIL $1"; fail=1; }
+skip() { echo "SKIP $1"; }   # a case that did not run on this machine: never a PASS, never sets fail
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
 PW=$(wp "$D/proj"); K=$(key "$PW"); P="$HOME/.claude/smartuse/projects/$K"; W="$P/wait.json"; M="$P/wait-block.json"   # the state dir of the project every case runs in; each case starts with it removed
 PL=$(wp "$(cd "$H/.." && pwd -P)")   # the plugin dir as the hook spells it in the command it recommends: absolute, resolved, forward slashes
@@ -1291,7 +1292,7 @@ if [ "$NT" = 1 ]; then LONGK=$(( 239 - BL )); FULLEDGE=$(( 194 - BL - 1 )); else
 # b: the same folder for a short, a long and a 300-character path
 SHORTP=$(wp "$D/keys/plain"); [ -d "$D/keys/plain" ] || SHORTP=$(wp "$D/proj")
 same6 "b short path" "$SHORTP"
-if [ "$LONGK" -ge 20 ]; then same6 "b long path (key $LONGK, state folder $(( BL + 1 + LONGK )) characters)" "$(lp "$LONGK")"; else ok "b long path skipped: HOME is $BL characters, too long to build a folder of 240"; fi
+if [ "$LONGK" -ge 20 ]; then same6 "b long path (key $LONGK, state folder $(( BL + 1 + LONGK )) characters)" "$(lp "$LONGK")"; else skip "b long path: HOME is $BL characters, too long to build a folder of 240"; fi
 same6 "b 300-character path" "$(lp 300)"
 # c: a short path, and a path at the edge of the limit, give today's key byte for byte (the suite's key() helper); one character more gives the short key
 for p in "$SHORTP" "$(wp "$D/keys/with space.v1/x y")" "$(lp "$FULLEDGE")"; do
@@ -1320,7 +1321,7 @@ except Exception:
       [ "$after" != "$full" ] && [ -f "$PROJ10/$after/wait.json" ] && [ ! -f "$PROJ10/$full/wait.json" ] && ok "e an existing folder of $L characters (no file fits in it) is left behind empty, the short key is used" || ko "e folder of $L: ledger.py says '$after', wait.json: short $([ -f "$PROJ10/$after/wait.json" ] && echo yes || echo no), full $([ -f "$PROJ10/$full/wait.json" ] && echo yes || echo no)"
     fi
   done
-else ok "e skipped here (not Windows: only the 255-character name limit applies and an existing folder cannot be longer than it; fit_key's rules 2 and 3 are in case f)"; fi
+else skip "e (not Windows: only the 255-character name limit applies and an existing folder cannot be longer than it; fit_key's rules 2 and 3 are in case f)"; fi
 # e2: 0.7.2 F2 (D-YK19): a project on the short key has a paid counter there; a shell then makes its full-key folder (220 characters: a file fits in it). The counter wins:
 # every hook, ledger.py and bash-guard included, still names the short folder, and the made folder stays empty (before, they moved to it and the paid count restarted)
 same6k() { # $1 = label, $2 = a project path whose full-key folder is made and whose short-key folder holds paid-runs.json
@@ -1336,7 +1337,7 @@ same6k() { # $1 = label, $2 = a project path whose full-key folder is made and w
 }
 if [ "$NT" = 1 ]; then
   same6k "e2 state folder of 220 characters, its full-key folder made, a paid counter in the short-key folder" "$(lp $(( 220 - BL - 1 )))"
-else ok "e2 skipped here (not Windows: a short key arises only past 255 characters, where its full-key folder cannot be made; the rule itself is in case f g5)"; fi
+else skip "e2 (not Windows: a short key arises only past 255 characters, where its full-key folder cannot be made; the rule itself is in case f g5)"; fi
 rm -rf "$PROJ10"
 # f: fit_key is one helper, byte for byte in the six hooks (read with ast, no hook imported), and agrees with the rule on a table, for nt True and False
 cat > "$D/fk.py" <<'PY'
@@ -1350,9 +1351,18 @@ for f in FILES:
     fns = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "fit_key"]
     if len(fns) != 1:
         print("%s: %d module-level fit_key (wanted 1)" % (f, len(fns))); sys.exit()
-    for n in tree.body:
-        if isinstance(n, (ast.Import, ast.ImportFrom)) and "hashlib" in ast.dump(n):
-            print("%s: hashlib imported at the top level" % f); sys.exit()
+    # 0.7.2 F4: every import in the whole module, module-level try/if and nested blocks included, not only the top-level statements.
+    # One naming hashlib must sit inside a function; one naming winreg must sit inside fit_key. Anything else crashes the hook on Linux CI.
+    def walk(node, anc):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.Import, ast.ImportFrom)):
+                roots = {a.name.split(".")[0] for a in ch.names} if isinstance(ch, ast.Import) else {(ch.module or "").split(".")[0]}
+                if "hashlib" in roots and not any(isinstance(a, (ast.FunctionDef, ast.AsyncFunctionDef)) for a in anc):
+                    print("%s: hashlib imported outside a function (line %d)" % (f, ch.lineno)); sys.exit()
+                if "winreg" in roots and not any(a is fns[0] for a in anc):
+                    print("%s: winreg imported outside fit_key (line %d)" % (f, ch.lineno)); sys.exit()
+            walk(ch, anc + [ch])
+    walk(tree, [tree])
     if not any(isinstance(n, ast.Import) and any(a.name == "hashlib" for a in n.names) for n in ast.walk(fns[0])):
         print("%s: fit_key does not import hashlib inside itself" % f); sys.exit()
     srcs[f] = ast.get_source_segment(text, fns[0])
