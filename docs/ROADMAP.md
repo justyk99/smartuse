@@ -100,7 +100,7 @@ Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, 
 - [x] F4 a test that did not run says SKIP: not counted as PASS, shown per suite by `all.sh`; the `fit_key` import check reads the whole module
 - [x] F5 docs, counts (badge 4376 hook + 36 bench, PASS only) and version: README, CONTRIBUTING, SECURITY, CHANGELOG, both manifests at 0.7.2
 - [x] E1 the ledger drop, traced (2026-11-25): a sharing violation on the claimed file; 3 drops in 1,000, every one in that order, and a held delete handle reproduces it
-- [ ] T3, the release word, tag (the maintainer's)
+- [x] T3 (2026-11-25) · [x] released 2026-11-25 · [ ] tag (the maintainer's)
 
 ## Next release (after 0.7.2) — open items
 - [ ] Doctor does not name one layout the paid check refuses: a counter in a full-key folder over 232 characters after `LongPathsEnabled` is switched off (the project moves to a fresh short folder; the lock check refuses rather than restart the count). Doctor should print the two-folder FAIL line for it too

@@ -1,13 +1,13 @@
 STATUS: smartuse · updated 2026-11-25
 FINISH LINE: smartuse 1.0, driven by the plan in docs/ROADMAP.md
-Done when (assumed from the old Next list): 1 0.6.1 released (done 2026-11-11) 2 0.7.0 paid-call guard released (done 2026-11-23) 3 0.7.1 hardening released (done 2026-11-24) 4 the 1.0 items on docs/ROADMAP.md closed
-Now: 0.7.2 built, reviewed and tested on the local branch `fix-0.7.2`, not pushed. Public main = 0.7.1 (`d0f25c4`). Merged: F1 the scan reads every line (`711bcb0`), F2 a made folder keeps the paid count (`7c958f7`), F3 a too-long kept folder is named (`076dcdf`), F4 SKIP (`755025b`), F5 docs and version (`6a110f0`), E1 the ledger drop traced (`e386cb4`), review fix rounds A–D (`7e524e5`, `799b369`, `decc28c`, `8659aaa`: two counters deny, every reading masked, binary blobs and authors scanned, the lock re-check). Final T2: 12 of 12 (PASS + SKIP: run 1340 · file-guard 103+4 · ledger 46 · until-done 50 · watch 63 · heartbeat 213+3 · wait-gate 211 · recall 197+6 · fresh-gate 756+2 · paid 1397+1 · ab · term-scan). T3: both validates pass, the bare publish scan 0 private hits (5 patterns, messages, paths and authors included) and the per-line re-check 0, F1 interactive PASS, F4 SKIP lines read; F2/F3 interactive by their suite cases (synthetic, the adapter line is the owner's). Reviews: fresh + security + re-check, every major closed. Plan docs/notes/0.7.2-plan.md (§10 results, §12 the fix rounds D9–D15).
-Next: the release (brief docs/notes/0.7.2-brief.md): CHANGELOG date, fast-forward main to `fix-0.7.2`, push on the maintainer's word.
-NEEDS YOU (2): 1 the release word for 0.7.2 · 2 leftovers you delete (the permission system refused Claude): `.claude/worktrees/pg7-scratch/`, the old worktrees below
+Done when (assumed from the old Next list): 1 0.6.1 released (done 2026-11-11) 2 0.7.0 paid-call guard released (done 2026-11-23) 3 0.7.1 hardening released (done 2026-11-24) 4 0.7.2 the scan reads every line released (done 2026-11-25) 5 the 1.0 items on docs/ROADMAP.md closed
+Now: 0.7.2 released 2026-11-25: main fast-forwarded to `fix-0.7.2` and pushed. F1 the scan reads every line, F2 a made folder keeps the paid count, F3 a too-long kept folder is named, F4 SKIP, F5 docs and version, E1 the ledger drop traced, review fix rounds A–D. Final T2: 12 of 12. Bare publish scan 0 private hits. Plan docs/notes/0.7.2-plan.md (§10 results, §12 the fix rounds D9–D15).
+Next: the next release picks from ROADMAP "Next release (after 0.7.2)": the ledger fix first (its red case is E1b, the fix shape is in ROADMAP).
+NEEDS YOU (2): 1 a tag for 0.7.2 only if you want one · 2 leftovers you delete (the permission system refused Claude): `.claude/worktrees/pg7-scratch/`, the old worktrees below
 ## Last 3 cards
+- 2026-11-25 0.7.2 released: CHANGELOG dated, stale-wording grep clean, bare scan 0 private hits, main fast-forwarded and pushed
 - 2026-11-25 0.7.2 reviews: the security review found that a folder copy could plant a counter (D9: two counters deny, checked again under the lock) and the scan could print a term in another encoding (D10, D13); fixed in four rounds, the re-check closed all
 - 2026-11-25 0.7.2 E1: the ledger drop is a sharing violation on the claimed file (3 in 1,000; a held delete handle reproduces it); fix shape in ROADMAP
-- 2026-11-24 0.7.1 released: CHANGELOG dated, stale-wording grep clean, bare scan + per-line re-check 0 private hits, main fast-forwarded and pushed
 ## Unknowns
 - low, traced (0.7.2 E1): the ledger race drops a line about 3 in 1000 on Windows → the fix in the next release (ROADMAP)
 - accepted (SECURITY.md): a delete of the state folder, a copy over the live counter, or a permission change on it resets the paid count: deliberate tampering with the owner's own state
