@@ -1273,7 +1273,8 @@ fire() { # $1 = hook (heartbeat|recall|wait-gate|until-done), $2 = a project pat
   printf '%s' "$ev" | CLAUDE_PROJECT_DIR="$pw" py "$H/$hook.py" > "$D/o10b" 2>&1
 }
 wrote() { # $1 = hook, $2 = a project path -> the folder name where the hook left its file ("" when nowhere); the state is reset first
-  local d n; rm -rf "$PROJ10"; fire "$1" "$2"
+  local d n; rm -rf "$PROJ10"; if [ -n "${PRESET_SHORT:-}" ]; then mkdir -p "$PROJ10/$PRESET_FULL" "$PROJ10/$PRESET_SHORT" && printf '{}' > "$PROJ10/$PRESET_SHORT/paid-runs.json"; fi   # 0.7.2 F2: a made full-key folder and a short-key folder holding the paid counter, put back before every hook
+  fire "$1" "$2"
   for d in "$PROJ10"/*/; do
     if [ -f "${d}$FILE" ]; then
       if [ "$1" = until-done ] && ! grep -q '"block"' "$D/o10b"; then continue; fi   # until-done proves its folder by reading routing.json there and blocking
@@ -1320,6 +1321,22 @@ except Exception:
     fi
   done
 else ok "e skipped here (not Windows: only the 255-character name limit applies and an existing folder cannot be longer than it; fit_key's rules 2 and 3 are in case f)"; fi
+# e2: 0.7.2 F2 (D-YK19): a project on the short key has a paid counter there; a shell then makes its full-key folder (220 characters: a file fits in it). The counter wins:
+# every hook, ledger.py and bash-guard included, still names the short folder, and the made folder stays empty (before, they moved to it and the paid count restarted)
+same6k() { # $1 = label, $2 = a project path whose full-key folder is made and whose short-key folder holds paid-runs.json
+  local want h got bad=""; PRESET_FULL=$(key "$2")
+  PRESET_SHORT=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$PRESET_FULL" </dev/null)
+  want=$PRESET_SHORT
+  rm -rf "$PROJ10"; mkdir -p "$PROJ10/$PRESET_FULL" "$PROJ10/$PRESET_SHORT" && printf '{}' > "$PROJ10/$PRESET_SHORT/paid-runs.json"
+  [ "$(fname "$2")" = "$want" ] || bad="$bad ledger:'$(fname "$2")'"
+  for h in heartbeat recall wait-gate until-done; do got=$(wrote "$h" "$2"); [ "$got" = "$want" ] || bad="$bad $h:'$got'"; done
+  [ -z "$(ls -A "$PROJ10/$PRESET_FULL" 2>/dev/null)" ] || bad="$bad full-folder-not-empty"
+  PRESET_SHORT=; PRESET_FULL=
+  [ -z "$bad" ] && ok "$1: ledger.py, heartbeat.py, recall.py, until-done.py and wait-gate.py all name the short folder ($want), and the made full-key folder stays empty" || ko "$1: wanted '$want', but:$bad"
+}
+if [ "$NT" = 1 ]; then
+  same6k "e2 state folder of 220 characters, its full-key folder made, a paid counter in the short-key folder" "$(lp $(( 220 - BL - 1 )))"
+else ok "e2 skipped here (not Windows: a short key arises only past 255 characters, where its full-key folder cannot be made; the rule itself is in case f g5)"; fi
 rm -rf "$PROJ10"
 # f: fit_key is one helper, byte for byte in the six hooks (read with ast, no hook imported), and agrees with the rule on a table, for nt True and False
 cat > "$D/fk.py" <<'PY'
@@ -1440,6 +1457,67 @@ try:
         bad.append("a short key must come back as itself with no sha1 run (sha1 calls: %d)" % n_full)
     if got_short != short_of("t" * 300) or n_short != 1:
         bad.append("a long key must come back shortened by one sha1 run (calls: %d)" % n_short)
+    # 0.7.2 F2 (D-YK19): past the length test, an existing full-key folder is kept unless the short-key folder already holds paid-runs.json (the counter
+    # wins: a made full folder must not restart a paid count). The short folder and its counter are real files in the temp base; a folder too long to make
+    # is faked through os.path.isdir as above; the registry is the fake winreg.
+    def counter_for(full):      # a short-key folder holding the paid counter, as the hook leaves it
+        d = os.path.join(base, short_of(full)); os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "paid-runs.json"), "w").write("{}")
+    def g_case(label, nt, value, full, made, fake, counter, expect):
+        reg.value, reg.boom, reg.reads = value, False, 0
+        if made: os.makedirs(os.path.join(base, full), exist_ok=True)
+        if counter: counter_for(full)
+        if fake: exists_only(base + os.sep + full)
+        try:
+            got = fit_key(full, base, nt)
+        finally:
+            os.path.isdir = real_isdir
+        exp = full if expect == "full" else short_of(full)
+        if got != exp:
+            bad.append("%s: got %r wanted the %s key" % (label, got[:30] + "..." + str(len(got)), expect))
+        reg.value = 0
+    g_case("g1 nt, existing folder at 220 + a short folder with a counter", True, 0, full_of(220, "q"), True, False, True, "short")
+    g_case("g2 nt, existing folder at 220, no counter beside it", True, 0, full_of(220, "r"), True, False, False, "full")
+    g_case("g2b nt, existing folder at 232, no counter beside it", True, 0, full_of(232, "R"), True, False, False, "full")
+    g_case("g3 nt, long paths on, existing folder at 248 + a counter", True, 1, full_of(248, "s"), False, True, True, "short")
+    g_case("g3b nt, long paths on, existing folder at 248, no counter", True, 1, full_of(248, "S"), False, True, False, "full")
+    g_case("g4 nt, no full folder + a counter", True, 0, full_of(220, "t"), False, False, True, "short")
+    g_case("g4b not nt, no full folder + a counter", False, 0, "v" * 300, False, False, True, "short")
+    g_case("g5 not nt, a 300-character folder (faked) + a counter", False, 0, "w" * 300, False, True, True, "short")
+    g_case("g5b not nt, a 300-character folder (faked), no counter", False, 0, "W" * 300, False, True, False, "full")
+    g_case("g5c not nt, a 256-character key whose folder exists (faked) + a counter", False, 0, "y" * 256, False, True, True, "short")
+    g_case("g5d nt, a counter for a path that fits: the full key (not long: the counter is not looked at)", True, 0, full_of(194, "z"), True, False, True, "full")
+    # a counter beside a folder that is not a file named paid-runs.json (a folder of that name) does not count
+    dd = os.path.join(base, short_of(full_of(220, "x")), "paid-runs.json"); os.makedirs(dd, exist_ok=True)
+    g_case("g1b nt, existing folder at 220 + a FOLDER named paid-runs.json in the short folder (no counter)", True, 0, full_of(220, "x"), True, False, False, "full")
+    # g6: a short key whose folder exists makes no isdir, no isfile and no sha1 call (today it stats on every call; the common path stays free)
+    isdir_calls, isfile_calls, sha_calls = [], [], []
+    real_isfile = os.path.isfile
+    os.path.isdir = lambda p: (isdir_calls.append(p), real_isdir(p))[1]
+    os.path.isfile = lambda p: (isfile_calls.append(p), real_isfile(p))[1]
+    stub2 = types.ModuleType("hashlib"); stub2.sha1 = lambda b: (sha_calls.append(1), real_hashlib.sha1(b))[1]
+    sys.modules["hashlib"] = stub2
+    try:
+        k20 = "C--p-" + "g" * 15
+        os.makedirs(os.path.join(base, k20), exist_ok=True)
+        got6 = fit_key(k20, base, True); got6b = fit_key(k20, base, False)
+        n6 = (len(isdir_calls), len(isfile_calls), len(sha_calls))
+        # g7: a kept folder (long key, folder exists, no counter) costs one sha1 run; the answer is the full key
+        kk = full_of(220, "k"); os.makedirs(os.path.join(base, kk), exist_ok=True)
+        del sha_calls[:]
+        got7 = fit_key(kk, base, True); n7 = len(sha_calls)
+        # g8: a read that raises (isfile) never escapes: the full key comes back
+        def boom_isfile(p): raise OSError("stat refused")
+        os.path.isfile = boom_isfile
+        got8 = fit_key(kk, base, True)
+    finally:
+        os.path.isdir = real_isdir; os.path.isfile = real_isfile; sys.modules["hashlib"] = real_hashlib
+    if got6 != k20 or got6b != k20 or n6 != (0, 0, 0):
+        bad.append("g6 a 20-character key whose folder exists: got %r, isdir/isfile/sha1 calls %r (wanted none)" % (got6, n6))
+    if got7 != kk or n7 != 1:
+        bad.append("g7 a kept folder: got the full key %s, sha1 runs %d (wanted 1)" % (got7 == kk, n7))
+    if got8 != kk:
+        bad.append("g8 isfile raises: fit_key must return the full key, got %r" % got8[:30])
     # the short key never starts with "-": an all-dash tail leaves the 12 hex alone
     dk = "u" * 200 + "-" * 60
     for nt in (True, False):
@@ -1454,7 +1532,7 @@ finally:
     else: sys.modules["winreg"] = real_winreg
     shutil.rmtree(tmp, ignore_errors=True)
 PY
-r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233); D8: with a fake winreg, Windows long paths on keeps an existing folder of 248 and off, or a read that raises, gives the short key; the switch is read only when the length test fails; no hashlib on the common path; a short key never starts with -" || ko "f fit_key: $r"
+r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233); D8: with a fake winreg, Windows long paths on keeps an existing folder of 248 and off, or a read that raises, gives the short key; the switch is read only when the length test fails; no hashlib on the common path; a short key never starts with -; 0.7.2 F2 g1-g8: a short-key folder holding paid-runs.json wins over an existing full-key folder, on Windows (also with long paths on) and elsewhere, and a kept folder costs one sha1 and no counter is looked for on the common path" || ko "f fit_key: $r"
 [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && ok "F1: the real ~/.claude/smartuse gained no folder from these cases (the temp HOME took them all)" || ko "F1: a test folder reached the real ~/.claude/smartuse/projects"
 
 # ===== 11. what the owner's session gets: the Stop-hook JSON until-done.py prints; the hook is registered

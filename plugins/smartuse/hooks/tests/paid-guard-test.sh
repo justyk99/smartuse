@@ -2127,6 +2127,29 @@ if [ "$LK" -lt 60 ]; then ok "39 skipped: HOME is $BL characters, too long to bu
   [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39 the real ~/.claude/smartuse gained no folder from these cases" || ko "39 a test folder reached the real ~/.claude/smartuse/projects"
   rm -rf "$D/lp"
 fi
+# ===== 39b. 0.7.2 F2 (D-YK19), making a state folder keeps the paid count. A project whose state folder is 220 characters is on the short key (no full-key
+# folder yet: a file would not fit with room to spare). Run 1 is counted in the short folder. A shell then makes the full-key folder (a file fits in it, so
+# 0.7.1's rule moved to it and the count restarted at used 1). Now the folder that already holds the counter wins: run 2 shows used 2 in the short folder, and
+# the made folder stays empty. Windows only: elsewhere a short key arises past 255 characters, where its full-key folder cannot be made.
+if [ "$NT" != 1 ]; then ok "39b skipped here (not Windows: no short key can meet a full-key folder that can be made)"; else
+  LK=$(( 219 - BL ))
+  if [ "$LK" -lt 60 ]; then ok "39b skipped: HOME is $BL characters, too long to build a state folder of 220"; else
+    rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW")
+    fresh; mkdir -p "$LP/.claude"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+    [ "${#LKEY}" = "$LK" ] && ok "39b the project folder's key is $LK characters (state folder $(( BL + 1 + LK )) on this HOME)" || ko "39b the key is ${#LKEY} characters, wanted $LK"
+    guard 'python render.py --images 1' toolu_M1 "$LPW"
+    LS=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/ledger.py" --state-dir </dev/null); LS=${LS%$'\r'}; LN=${LS##*[/\\]}; LR="$HOME/.claude/smartuse/projects/$LN/paid-runs.json"
+    [ -z "$OUT" ] && [ -z "$ERR" ] && [ -n "$LN" ] && [ "$LN" != "$LKEY" ] && [ -f "$LR" ] && [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 1 ] && ok "39b run 1 is counted in the short-key folder ($LN): used 1" || ko "39b run 1: stdout '${OUT:0:300}' stderr '$ERR' short folder '$LN', counter: $(cat "$LR" 2>&1)"
+    mkdir -p "$HOME/.claude/smartuse/projects/$LKEY"
+    guard 'python render.py --images 1' toolu_M2 "$LPW"
+    LS2=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/ledger.py" --state-dir </dev/null); LS2=${LS2%$'\r'}; LN2=${LS2##*[/\\]}
+    [ "$LN2" = "$LN" ] && ok "39b after the shell made the full-key folder, ledger.py --state-dir still names the short folder" || ko "39b ledger.py now names '$LN2' (was '$LN')"
+    [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 2 ] && ok "39b run 2 shows used 2 in the short-key folder: the count survived" || ko "39b run 2: stdout '${OUT:0:300}' stderr '$ERR' short counter: $(cat "$LR" 2>&1) full-key folder: $(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>&1 | tr '\n' ' ')"
+    [ -z "$(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>/dev/null)" ] && ok "39b the full-key folder the shell made stays empty (no counter, no marker moved into it)" || ko "39b the full-key folder holds: $(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>&1 | tr '\n' ' ')"
+    [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39b the real ~/.claude/smartuse gained no folder from these cases" || ko "39b a test folder reached the real ~/.claude/smartuse/projects"
+    rm -rf "$D/lp"
+  fi
+fi
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
