@@ -747,4 +747,34 @@ longcase "a key of 300 characters" 300
 rm -rf "$H2/.claude/smartuse/projects"
 [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && echo "PASS F1a the real ~/.claude/smartuse gained no folder from these cases" || { echo "FAIL F1a a test folder reached the real ~/.claude/smartuse/projects"; fail=1; }
 
+# ===== 0.7.2 F3 (D-YK20): doctor tells a kept state folder that is too long for paid runs. A full-key folder that already exists is kept while a 26-character file fits in
+# it (up to 232 characters), but the claim marker of a paid run is 40 characters (paid.<30-character tool_use_id>.done): in a kept folder of 219 to 232 characters, with
+# Windows long paths off, it cannot be made, so doctor's short throwaway file saying "writable" was not the truth. A second throwaway of 40 characters now decides. Windows
+# only, and only with LongPathsEnabled = 0. In a kept folder of 200 characters doctor still says writable, and doctor never fills the folder.
+if [ "$NT" = 1 ]; then
+  LPON=$(py -c 'import sys
+try:
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+        sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
+except Exception:
+    sys.stdout.write("0")' </dev/null)   # the same read as wait-gate-test.sh section e: this machine's long-path switch (read only)
+  if [ "$LPON" = 1 ]; then echo "PASS (skipped) F3 doctor, a kept state folder too long for paid runs: Windows long paths are on here (LongPathsEnabled = 1), the 40-character file is made"
+  elif [ $(( 224 - BL2 )) -lt 20 ]; then echo "PASS (skipped) F3 doctor, a kept state folder of 225 characters: HOME is $BL2 characters, too long to build it"
+  else
+    rm -rf "$H2/.claude/smartuse/projects"
+    for L in 225 200; do
+      pw=$(lpath $(( L - 1 - BL2 ))); fk=$(key "$pw"); sf="$H2/.claude/smartuse/projects/$fk"; mkdir -p "$sf"
+      OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+      if [ "$L" = 225 ]; then
+        case "$OUT" in *"state folder: FAIL · paid runs cannot be counted here: its path is 225 characters"*"Windows long paths"*"delete"*"paid-runs.json"*) [ "$N" -le 8 ] && echo "PASS F3 doctor, a kept state folder of 225 characters (long paths off): FAIL with its length and both ways out ($N lines)" || { echo "FAIL F3 doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL F3 doctor, a kept state folder of 225 characters: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+      else
+        case "$OUT" in *"state folder: writable"*) echo "PASS F3 doctor, a kept state folder of 200 characters: still writable";; *) echo "FAIL F3 doctor, a kept state folder of 200 characters: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+      fi
+      [ -z "$(ls -A "$sf" 2>/dev/null)" ] && echo "PASS F3 doctor ($L): its throwaway files are gone, the folder is left empty" || { echo "FAIL F3 doctor ($L) left files: $(ls -A "$sf" | tr '\n' ' ')"; fail=1; }
+    done
+    rm -rf "$H2/.claude/smartuse/projects"
+  fi
+else echo "PASS (skipped) F3 doctor, a kept state folder too long for paid runs: Windows only"; fi
+
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

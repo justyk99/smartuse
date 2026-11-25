@@ -594,6 +594,9 @@ def cli_sdir():
     return state_dir(project_dir())
 
 
+LONG_FOLDER = "path too long"   # can_write's `why` when the short throwaway works but the 40-character one (a paid run's claim marker) does not (0.7.2 F3)
+
+
 def can_write(d):
     """(ok, why): can a file be created in the state folder d, or, while d does not exist yet, in the nearest folder above it that does (what the
     hooks' mkdir -p needs)? A throwaway file is made there and removed at once; a folder that is really a file reads as "not a folder"."""
@@ -607,6 +610,14 @@ def can_write(d):
         with open(probe, "w", encoding="utf-8") as fh:
             fh.write("x")
         os.remove(probe)
+        if p == str(d) and os.name == "nt":   # 0.7.2 F3: the folder exists. A paid run keeps a 40-character claim marker there (paid.<30-character id>.done): a second throwaway of that length
+            probe = os.path.join(p, (f".doctor-{os.getpid()}-" + "x" * 40)[:36] + ".tmp")
+            try:
+                with open(probe, "w", encoding="utf-8") as fh:
+                    fh.write("x")
+                os.remove(probe)
+            except Exception:
+                return False, LONG_FOLDER
         return True, ""
     except Exception as e:
         return False, getattr(e, "strerror", None) or type(e).__name__
@@ -645,6 +656,7 @@ def doctor_lines(sdir, now=None):
         out.append("level: unknown · no options recorded for this session: restart Claude Code")
     ok, why = can_write(sdir)
     out.append("state folder: writable" if ok
+               else f"state folder: FAIL · paid runs cannot be counted here: its path is {len(str(sdir))} characters, too long for the 40-character files a paid run keeps in it: turn on Windows long paths, or delete this folder so smartuse uses a short name (only if it holds no paid-runs.json; its old receipts go with it)" if why == LONG_FOLDER
                else f"state folder: FAIL · cannot be written ({why}): the heartbeat cannot save its state; check that ~/.claude/smartuse is a folder you may write to")
     return out
 
