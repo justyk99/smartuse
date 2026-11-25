@@ -678,10 +678,11 @@ def doctor_lines(sdir, now=None):
         out.append("level: unknown · no options recorded for this session: restart Claude Code")
     ok, why = can_write(sdir)
     too_long = why == LONG_FOLDER and len(str(sdir)) + 1 + LONG_NAME > WIN_PATH_MAX   # the length claim only when the path really is over 209 characters
+    # 210 to 218 characters: a single script's 40-character marker still fits, only a two-script command (49) fails, so the line says "some paid runs"
     if why == LONG_FOLDER and not too_long:
         why = f"a {LONG_NAME}-character test file could not be made there"
     out.append("state folder: writable" if ok
-               else f"state folder: FAIL · paid runs cannot be counted here: its path is {len(str(sdir))} characters, too long for the {LONG_NAME}-character files a paid run keeps in it: turn on Windows long paths, or delete this folder so smartuse uses a short name (only if it holds no paid-runs.json; its old receipts go with it)" if too_long
+               else f"state folder: FAIL · {'paid runs' if len(str(sdir)) + 1 + 40 > WIN_PATH_MAX else 'some paid runs (two scripts in one command)'} cannot be counted here: its path is {len(str(sdir))} characters, too long for the {LONG_NAME}-character files a paid run keeps in it: turn on Windows long paths, or delete this folder so smartuse uses a short name (only if it holds no paid-runs.json; its old receipts go with it)" if too_long
                else f"state folder: FAIL · cannot be written ({why}): the heartbeat cannot save its state; check that ~/.claude/smartuse is a folder you may write to")
     two = two_counters(project_dir(), str(pathlib.Path(sdir).parent))   # 0.7.2 D9
     if two:

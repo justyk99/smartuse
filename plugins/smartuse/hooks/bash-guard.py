@@ -2940,16 +2940,22 @@ def paid_state_dir(project):
     return paid_home() / ".claude" / "smartuse" / "projects" / paid_project_key(project)
 
 
-def paid_two_counters(project):
-    """True when the project's full-key state folder and its short-key one each hold paid-runs.json (0.7.2 D9). `owner-file` reads names in the command
-    text, so a folder copy or link (cp -r, robocopy, a junction) can plant a counter in either folder; fit_key keeps the full key then, and no single
-    planted counter may win, so the paid call is denied. Not inside fit_key (its text is one copy in six hooks). The short name is fit_key's own answer
-    for a base that cannot exist (a "?" run as long as the real one, so the length test is the same and no folder is kept): it differs from the full key
-    only when the key is too long for its folder. Reads names only; a detection error propagates (the caller denies)."""
+def paid_keys(project):
+    """(state base folder, full key, short key) of a project. The short name is fit_key's own answer for a base that cannot exist (a "?" run as long
+    as the real one, so the length test is the same and no folder is kept): it differs from the full key only when the key is too long for its
+    folder (0.7.2 D9; not inside fit_key, whose text is one copy in six hooks). Reads no folder."""
     import pathlib   # inside the paid path only (V9): no new top-level import
     full = re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
     base = str(paid_home() / ".claude" / "smartuse" / "projects")
-    short = fit_key(full, "?" * len(base), os.name == "nt")
+    return base, full, fit_key(full, "?" * len(base), os.name == "nt")
+
+
+def paid_two_counters(project):
+    """True when the project's full-key state folder and its short-key one each hold paid-runs.json (0.7.2 D9). `owner-file` reads names in the command
+    text, so a folder copy or link can plant a counter in either folder; fit_key keeps the full key then, and a copy into the other folder is refused,
+    so the paid call is denied. This is the early check; paid_count repeats it under the counter lock (D14). Reads names only; a detection error
+    propagates (the caller denies)."""
+    base, full, short = paid_keys(project)
     return (short != full and os.path.isfile(base + os.sep + full + os.sep + "paid-runs.json")
             and os.path.isfile(base + os.sep + short + os.sep + "paid-runs.json"))
 
@@ -3117,7 +3123,7 @@ def paid_counter_lock(sdir, deadline=None):
     return None
 
 
-def paid_count(data, sdir, items, text, deadline=None):
+def paid_count(data, sdir, items, text, deadline=None, project=None):
     """The cap rules, then count each allowed run, all under the counter lock (two parallel calls cannot both pass the cap). items =
     [(go_id, go, script)], one per script the command runs; ALL are checked before ANY is counted. A script already counted (a marker
     for this tool_use_id and go) is allowed again, not counted twice. Rules: runs used up; run 2+ needs `test ok`; run 1 must make ONE
@@ -3125,7 +3131,9 @@ def paid_count(data, sdir, items, text, deadline=None):
     skips it). Counting: claim the tool_use_id (an O_EXCL marker, as ledger.py claims receipt.<agent>.done), used += 1, one atomic write.
     -> None when allowed, else (True, why the run cannot be counted, item index: the caller says "could not verify the go") or
     (False, the reason's tail, item index: a rule denies it). A corrupt counter file is never reset silently. F5: a go the owner stopped
-    (go["stopped"], or the entry's stopped) is denied first, and the stop is written into the entry the first time it is seen."""
+    (go["stopped"], or the entry's stopped) is denied first, and the stop is written into the entry the first time it is seen.
+    0.7.2 D14: with `project`, once the lock is held and the folder actually used (sdir) is known, the OTHER state folder (full key vs short key) must
+    hold no paid-runs.json: a counter that landed there after paid_verdict's early check (a copy and delete timed between the two) denies as PAID_TWO."""
     try:
         sdir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -3138,6 +3146,11 @@ def paid_count(data, sdir, items, text, deadline=None):
         return True, "the counter is busy", 0
     claimed = []
     try:
+        if project is not None:
+            base, full, short = paid_keys(project)
+            other = short if sdir.name == full else full if sdir.name == short else ""
+            if other and other != sdir.name and os.path.isfile(base + os.sep + other + os.sep + "paid-runs.json"):
+                return True, PAID_TWO, 0                      # D14: the other folder holds a counter; nothing is read or written here
         f = sdir / "paid-runs.json"
         try:
             state = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
@@ -3293,7 +3306,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
                 if again:
                     return (head(again) + f"a loop or repeat runs {clip(again[1])} more than once in one call; run it once per call so each run is counted.")
                 r = ((True, PAID_TWO, 0) if paid_two_counters(project)
-                     else paid_count(data, paid_state_dir(project), [(c[1], c[2], c[0][1], c[0][3]) for c in covered], text, deadline))
+                     else paid_count(data, paid_state_dir(project), [(c[1], c[2], c[0][1], c[0][3]) for c in covered], text, deadline, project))
                 if r:
                     first = covered[r[2]][0]
                     why, rule = (r[1], "") if r[0] else ("", r[1])

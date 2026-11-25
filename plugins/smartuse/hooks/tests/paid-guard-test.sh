@@ -119,9 +119,41 @@ elif mode == "inproc":   # inproc GUARD PROJECT KIND: main() run in this process
     elif kind == "lock":
         ns["BUDGET_S"] = 0.3
         run("strict")
+    elif kind == "race":     # 0.7.2 D14: a counter lands in the short-key folder AFTER the early two-counters check (the stub plants it and says "no"): the check under the lock must see it
+        def late(project):
+            base = str(ns["paid_home"]() / ".claude" / "smartuse" / "projects")
+            full = __import__("re").sub(r"[^A-Za-z0-9._-]", "-", str(__import__("pathlib").Path(project).resolve())).lstrip("-")
+            short = ns["fit_key"](full, "?" * len(base), os.name == "nt")
+            os.makedirs(os.path.join(base, short), exist_ok=True)
+            open(os.path.join(base, short, "paid-runs.json"), "w").write("{}")
+            return False
+        ns["paid_two_counters"] = late
+        run("strict", "python render.py --images 1")
     elif kind == "unread":   # 0.7.0 review fix m7: the script exists but its read fails (the mock stands for a file that cannot be opened)
         ns["paid_read_file"] = lambda p: None
         run("strict", "python polish.py"); run("light", "python polish.py")
+elif mode == "twolock":  # twolock GUARD HOME: 0.7.2 D14, paid_count called directly. The state folder used is the short-key one (a 240-character path), its full-key sibling "holds a counter" (os.path.isfile stands in: no 240-character name can be made on every OS)
+    import os, pathlib, re
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "twolock"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    home = sys.argv[3]; os.environ["HOME"] = home
+    proj = os.path.join(home, "a" * 80, "b" * 80, "c" * 80)
+    full = re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(proj).resolve())).lstrip("-")
+    sdir = ns["paid_state_dir"](proj)
+    assert sdir.name != full, (sdir.name, full)
+    go = {"script": "render.py", "runs": 3, "cap": "RM1", "count": "none", "test_ok": True, "go_from": "adapter"}
+    items = [("go1", go, "render.py", 0)]
+    target = os.path.normpath(os.path.join(str(sdir.parent), full, "paid-runs.json"))
+    real = os.path.isfile
+    os.path.isfile = lambda p: True if os.path.normpath(str(p)) == target else real(p)
+    try:
+        r1 = ns["paid_count"]({"tool_use_id": "toolu_x"}, sdir, items, "python render.py", None, proj)
+    finally:
+        os.path.isfile = real
+    left = sorted(x.name for x in sdir.iterdir()) if sdir.is_dir() else None
+    r2 = ns["paid_count"]({"tool_use_id": "toolu_y"}, sdir, items, "python render.py", None, proj)
+    ok = r1 == (True, ns["PAID_TWO"], 0) and left == [] and r2 is None and (sdir / "paid-runs.json").is_file()
+    print("ok" if ok else "r1=%r left=%r r2=%r" % (r1, left, r2))
 elif mode == "ptime":    # ptime GUARD PROJECT: the paid path inside the process, no process start in the times
     import os, time
     src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "ptime"}
@@ -2195,9 +2227,19 @@ if [ "$NT" != 1 ]; then skip "39d skipped here (not Windows: no short key can me
     rm -rf "${FP:?}"; guard 'python render.py --images 1' "$ID2" "$LPW"
     [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(py "$CW" entry "$(wp "$SR")" used </dev/null 2>/dev/null)" = 2 ] && ok "39d with the planted folder removed, run 2 is counted: used 2" || ko "39d after the delete: stdout '${OUT:0:300}' stderr '$ERR' counter: $(cat "$SR" 2>&1)"
     [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39d the real ~/.claude/smartuse gained no folder from these cases" || ko "39d a test folder reached the real ~/.claude/smartuse/projects"
+    # D14: a counter lands in the short-key folder after the early check (stubbed): the check under the counter lock denies, and nothing is counted
+    rm -rf "${D:?}/lp" "${D:?}/snap"; LP=$(mklong "$LK"); fresh; mkdir -p "$LP/.claude" "$FP"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+    guard 'python render.py --images 1' "$ID1" "$LPW"
+    r=$(CLAUDE_PROJECT_DIR="$LPW" py "$CW" inproc "$(wp "$G")" "$LPW" race </dev/null 2>&1)
+    case "$r" in *"deny "*"two state folders hold a counter"*) ok "39d D14: a counter that lands after the early check is caught under the counter lock: denied";; *) ko "39d D14 race: $r";; esac
+    [ "$(py "$CW" entry "$(wp "$FR")" used </dev/null 2>/dev/null)" = 1 ] && ok "39d D14: nothing was counted (the full-key counter still says used 1)" || ko "39d D14 state: $(cat "$FR" 2>&1)"
     rm -rf "${D:?}/lp" "${D:?}/snap"
   fi
 fi
+# ===== 39e. 0.7.2 D14, any OS. paid_count is called with the folder it will use (the short-key one) and a full-key sibling that holds a counter: it denies under the lock and
+# leaves the folder empty; with no counter beside it, the same call counts. The sibling's counter is faked through os.path.isfile (a 240-character name cannot be made everywhere).
+mkdir -p "$D/tl"; r=$(py "$CW" twolock "$(wp "$G")" "$(wp "$D/tl")" </dev/null 2>&1); [ "$r" = ok ] && ok "39e paid_count under the lock: a counter in the other state folder is denied (two state folders hold a counter), nothing is written; without one the run is counted" || ko "39e twolock: $r"
+rm -rf "${D:?}/tl"
 # ===== 39c. 0.7.2 F3 (D-YK20, the honest half), a kept state folder too long for paid runs is said aloud. A full-key folder that already exists is kept while a file
 # of 26 characters fits in it (up to 232), but a real 30-character tool_use_id makes the claim marker paid.<id>.done 40 characters: in a folder of 219 to 232 characters,
 # with Windows long paths off, that marker cannot be made, so no paid run was ever counted there, and the reason sent the owner to the adapter, which is not the fix. Now
