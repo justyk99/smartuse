@@ -45,25 +45,60 @@ def load_private(repo):
     return terms
 
 
+def readings(raw):
+    """One line's bytes as the strings to scan, plus whether it was not valid UTF-8.
+    Not UTF-8: read as UTF-8 and as cp1252 (a fixed second reading, not the console's code page), undecodable bytes replaced.
+    NUL bytes: each reading is also read with them removed (the ASCII letters of UTF-16 text)."""
+    try:
+        rs, bad = [raw.decode("utf-8")], False
+    except UnicodeDecodeError:
+        rs, bad = [raw.decode("utf-8", errors="replace"), raw.decode("cp1252", errors="replace")], True
+    if b"\0" in raw:
+        rs += [r.replace("\0", "") for r in rs]
+    return list(dict.fromkeys(rs)), bad
+
+
+def star(text, private):
+    """text with every character inside any private match starred; the same length, so offsets still line up."""
+    chars = list(text)
+    for _, rx in private:
+        for m in rx.finditer(text):
+            chars[m.start():m.end()] = "*" * (m.end() - m.start())
+    return "".join(chars)
+
+
 def mask(text, m, private):
-    s, e = m.start(), m.end()
-    hit = "*" * (e - s) if private else text[s:e]
-    lo, hi = max(0, s - 30), min(len(text), e + 30)
-    return (text[lo:s] + hit + text[e:hi]).replace("\n", " ")
+    lo, hi = max(0, m.start() - 30), min(len(text), m.end() + 30)
+    return star(text, private)[lo:hi].replace("\0", "")  # a line holds no newline, but UTF-16 text may hold NULs
 
 
-def scan_text(label, text, patterns, hits, max_hits):
-    for ln, line in enumerate(text.splitlines(), 1):
+def scan_line(label, ln, rs, patterns, private, hits, max_hits):
+    """One hit per pattern per line, private patterns first (so a cap keeps them); every excerpt stars every private match
+    on its line, a generic hit's included. A pattern found in the first reading is not counted again in the second."""
+    done = set()
+    for text in rs:
         for name, rx in patterns:
-            for m in rx.finditer(line):
+            if name in done:
+                continue
+            m = rx.search(text)
+            if m:
                 if len(hits) >= max_hits:
                     return
-                hits.append((label, ln, name, mask(line, m, name.startswith("private#"))))
-                break  # one hit per pattern per line
+                done.add(name)
+                hits.append((label, ln, name, mask(text, m, private)))
+
+
+def scan_bytes(label, raw, patterns, private, hits, max_hits, stats):
+    for ln, line in enumerate(raw.splitlines(), 1):
+        rs, bad = readings(line)
+        stats["bad"] += bad
+        scan_line(label, ln, rs, patterns, private, hits, max_hits)
+        if len(hits) >= max_hits:
+            return
 
 
 def tracked_files(repo):
-    out = subprocess.run(["git", "ls-files", "-z"], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=repo, capture_output=True).stdout.decode("utf-8", errors="replace")
     return [p for p in out.split("\0") if p]
 
 
@@ -80,39 +115,44 @@ def main():
     a = ap.parse_args()
     repo = pathlib.Path(a.repo).resolve()
     private = load_private(repo)
-    patterns = GENERIC + private
+    patterns = private + GENERIC  # private first: a cap or a line's one-hit rule never hides a private term behind a generic one
     hits = []
+    stats = {"bad": 0, "binary": 0}
     for rel in tracked_files(repo):
         if rel in SKIP_SELF or any(part in SKIP_DIRS for part in rel.split("/")):
             continue
-        p = repo / rel
+        scan_line(rel, 0, [rel], patterns, private, hits, a.max_hits)  # the path itself, label `<path>:0`
         try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
+            raw = (repo / rel).read_bytes()
         except Exception:
             continue
-        scan_text(rel, text, patterns, hits, a.max_hits)
+        scan_bytes(rel, raw, patterns, private, hits, a.max_hits, stats)
     if a.history:
-        log = subprocess.run(["git", "log", "-p", "--all", "--format=commit %h %s"], cwd=repo, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+        # the message is indented 4 spaces (%w), so no message line can pass for a `commit` / `diff` line below
+        log = subprocess.run(["git", "-c", "core.quotepath=off", "log", "-p", "--all", "--format=commit %h%n%w(0,4,4)%B"], cwd=repo, capture_output=True).stdout
         cur = "?"
         for ln, line in enumerate(log.splitlines(), 1):
-            if line.startswith("commit "):
-                cur = line.split()[1]
+            if line.startswith(b"commit "):
+                cur = line.split()[1].decode("ascii", errors="replace")
                 continue
-            if line.startswith(("+++ ", "--- ", "index ", "diff --git")):
+            if line.startswith((b"+++ ", b"--- ", b"index ")):
                 continue
-            for name, rx in patterns:
-                m = rx.search(line)
-                if m and len(hits) < a.max_hits:
-                    hits.append((f"history@{cur}", ln, name, mask(line, m, name.startswith("private#"))))
-                    break
-    print(f"term-scan: {len(patterns)} patterns ({len(private)} private) · {'tree + history' if a.history else 'tree'} · {len(hits)} hits")
+            if re.match(rb"Binary files .* differ$", line):
+                stats["binary"] += 1  # git prints no content for it (a UTF-16 file included); its paths are on the diff --git line above
+                continue
+            rs, bad = readings(line)
+            stats["bad"] += bad
+            scan_line(f"history@{cur}", ln, rs, patterns, private, hits, a.max_hits)  # `diff --git` lines carry the paths
+    npriv = sum(1 for h in hits if h[2].startswith("private#"))
+    extra = (f" · {stats['bad']} lines not UTF-8" if stats["bad"] else "") + (f" · {stats['binary']} binary diffs not read" if stats["binary"] else "")
+    print(f"term-scan: {len(patterns)} patterns ({len(private)} private) · {'tree + history' if a.history else 'tree'} · {len(hits)} hits ({npriv} private){extra}")
     by = {}
     for label, ln, name, ex in hits:
         by.setdefault(name, []).append((label, ln, ex))
     for name, rows in sorted(by.items(), key=lambda kv: -len(kv[1])):
         print(f"\n## {name} ({len(rows)})")
         for label, ln, ex in rows[:60]:
-            print(f"- {label}:{ln}  …{ex}…")
+            print(f"- {star(label, private)}:{ln}  …{ex}…")
         if len(rows) > 60:
             print(f"- … {len(rows) - 60} more")
     unchecked = not private and not a.no_private

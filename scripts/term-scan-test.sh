@@ -32,4 +32,42 @@ case "$out" in *Traceback*) tb=1;; *) tb=0;; esac
 case "$out" in *"term-scan: "*"tree + history"*" 2 hits"*) sum=1;; *) sum=0;; esac
 if [ -n "$PY" ] && [ "$got" = 1 ] && [ $tb = 0 ] && [ $sum = 1 ]; then echo "PASS non-ASCII text with no UTF-8 mode and a piped stdout: summary line, no traceback, exit 1 (red half is Windows-only)"
 else echo "FAIL non-ASCII text, no UTF-8 mode: python '$PY', exit $got, wanted 1; traceback $tb, summary $sum; output '${out:0:200}'"; fail=1; fi
+# F1 (0.7.2): the scan reads every line whole. Invented terms only; every repo is a temp dir with its own private list.
+W=$(mktemp -d); trap 'rm -rf "$T" "$U" "$W"' EXIT
+scan2() { bash "$H/plugins/smartuse/hooks/py.sh" "$H/scripts/term-scan.py" --repo "$1" "${@:2}" 2>&1; }
+sect() { printf '%s\n' "$1" | awk -v n="$2" '/^## /{s=($2==n)} s'; } # the lines of one "## <pattern>" block
+gcm() { git -C "$1" -c user.name=yk -c user.email=yk@example.com -c commit.gpgsign=false commit -q "${@:2}"; }
+mkr() { mkdir "$W/$1"; git -C "$W/$1" init -q; } # $1 = a short name; the repo is $W/$1
+okc() { case "$2" in ""|*[!1]*) echo "FAIL $1: ${3:0:240}"; fail=1;; *) echo "PASS $1";; esac; } # $2 = one 1 per check; any 0 fails
+has() { case "$1" in *"$2"*) echo 1;; *) echo 0;; esac; }
+lacks() { case "$1" in *"$2"*) echo 0;; *) echo 1;; esac; }
+ex1() { [ "$got" = 1 ] && echo 1 || echo 0; } # the scan's exit was 1, a hit
+mkr r1; printf 'mail bob@corp-x.io zebrafish\n' > "$W/r1/mail.txt"; printf 'zebrafish\n' > "$W/r1/.smartuse-terms.local"
+git -C "$W/r1" add mail.txt; gcm "$W/r1" -m 'add mail note'
+out=$(scan2 "$W/r1" --history); got=$?
+okc "r1 history: a private term on a line with an e-mail is a history@ private#1 hit" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')" "exit $got; $out"
+okc "r2 tree and history: the e-mail hit's excerpt never shows the term" "$(has "$out" "## email")$(lacks "$out" zebrafish)" "$out"
+out=$(scan2 "$W/r1" --history --max-hits 1); got=$?
+okc "r5 --max-hits 1 keeps the private hit, not the e-mail hit" "$(ex1)$(has "$(sect "$out" private#1)" 'mail.txt')" "exit $got; $out"
+mkr r3; printf 'nothing here\n' > "$W/r3/plain.txt"; printf 'zebrafish\n' > "$W/r3/.smartuse-terms.local"
+git -C "$W/r3" add plain.txt; gcm "$W/r3" -m 'notes on zebrafish handling'
+out=$(scan2 "$W/r3" --history); got=$?
+okc "r3 a private term in a commit subject is a history@ private#1 hit, never printed" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
+mkr r3b; printf 'nothing here\n' > "$W/r3b/plain.txt"; printf 'zebrafish\n' > "$W/r3b/.smartuse-terms.local"
+git -C "$W/r3b" add plain.txt; gcm "$W/r3b" -m 'plain subject' -m 'the body mentions zebrafish too'
+out=$(scan2 "$W/r3b" --history); got=$?
+okc "r3b a private term in a commit body line is a history@ hit too" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
+mkr r4; printf 'z\303\251brafish\n' > "$W/r4/.smartuse-terms.local"; printf 'a line\nz\351brafish\n' > "$W/r4/cp.txt"
+git -C "$W/r4" add cp.txt; gcm "$W/r4" -m 'add cp1252 note'
+out=$(scan2 "$W/r4" --history); got=$?
+sec=$(sect "$out" private#1)
+okc "r4 a term saved as cp1252: a tree hit, a history hit, the not-UTF-8 clause, never printed" "$(ex1)$(has "$sec" 'cp.txt:2')$(has "$sec" 'history@')$(has "$out" 'lines not UTF-8')$(lacks "$out" brafish)" "exit $got; $out"
+mkr r6; printf 'zebrafish\n' > "$W/r6/.smartuse-terms.local"; printf '\377\376z\000e\000b\000r\000a\000f\000i\000s\000h\000\n\000' > "$W/r6/u16.txt"
+git -C "$W/r6" add u16.txt; gcm "$W/r6" -m 'add utf-16 note'
+out=$(scan2 "$W/r6" --history); got=$?
+okc "r6 a UTF-16LE file: a tree hit, one binary diff counted, never printed" "$(ex1)$(has "$(sect "$out" private#1)" 'u16.txt:')$(has "$out" '1 binary diffs not read')$(lacks "$out" zebrafish)" "exit $got; $out"
+mkr r7; printf 'zebrafish\n' > "$W/r7/.smartuse-terms.local"; printf 'hello\n' > "$W/r7/zebrafish-notes.txt"
+git -C "$W/r7" add zebrafish-notes.txt; gcm "$W/r7" -m 'add notes'
+out=$(scan2 "$W/r7" --history); got=$?
+okc "r7 a file name holding the term is a private#1 hit (tree and history), the name is starred" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
