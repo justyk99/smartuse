@@ -11,7 +11,7 @@ NEEDS YOU (1): leftovers you delete (the permission system refused Claude): `.cl
 ## Unknowns
 - new, minor (security review 2026-11-24, pre-existing): `term-scan.py` keeps only the first pattern per line, so a private term on a line with a generic hit is not counted and shows unmasked in the context; the 0.7.1 push was checked by a per-line re-check instead (0). Fix: scan every pattern per line, private first → next release
 - new, minor (F3): history decoded as UTF-8 with replace, so a private term committed in another encoding is missed silently (before: a crash) → with the item above
-- new, low: the ledger race (two Stop hooks at once) drops a line about 4 in 1000 on Windows; no failed claim saw pending.json still there, so the planned retry would not help; needs a file-handle trace → ROADMAP next release
+- low, traced (0.7.2 E1): the ledger race drops a line about 3 in 1000 on Windows: a sharing violation on the claimed file; fix shape in ROADMAP next release
 - new, low: a kept state folder of 219–232 characters denies every paid run (claim marker past 259) and doctor still says writable → ROADMAP
 - new, low: skipped test cases print as PASS and count toward the floors; wait-gate-test's fit_key check would pass a top-level `import hashlib`/`winreg` → ROADMAP
 - method M's Stop wait is two-valued (about 0.33 or 0.57 s): not gated → look before 1.0
