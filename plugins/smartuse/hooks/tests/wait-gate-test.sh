@@ -1274,7 +1274,7 @@ fire() { # $1 = hook (heartbeat|recall|wait-gate|until-done), $2 = a project pat
   printf '%s' "$ev" | CLAUDE_PROJECT_DIR="$pw" py "$H/$hook.py" > "$D/o10b" 2>&1
 }
 wrote() { # $1 = hook, $2 = a project path -> the folder name where the hook left its file ("" when nowhere); the state is reset first
-  local d n; rm -rf "$PROJ10"; if [ -n "${PRESET_SHORT:-}" ]; then mkdir -p "$PROJ10/$PRESET_FULL" "$PROJ10/$PRESET_SHORT" && printf '{}' > "$PROJ10/$PRESET_SHORT/paid-runs.json"; fi   # 0.7.2 F2: a made full-key folder and a short-key folder holding the paid counter, put back before every hook
+  local d n; rm -rf "$PROJ10"; if [ -n "${PRESET_SHORT:-}" ]; then mkdir -p "$PROJ10/$PRESET_FULL" "$PROJ10/$PRESET_SHORT" && printf '{}' > "$PROJ10/$PRESET_SHORT/paid-runs.json"; [ -z "${PRESET_FCNT:-}" ] || printf '{}' > "$PROJ10/$PRESET_FULL/paid-runs.json"; fi   # 0.7.2 F2: a made full-key folder and a short-key folder holding the paid counter, put back before every hook (D9: PRESET_FCNT set, the full-key folder holds one too)
   fire "$1" "$2"
   for d in "$PROJ10"/*/; do
     if [ -f "${d}$FILE" ]; then
@@ -1323,20 +1323,23 @@ except Exception:
   done
 else skip "e (not Windows: only the 255-character name limit applies and an existing folder cannot be longer than it; fit_key's rules 2 and 3 are in case f)"; fi
 # e2: 0.7.2 F2 (D-YK19): a project on the short key has a paid counter there; a shell then makes its full-key folder (220 characters: a file fits in it). The counter wins:
-# every hook, ledger.py and bash-guard included, still names the short folder, and the made folder stays empty (before, they moved to it and the paid count restarted)
-same6k() { # $1 = label, $2 = a project path whose full-key folder is made and whose short-key folder holds paid-runs.json
-  local want h got bad=""; PRESET_FULL=$(key "$2")
+# ledger.py and the four hooks that write a state file (bash-guard.py has its own cases: case f's table and paid-guard-test.sh 39b) still name the short folder, and the made folder stays empty
+# (before, they moved to it and the paid count restarted). e3 (D9): when the full-key folder holds a counter too (a folder copy planted one in the short folder), the full folder stays.
+same6k() { # $1 = label, $2 = a project path whose full-key folder is made and whose short-key folder holds paid-runs.json; $3 = both: the full-key folder holds a counter too, so it is the one named
+  local want h got bad=""; PRESET_FULL=$(key "$2"); [ "${3:-}" = both ] && PRESET_FCNT=1
   PRESET_SHORT=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$PRESET_FULL" </dev/null)
-  want=$PRESET_SHORT
-  rm -rf "$PROJ10"; mkdir -p "$PROJ10/$PRESET_FULL" "$PROJ10/$PRESET_SHORT" && printf '{}' > "$PROJ10/$PRESET_SHORT/paid-runs.json"
+  want=$PRESET_SHORT; [ "${3:-}" = both ] && want=$PRESET_FULL
+  rm -rf "$PROJ10"; mkdir -p "$PROJ10/$PRESET_FULL" "$PROJ10/$PRESET_SHORT" && printf '{}' > "$PROJ10/$PRESET_SHORT/paid-runs.json"; [ "${3:-}" = both ] && printf '{}' > "$PROJ10/$PRESET_FULL/paid-runs.json"
   [ "$(fname "$2")" = "$want" ] || bad="$bad ledger:'$(fname "$2")'"
   for h in heartbeat recall wait-gate until-done; do got=$(wrote "$h" "$2"); [ "$got" = "$want" ] || bad="$bad $h:'$got'"; done
-  [ -z "$(ls -A "$PROJ10/$PRESET_FULL" 2>/dev/null)" ] || bad="$bad full-folder-not-empty"
-  PRESET_SHORT=; PRESET_FULL=
-  [ -z "$bad" ] && ok "$1: ledger.py, heartbeat.py, recall.py, until-done.py and wait-gate.py all name the short folder ($want), and the made full-key folder stays empty" || ko "$1: wanted '$want', but:$bad"
+  [ "${3:-}" = both ] || [ -z "$(ls -A "$PROJ10/$PRESET_FULL" 2>/dev/null)" ] || bad="$bad full-folder-not-empty"
+  PRESET_SHORT=; PRESET_FULL=; PRESET_FCNT=
+  if [ "${3:-}" = both ]; then [ -z "$bad" ] && ok "$1: ledger.py, heartbeat.py, recall.py, until-done.py and wait-gate.py all name the full-key folder ($want)" || ko "$1: wanted '$want', but:$bad"
+  else [ -z "$bad" ] && ok "$1: ledger.py, heartbeat.py, recall.py, until-done.py and wait-gate.py all name the short folder ($want), and the made full-key folder stays empty" || ko "$1: wanted '$want', but:$bad"; fi
 }
 if [ "$NT" = 1 ]; then
   same6k "e2 state folder of 220 characters, its full-key folder made, a paid counter in the short-key folder" "$(lp $(( 220 - BL - 1 )))"
+  same6k "e3 state folder of 220 characters, a paid counter in the full-key folder AND in the short-key folder (D9)" "$(lp $(( 220 - BL - 1 )))" both
 else skip "e2 (not Windows: a short key arises only past 255 characters, where its full-key folder cannot be made; the rule itself is in case f g5)"; fi
 rm -rf "$PROJ10"
 # f: fit_key is one helper, byte for byte in the six hooks (read with ast, no hook imported), and agrees with the rule on a table, for nt True and False
@@ -1473,10 +1476,11 @@ try:
     def counter_for(full):      # a short-key folder holding the paid counter, as the hook leaves it
         d = os.path.join(base, short_of(full)); os.makedirs(d, exist_ok=True)
         open(os.path.join(d, "paid-runs.json"), "w").write("{}")
-    def g_case(label, nt, value, full, made, fake, counter, expect):
+    def g_case(label, nt, value, full, made, fake, counter, expect, full_counter=False):
         reg.value, reg.boom, reg.reads = value, False, 0
         if made: os.makedirs(os.path.join(base, full), exist_ok=True)
         if counter: counter_for(full)
+        if full_counter: open(os.path.join(base, full, "paid-runs.json"), "w").write("{}")   # the full-key folder holds a counter too (0.7.2 D9)
         if fake: exists_only(base + os.sep + full)
         try:
             got = fit_key(full, base, nt)
@@ -1497,6 +1501,10 @@ try:
     g_case("g5b not nt, a 300-character folder (faked), no counter", False, 0, "W" * 300, False, True, False, "full")
     g_case("g5c not nt, a 256-character key whose folder exists (faked) + a counter", False, 0, "y" * 256, False, True, True, "short")
     g_case("g5d nt, a counter for a path that fits: the full key (not long: the counter is not looked at)", True, 0, full_of(194, "z"), True, False, True, "full")
+    # 0.7.2 D9 (a folder copy can plant a counter in the short folder): the short key wins only when the short folder holds a counter AND the full-key folder does not
+    g_case("g9 nt, existing folder at 220 holding a counter + a short folder with a counter", True, 0, full_of(220, "1"), True, False, True, "full", True)
+    g_case("g9b nt, existing folder at 232 holding a counter + a short folder with a counter", True, 0, full_of(232, "2"), True, False, True, "full", True)
+    g_case("g10 nt, existing folder at 220 holding a counter, no short counter", True, 0, full_of(220, "3"), True, False, False, "full", True)
     # a counter beside a folder that is not a file named paid-runs.json (a folder of that name) does not count
     dd = os.path.join(base, short_of(full_of(220, "x")), "paid-runs.json"); os.makedirs(dd, exist_ok=True)
     g_case("g1b nt, existing folder at 220 + a FOLDER named paid-runs.json in the short folder (no counter)", True, 0, full_of(220, "x"), True, False, False, "full")
@@ -1542,7 +1550,7 @@ finally:
     else: sys.modules["winreg"] = real_winreg
     shutil.rmtree(tmp, ignore_errors=True)
 PY
-r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233); D8: with a fake winreg, Windows long paths on keeps an existing folder of 248 and off, or a read that raises, gives the short key; the switch is read only when the length test fails; no hashlib on the common path; a short key never starts with -; 0.7.2 F2 g1-g8: a short-key folder holding paid-runs.json wins over an existing full-key folder, on Windows (also with long paths on) and elsewhere, and a kept folder costs one sha1 and no counter is looked for on the common path" || ko "f fit_key: $r"
+r=$(py "$D/fk.py" "$H" </dev/null 2>&1); [ "$r" = ok ] && ok "f fit_key: one module-level function, hashlib imported inside it only, the six sources identical (ast, no hook imported), and the same answers for nt True and False on the table (20 characters; dirlen 194/195; 255/256 characters; an existing folder at 220, 232, 233); D8: with a fake winreg, Windows long paths on keeps an existing folder of 248 and off, or a read that raises, gives the short key; the switch is read only when the length test fails; no hashlib on the common path; a short key never starts with -; 0.7.2 F2 g1-g8: a short-key folder holding paid-runs.json wins over an existing full-key folder, on Windows (also with long paths on) and elsewhere, and a kept folder costs one sha1 and no counter is looked for on the common path; D9 g9-g10: not when the full-key folder holds a counter too" || ko "f fit_key: $r"
 [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'xxxxxxxx')" = 0 ] && ok "F1: the real ~/.claude/smartuse gained no folder from these cases (the temp HOME took them all)" || ko "F1: a test folder reached the real ~/.claude/smartuse/projects"
 
 # ===== 11. what the owner's session gets: the Stop-hook JSON until-done.py prints; the hook is registered

@@ -749,8 +749,10 @@ rm -rf "$H2/.claude/smartuse/projects"
 
 # ===== 0.7.2 F3 (D-YK20): doctor tells a kept state folder that is too long for paid runs. A full-key folder that already exists is kept while a 26-character file fits in
 # it (up to 232 characters), but the claim marker of a paid run is 40 characters (paid.<30-character tool_use_id>.done): in a kept folder of 219 to 232 characters, with
-# Windows long paths off, it cannot be made, so doctor's short throwaway file saying "writable" was not the truth. A second throwaway of 40 characters now decides. Windows
-# only, and only with LongPathsEnabled = 0. In a kept folder of 200 characters doctor still says writable, and doctor never fills the folder.
+# Windows long paths off, it cannot be made, so doctor's short throwaway file saying "writable" was not the truth. A second throwaway of 49 characters (the longest claim
+# marker, the second script's paid.<id>.<8>.done) now decides, and the FAIL line is printed only when the path really is over 209 characters (259 - 1 - 49). Windows
+# only, and only with LongPathsEnabled = 0. In a kept folder of 200 characters doctor still says writable, and doctor never fills the folder. D9: a counter in both the
+# full-key and the short-key folder is one FAIL line naming both folders.
 if [ "$NT" = 1 ]; then
   LPON=$(py -c 'import sys
 try:
@@ -763,11 +765,11 @@ except Exception:
   elif [ $(( 224 - BL2 )) -lt 20 ]; then echo "SKIP F3 doctor, a kept state folder of 225 characters: HOME is $BL2 characters, too long to build it"
   else
     rm -rf "$H2/.claude/smartuse/projects"
-    for L in 225 200; do
+    for L in 225 215 200; do
       pw=$(lpath $(( L - 1 - BL2 ))); fk=$(key "$pw"); sf="$H2/.claude/smartuse/projects/$fk"; mkdir -p "$sf"
       OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
-      if [ "$L" = 225 ]; then
-        case "$OUT" in *"state folder: FAIL · paid runs cannot be counted here: its path is 225 characters"*"Windows long paths"*"delete"*"paid-runs.json"*) [ "$N" -le 8 ] && echo "PASS F3 doctor, a kept state folder of 225 characters (long paths off): FAIL with its length and both ways out ($N lines)" || { echo "FAIL F3 doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL F3 doctor, a kept state folder of 225 characters: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+      if [ "$L" != 200 ]; then
+        case "$OUT" in *"state folder: FAIL · paid runs cannot be counted here: its path is $L characters"*"Windows long paths"*"delete"*"paid-runs.json"*) [ "$N" -le 8 ] && echo "PASS F3 doctor, a kept state folder of $L characters (long paths off): FAIL with its length and both ways out ($N lines)" || { echo "FAIL F3 doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL F3 doctor, a kept state folder of $L characters: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
       else
         case "$OUT" in *"state folder: writable"*) echo "PASS F3 doctor, a kept state folder of 200 characters: still writable";; *) echo "FAIL F3 doctor, a kept state folder of 200 characters: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
       fi
@@ -776,5 +778,40 @@ except Exception:
     rm -rf "$H2/.claude/smartuse/projects"
   fi
 else echo "SKIP F3 doctor, a kept state folder too long for paid runs: Windows only"; fi
+# the probe is 49 characters and the FAIL line checks the length (any OS: can_write is stood in for): a state folder of 209 characters or less that fails the long probe
+# is "cannot be written" (not a length claim); one over 209 says the path is too long
+cat > "$D/dl.py" <<'PY'
+import os, pathlib, sys
+src = open(os.path.join(sys.argv[1], "heartbeat.py"), encoding="utf-8").read()
+cut = src.index("\ntry:\n    main()")
+ns = {"__name__": "doctor_probe", "__file__": os.path.join(sys.argv[1], "heartbeat.py")}
+exec(compile(src[:cut], "heartbeat", "exec"), ns)
+ns["can_write"] = lambda d: (False, ns["LONG_FOLDER"])
+bad = []
+for n, want in ((209, "cannot be written"), (210, "paid runs cannot be counted here: its path is 210 characters")):
+    sd = pathlib.Path("C:/" + "x" * (n - 3) if os.name == "nt" else "/" + "x" * (n - 1))
+    line = [l for l in ns["doctor_lines"](sd) if l.startswith("state folder:")][0]
+    if want not in line or (n == 209 and "too long" in line):
+        bad.append("%d: %s" % (n, line[:120]))
+print("ok" if not bad else "; ".join(bad))
+PY
+r=$(py "$D/dl.py" "$H" </dev/null 2>&1 | tail -3); [ "$r" = ok ] && echo "PASS F3 doctor: a failed 49-character probe in a folder of 209 characters says cannot be written (no length claim); at 210 it says the path is too long" || { echo "FAIL F3 doctor probe length check: $r"; fail=1; }
+# D9: a counter in both the full-key and the short-key folder is one FAIL line naming both (Windows: a short key beside a full-key folder that can be made)
+if [ "$NT" = 1 ]; then
+  if [ $(( 204 - BL2 )) -lt 20 ]; then echo "SKIP D9 doctor, two counters: HOME is $BL2 characters, too long to build a state folder of 205"
+  else
+    rm -rf "$H2/.claude/smartuse/projects"
+    pw=$(lpath $(( 205 - 1 - BL2 ))); fk=$(key "$pw"); pr="$H2/.claude/smartuse/projects"
+    sk=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$fk" </dev/null)
+    mkdir -p "$pr/$fk" "$pr/$sk"; printf '{}' > "$pr/$fk/paid-runs.json"
+    OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+    case "$OUT" in *"state folder: FAIL"*"two state folders hold"*"$fk"*"$sk"*) echo "FAIL D9 doctor named two folders with only one counter: $OUT"; fail=1;; *) echo "PASS D9 doctor, a counter in the full-key folder only: no two-counters line";; esac
+    printf '{}' > "$pr/$sk/paid-runs.json"
+    OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+    case "$OUT" in *"state folder: FAIL · two state folders hold a paid counter: $fk and $sk"*"delete"*) [ "$N" -le 8 ] && echo "PASS D9 doctor, a counter in both folders: one FAIL line names both folders and the way out ($N lines)" || { echo "FAIL D9 doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL D9 doctor, a counter in both folders: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+    [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(ls -A "$pr/$sk" | tr '\n' ' ')" = "paid-runs.json " ] && echo "PASS D9 doctor left both folders as they were (read-only)" || { echo "FAIL D9 doctor touched the folders: $(ls -A "$pr/$fk" "$pr/$sk" | tr '\n' ' ')"; fail=1; }
+    rm -rf "$H2/.claude/smartuse/projects"
+  fi
+else echo "SKIP D9 doctor, a counter in two state folders: Windows only"; fi
 
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
