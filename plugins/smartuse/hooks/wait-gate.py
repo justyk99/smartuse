@@ -132,7 +132,9 @@ def fit_key(full, base, nt):
     (<HOME>/.claude/smartuse/projects); nt = os.name == "nt". `full` itself while the folder and its longest file name fit (a whole path may hold
     259 characters on Windows, E1; one name 255 elsewhere), else the last 40 characters of it, "-", and 12 hex of the sha1 of the whole key. A folder
     that already exists under the full key is kept while a file fits in it (D7a), or whatever its length when Windows long paths are on (D8: the
-    LongPathsEnabled switch is read, only when the length test fails). Reads folder names and one registry value. Never raises: any error returns `full`.
+    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json: the counter wins, so
+    a made full-key folder cannot restart a paid count (0.7.2 F2). Reads folder and file names and one registry value, never content. Never raises:
+    any error returns `full`.
     The same text is copied into heartbeat.py, ledger.py, recall.py, until-done.py, wait-gate.py and bash-guard.py (the tests assert it equal)."""
     try:
         WIN_PATH_MAX = 259   # the longest whole file path on Windows without long-path support (MAX_PATH 260 with its NUL, measured by E1)
@@ -155,16 +157,14 @@ def fit_key(full, base, nt):
             return (full[-TAIL:] + "-" + hashlib.sha1(full.encode()).hexdigest()[:HASH]).lstrip("-")
 
         dirlen = len(base) + 1 + len(full)
-        have = os.path.isdir(base + os.sep + full)
-        if nt and have and (dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX or long_paths()):
+        too_long = len(full) > KEY_MAX or (nt and dirlen + 1 + NAME_ROOM > WIN_PATH_MAX)
+        if not too_long:
             return full
-        if not nt and have:
+        s = short()
+        if (os.path.isdir(base + os.sep + full) and (not nt or dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX or long_paths())
+                and not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json")):
             return full
-        if len(full) > KEY_MAX:
-            return short()
-        if nt and dirlen + 1 + NAME_ROOM > WIN_PATH_MAX:
-            return short()
-        return full
+        return s
     except Exception:
         return full
 
