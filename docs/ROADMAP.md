@@ -98,11 +98,12 @@ Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, 
 - [x] F2 a made state folder keeps the paid count: a short-key folder that holds `paid-runs.json` wins over a made full-key folder
 - [x] F3 a kept folder too long for paid runs is named: the refusal points at the state folder and `/smartuse:doctor`, doctor prints a `state folder: FAIL` line
 - [x] F4 a test that did not run says SKIP: not counted as PASS, shown per suite by `all.sh`; the `fit_key` import check reads the whole module
-- [x] F5 docs, counts (badge 4352 hook + 36 bench, PASS only) and version: README, CONTRIBUTING, SECURITY, CHANGELOG, both manifests at 0.7.2
+- [x] F5 docs, counts (badge 4376 hook + 36 bench, PASS only) and version: README, CONTRIBUTING, SECURITY, CHANGELOG, both manifests at 0.7.2
 - [x] E1 the ledger drop, traced (2026-11-25): a sharing violation on the claimed file; 3 drops in 1,000, every one in that order, and a held delete handle reproduces it
 - [ ] T3, the release word, tag (the maintainer's)
 
 ## Next release (after 0.7.2) — open items
+- [ ] Doctor does not name one layout the paid check refuses: a counter in a full-key folder over 232 characters after `LongPathsEnabled` is switched off (the project moves to a fresh short folder; the lock check refuses rather than restart the count). Doctor should print the two-folder FAIL line for it too
 - [ ] The ledger race (was 0.7.1 F4): with two Stop hooks at once, a run's ledger line can be missed. Measured on the author's Windows laptop: 4 rounds in 1,000 (2026-11-24), 3 in 1,000 (2026-11-25), none with two lines. Traced in 0.7.2 E1: hook B holds `pending.json` open for its rename while hook A's rename wins; A's read of the claimed file then fails with a sharing violation and A deletes it, so B's rename fails and nobody writes. Fix: the read retries a `PermissionError` 5 times, 20 ms apart (the `write_json` shape), and deletes the claimed file only when its JSON is bad; red case: a held delete handle on `pending.json` (E1b)
 - [ ] The `runs/` archive name: `runs/<started_at>_<task>.json` can be 186 characters (two names cut at 80), so in a state folder near the Windows limit a closed run may fail to archive, as before 0.7.1. 0.7.1's key rule counts only the fixed file names (49 at most); counting the archive would give ordinary repos new short keys
 - [ ] A `HOME` so long that even the short key leaves no room (a base folder over 140 characters on Windows) still fails to write state; doctor's `state folder:` line is the only sign
