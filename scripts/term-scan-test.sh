@@ -65,9 +65,39 @@ okc "r4 a term saved as cp1252: a tree hit, a history hit, the not-UTF-8 clause,
 mkr r6; printf 'zebrafish\n' > "$W/r6/.smartuse-terms.local"; printf '\377\376z\000e\000b\000r\000a\000f\000i\000s\000h\000\n\000' > "$W/r6/u16.txt"
 git -C "$W/r6" add u16.txt; gcm "$W/r6" -m 'add utf-16 note'
 out=$(scan2 "$W/r6" --history); got=$?
-okc "r6 a UTF-16LE file: a tree hit, one binary diff counted, never printed" "$(ex1)$(has "$(sect "$out" private#1)" 'u16.txt:')$(has "$out" '1 binary diffs not read')$(lacks "$out" zebrafish)" "exit $got; $out"
+okc "r6 a UTF-16LE file: a tree hit, a history hit (git log --text reads it), no binary diff left unread, never printed" "$(ex1)$(has "$(sect "$out" private#1)" 'u16.txt:')$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" 'binary diffs not read')$(lacks "$out" zebrafish)" "exit $got; $out"
 mkr r7; printf 'zebrafish\n' > "$W/r7/.smartuse-terms.local"; printf 'hello\n' > "$W/r7/zebrafish-notes.txt"
 git -C "$W/r7" add zebrafish-notes.txt; gcm "$W/r7" -m 'add notes'
 out=$(scan2 "$W/r7" --history); got=$?
 okc "r7 a file name holding the term is a private#1 hit (tree and history), the name is starred" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
+# 0.7.2 review fix round A (D10-D12). Same temp-repo style.
+mkr r8; printf 'z\303\251brafish\n' > "$W/r8/.smartuse-terms.local"; printf 'mail bob@corp-x.io z\351brafish\n' > "$W/r8/cp.txt"
+git -C "$W/r8" add cp.txt; gcm "$W/r8" -m 'add cp1252 mail note'
+out=$(scan2 "$W/r8" --history); got=$?
+okc "r8 D10 a cp1252 term on an e-mail line: the private hit is found, no excerpt shows the term in any reading" "$(ex1)$(has "$(sect "$out" private#1)" 'cp.txt:1')$(has "$out" '## email')$(lacks "$out" brafish)" "exit $got; $out"
+mkr r9; printf 'zebrafish\n' > "$W/r9/.smartuse-terms.local"; printf 'bob@corp-x.io z\000e\000b\000r\000a\000f\000i\000s\000h\000\n' > "$W/r9/u16.txt"
+git -C "$W/r9" add u16.txt; gcm "$W/r9" -m 'add utf-16 mail note'
+out=$(scan2 "$W/r9" --history); got=$?
+okc "r9 D10 a UTF-16LE term on an e-mail line: the private hit is found, the e-mail excerpt stars it" "$(ex1)$(has "$(sect "$out" private#1)" 'u16.txt:1')$(has "$out" '## email')$(lacks "$out" zebrafish)" "exit $got; $out"
+mkr r10; printf 'zebrafish\n' > "$W/r10/.smartuse-terms.local"; printf '\377\376z\000e\000b\000r\000a\000f\000i\000s\000h\000\n\000' > "$W/r10/old.txt"
+git -C "$W/r10" add old.txt; gcm "$W/r10" -m 'add utf-16 note'; git -C "$W/r10" rm -q old.txt; gcm "$W/r10" -m 'remove it'
+out=$(scan2 "$W/r10" --history); got=$?
+okc "r10 D11 a UTF-16 file added then removed: history reports a private hit (git log --text), never printed" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
+mkr r11; printf 'zebrafish\n' > "$W/r11/.smartuse-terms.local"; printf 'mail bob@corp-x.io\nmail amy@corp-y.io\n' > "$W/r11/a.txt"; printf 'the term zebrafish\n' > "$W/r11/z.txt"
+git -C "$W/r11" add a.txt z.txt; gcm "$W/r11" -m 'add notes'
+out=$(scan2 "$W/r11" --max-hits 2); got=$?
+okc "r11 D12 --max-hits caps generic rows only: a later private hit is kept, the summary says the cap was reached" "$(ex1)$(has "$(sect "$out" private#1)" 'z.txt')$(has "$out" '(1 private)')$(has "$out" 'cap reached at 2')$(lacks "$out" zebrafish)" "exit $got; $out"
+out=$(scan2 "$W/r11"); case "$out" in *"cap reached"*) echo "FAIL r11b no cap clause when the cap did not bite: $out"; fail=1;; *) echo "PASS r11b no cap clause when the cap is not reached";; esac
+mkr r12; printf 'zebrafish\n' > "$W/r12/.smartuse-terms.local"; printf 'nothing here\n' > "$W/r12/plain.txt"
+git -C "$W/r12" add plain.txt; git -C "$W/r12" -c user.name=zebrafish -c user.email=bob@corp-x.io -c commit.gpgsign=false commit -q -m 'plain subject'
+out=$(scan2 "$W/r12" --history); got=$?
+okc "r12 D12 an author name holding the term is a history@ private hit; the author's e-mail is no generic hit" "$(ex1)$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" '## email')$(lacks "$out" zebrafish)" "exit $got; $out"
+mkr r13; printf 'zebrafish
+' > "$W/r13/.smartuse-terms.local"; printf -- '-- zebrafish
+' > "$W/r13/a.txt"; printf -- '++ zebrafish
+' > "$W/r13/b.txt"
+git -C "$W/r13" add a.txt b.txt; gcm "$W/r13" -m 'add two notes'; git -C "$W/r13" rm -q a.txt b.txt; gcm "$W/r13" -m 'remove them'
+out=$(scan2 "$W/r13" --history); got=$?
+n=$(sect "$out" private#1 | grep -c 'history@')
+okc "r13 a patch line that looks like a file header (--- term, +++ term) inside a hunk is scanned: 4 history hits, not 2" "$(ex1)$([ "$n" = 4 ] && echo 1 || echo 0)$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
