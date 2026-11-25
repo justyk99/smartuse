@@ -3066,6 +3066,13 @@ def paid_count_flags(args, extra=""):
 
 
 PAID_SDIR = "the state folder cannot be written"   # 0.7.1 F2: paid_count's `why` when the state folder cannot be made; paid_verdict names /smartuse:doctor for it, not the adapter
+PAID_LONG = "the state folder's path is too long for the counter's files"   # 0.7.2 F3: `why` when a counter file's own path passes 259 characters on Windows (long paths off); paid_verdict names /smartuse:doctor for it too
+
+
+def paid_why(path, extra=0):
+    """paid_count's `why` for a counter file it could not create: PAID_LONG when this is Windows and the file's path (plus `extra` characters
+    of a temporary name made beside it) is past the 259 a path may hold without long-path support (0.7.2 F3), else "the counter is not writable"."""
+    return PAID_LONG if os.name == "nt" and len(str(path)) + extra > 259 else "the counter is not writable"
 
 
 def paid_counter_lock(sdir, deadline=None):
@@ -3164,7 +3171,7 @@ def paid_count(data, sdir, items, text, deadline=None):
                 except FileExistsError:
                     continue
                 except Exception:
-                    return True, "the counter is not writable", k
+                    return True, paid_why(marker), k             # 0.7.2 F3: a 40-character marker in a long kept folder: the path, not the adapter
                 claimed.append(marker)
             if not int(e.get("used") or 0):
                 e["run1_at"] = time.time()                    # F5: a typed test ok counts for this go only when its record is later than this (the first run)
@@ -3175,7 +3182,7 @@ def paid_count(data, sdir, items, text, deadline=None):
         if paid_write_json(f, state):
             claimed = []
             return None
-        return True, "the counter is not writable", 0
+        return True, paid_why(f, len(str(os.getpid())) + 5), 0   # the temporary file beside it is paid-runs.json.<pid>.tmp
     finally:
         for m in claimed:
             try:
@@ -3276,7 +3283,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         why = str(e)
     except Exception:
         why = "the check failed"
-    if why == PAID_SDIR:                                      # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written
+    if why in (PAID_SDIR, PAID_LONG):                         # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written; 0.7.2 F3: nor for a path too long for its files
         return head(first) + f"could not verify the go ({why}); run /smartuse:doctor. Nothing was spent."
     if why:
         return head(first) + f"could not verify the go ({why}); put it in .claude/smartuse.local.md. Nothing was spent."

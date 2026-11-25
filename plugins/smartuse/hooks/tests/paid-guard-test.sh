@@ -2150,6 +2150,39 @@ if [ "$NT" != 1 ]; then ok "39b skipped here (not Windows: no short key can meet
     rm -rf "$D/lp"
   fi
 fi
+# ===== 39c. 0.7.2 F3 (D-YK20, the honest half), a kept state folder too long for paid runs is said aloud. A full-key folder that already exists is kept while a file
+# of 26 characters fits in it (up to 232), but a real 30-character tool_use_id makes the claim marker paid.<id>.done 40 characters: in a folder of 219 to 232 characters,
+# with Windows long paths off, that marker cannot be made, so no paid run was ever counted there, and the reason sent the owner to the adapter, which is not the fix. Now
+# the reason says the folder's path is too long and names /smartuse:doctor; nothing is counted, no marker is left. Windows only, and only with LongPathsEnabled = 0.
+if [ "$NT" != 1 ]; then ok "39c skipped here (not Windows: the 259-character path limit is Windows-only)"; else
+  LPON=$(py -c 'import sys
+try:
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+        sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
+except Exception:
+    sys.stdout.write("0")' </dev/null)   # the same read as wait-gate-test.sh section e: this machine's long-path switch (read only)
+  LK=$(( 224 - BL )); LID=toolu_01ABCDEFGHIJKLMNOPQRSTUV
+  if [ "$LPON" = 1 ]; then ok "39c skipped: Windows long paths are on here (LongPathsEnabled = 1), so a marker in a 225-character folder is made; the deny text is the only proof"
+  elif [ "$LK" -lt 60 ]; then ok "39c skipped: HOME is $BL characters, too long to build a state folder of 225"; else
+    rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); LF="$HOME/.claude/smartuse/projects/$LKEY"
+    fresh; mkdir -p "$LP/.claude" "$LF"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+    [ "${#LID}" = 30 ] && [ "${#LKEY}" = "$LK" ] && ok "39c the kept state folder is $(( BL + 1 + LK )) characters, the tool_use_id 30 (marker 40)" || ko "39c key ${#LKEY} (wanted $LK), id ${#LID} (wanted 30)"
+    guard 'python render.py --images 1' "$LID" "$LPW"
+    case "$OUT" in *'could not verify the go (the state folder'*'path is too long for the counter'*'run /smartuse:doctor. Nothing was spent.'*) ok "39c a paid run in the kept 225-character folder: the reason says the path is too long and names /smartuse:doctor";; *) ko "39c reason: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+    case "$OUT" in *'smartuse.local.md'*) ko "39c the reason must not send the owner to the adapter: $OUT";; "") ko "39c no deny at all";; *) ok "39c ... and does not send the owner to smartuse.local.md (the adapter is not the fix)";; esac
+    [ -z "$(ls -A "$LF" 2>/dev/null)" ] && ok "39c nothing counted and no claim marker or lock left in the folder" || ko "39c the folder holds: $(ls -A "$LF" 2>&1 | tr '\n' ' ')"
+    rm -rf "$D/lp"; LK=$(( 209 - BL ))   # pin: a kept folder of 210 characters still counts (the marker path is 251)
+    if [ "$LK" -lt 60 ]; then ok "39c pin skipped: HOME is $BL characters, too long to build a state folder of 210"; else
+      LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); LF="$HOME/.claude/smartuse/projects/$LKEY"
+      fresh; mkdir -p "$LP/.claude" "$LF"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+      guard 'python render.py --images 1' "$LID" "$LPW"
+      [ -z "$OUT" ] && [ -z "$ERR" ] && [ -f "$LF/paid-runs.json" ] && [ -f "$LF/paid.$LID.done" ] && ok "39c pin: in a kept folder of $(( BL + 1 + LK )) characters the same run is counted (no PAID_LONG there)" || ko "39c pin: stdout '${OUT:0:300}' stderr '$ERR' folder: $(ls -A "$LF" 2>&1 | tr '\n' ' ')"
+    fi
+    [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39c the real ~/.claude/smartuse gained no folder from these cases" || ko "39c a test folder reached the real ~/.claude/smartuse/projects"
+    rm -rf "$D/lp"
+  fi
+fi
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
