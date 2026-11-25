@@ -12,7 +12,7 @@ usage: python3 scripts/term-scan.py [--history] [--repo <path>] [--max-hits N] [
 exit 1 when any hit was found (so it can gate a push), 2 when the private list is missing or empty (those names were not
 checked, so the run cannot call the tree clean; --no-private says a generic-only run is meant, as in CI), 0 when clean.
 """
-import argparse, codecs, os, pathlib, re, subprocess, sys
+import argparse, os, pathlib, re, subprocess, sys
 
 GENERIC = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@(?!users\.noreply\.github\.com|anthropic\.com|example\.(com|org))[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
@@ -46,20 +46,13 @@ def load_private(repo):
     return terms
 
 
-def _u8_one_per_byte(e):  # an undecodable run becomes one U+FFFD per byte, so every character is one byte or one valid sequence
-    return "\ufffd" * (e.end - e.start), e.end
+# UTF-8 with every undecodable byte read as one character: `surrogateescape` gives each bad byte one lone surrogate (U+DC80..U+DCFF),
+# which is then shown as U+FFFD. So every character is one bad byte or one valid sequence, and the byte offsets can be rebuilt.
+_ESCAPED = re.compile("[\udc80-\udcff]")
 
 
-_INVALID = []
-
-
-def _u8_record(e):
-    _INVALID.append((e.start, e.end))
-    return _u8_one_per_byte(e)
-
-
-codecs.register_error("termscan-u8", _u8_one_per_byte)
-codecs.register_error("termscan-u8-record", _u8_record)
+def u8_replace(raw):
+    return _ESCAPED.sub("\ufffd", raw.decode("utf-8", "surrogateescape"))
 
 
 class Reading:
@@ -82,19 +75,11 @@ class Reading:
                 out.append((b, b + n))
                 b += n
             return out
-        _INVALID.clear()  # "u8bad": UTF-8 with undecodable bytes replaced, one character per bad byte
-        self.raw.decode("utf-8", "termscan-u8-record")
-        inv, out, b, k = list(_INVALID), [], 0, 0
-        for ch in self.text:
-            if k < len(inv) and b == inv[k][0]:
-                out.append((b, b + 1))
-                b += 1
-                if b == inv[k][1]:
-                    k += 1
-            else:
-                n = len(ch.encode("utf-8"))
-                out.append((b, b + n))
-                b += n
+        out, b = [], 0  # "u8bad": a bad byte is one character of one byte, any other character is as long as its encoding
+        for ch in self.raw.decode("utf-8", "surrogateescape"):
+            n = 1 if "\udc80" <= ch <= "\udcff" else len(ch.encode("utf-8"))
+            out.append((b, b + n))
+            b += n
         return out
 
 
@@ -105,7 +90,7 @@ def readings(raw):
     try:
         base, bad = [Reading(raw.decode("utf-8"), raw, "u8")], False
     except UnicodeDecodeError:
-        base, bad = [Reading(raw.decode("utf-8", "termscan-u8"), raw, "u8bad"), Reading(raw.decode("cp1252", errors="replace"), raw, "cp")], True
+        base, bad = [Reading(u8_replace(raw), raw, "u8bad"), Reading(raw.decode("cp1252", errors="replace"), raw, "cp")], True
     rs = list(base)
     if b"\0" in raw:
         rs += [Reading(r.text.replace("\0", ""), raw, r.kind, parent=r) for r in base]

@@ -75,6 +75,10 @@ mkr r8; printf 'z\303\251brafish\n' > "$W/r8/.smartuse-terms.local"; printf 'mai
 git -C "$W/r8" add cp.txt; gcm "$W/r8" -m 'add cp1252 mail note'
 out=$(scan2 "$W/r8" --history); got=$?
 okc "r8 D10 a cp1252 term on an e-mail line: the private hit is found, no excerpt shows the term in any reading" "$(ex1)$(has "$(sect "$out" private#1)" 'cp.txt:1')$(has "$out" '## email')$(lacks "$out" brafish)" "exit $got; $out"
+mkr r8b; printf 'z\303\251brafish\n' > "$W/r8b/.smartuse-terms.local"; printf 'caf\351\222s r\351sum\351 na\357ve mail a.b@foo.org z\351brafish\n' > "$W/r8b/notes.txt"
+git -C "$W/r8b" add notes.txt; gcm "$W/r8b" -m 'add a cp1252 note with several bad runs'
+out=$(scan2 "$W/r8b" --history); got=$?
+okc "r8b D10 a cp1252 line with a 2-byte bad run before the term: the offsets stay aligned, no excerpt shows the term" "$(ex1)$(has "$(sect "$out" private#1)" 'notes.txt:1')$(has "$out" '## email')$(lacks "$out" brafish)" "exit $got; $out"
 mkr r9; printf 'zebrafish\n' > "$W/r9/.smartuse-terms.local"; printf 'bob@corp-x.io z\000e\000b\000r\000a\000f\000i\000s\000h\000\n' > "$W/r9/u16.txt"
 git -C "$W/r9" add u16.txt; gcm "$W/r9" -m 'add utf-16 mail note'
 out=$(scan2 "$W/r9" --history); got=$?
