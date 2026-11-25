@@ -2023,8 +2023,9 @@ def fit_key(full, base, nt):
     (<HOME>/.claude/smartuse/projects); nt = os.name == "nt". `full` itself while the folder and its longest file name fit (a whole path may hold
     259 characters on Windows, E1; one name 255 elsewhere), else the last 40 characters of it, "-", and 12 hex of the sha1 of the whole key. A folder
     that already exists under the full key is kept while a file fits in it (D7a), or whatever its length when Windows long paths are on (D8: the
-    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json: the counter wins, so
-    a made full-key folder cannot restart a paid count (0.7.2 F2). Reads folder and file names and one registry value, never content. Never raises:
+    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json and the full-key folder
+    does not: that counter wins, so a made full-key folder cannot restart a paid count (0.7.2 F2); a counter in both folders keeps the full key and
+    the paid check denies (D9: a folder copy can plant one, so neither alone may win). Reads folder and file names and one registry value, never content. Never raises:
     any error returns `full`.
     The same text is copied into heartbeat.py, ledger.py, recall.py, until-done.py, wait-gate.py and bash-guard.py (the tests assert it equal)."""
     try:
@@ -2053,7 +2054,8 @@ def fit_key(full, base, nt):
             return full
         s = short()
         if (os.path.isdir(base + os.sep + full) and (not nt or dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX or long_paths())
-                and not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json")):
+                and (os.path.isfile(base + os.sep + full + os.sep + "paid-runs.json")
+                     or not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json"))):
             return full
         return s
     except Exception:
@@ -2938,6 +2940,20 @@ def paid_state_dir(project):
     return paid_home() / ".claude" / "smartuse" / "projects" / paid_project_key(project)
 
 
+def paid_two_counters(project):
+    """True when the project's full-key state folder and its short-key one each hold paid-runs.json (0.7.2 D9). `owner-file` reads names in the command
+    text, so a folder copy or link (cp -r, robocopy, a junction) can plant a counter in either folder; fit_key keeps the full key then, and no single
+    planted counter may win, so the paid call is denied. Not inside fit_key (its text is one copy in six hooks). The short name is fit_key's own answer
+    for a base that cannot exist (a "?" run as long as the real one, so the length test is the same and no folder is kept): it differs from the full key
+    only when the key is too long for its folder. Reads names only; a detection error propagates (the caller denies)."""
+    import pathlib   # inside the paid path only (V9): no new top-level import
+    full = re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
+    base = str(paid_home() / ".claude" / "smartuse" / "projects")
+    short = fit_key(full, "?" * len(base), os.name == "nt")
+    return (short != full and os.path.isfile(base + os.sep + full + os.sep + "paid-runs.json")
+            and os.path.isfile(base + os.sep + short + os.sep + "paid-runs.json"))
+
+
 def paid_stored(project):
     """paid-runs.json read as it stands ({} when it cannot be read: paid_count, under its lock, is where a corrupt file denies)."""
     try:
@@ -3067,6 +3083,7 @@ def paid_count_flags(args, extra=""):
 
 PAID_SDIR = "the state folder cannot be written"   # 0.7.1 F2: paid_count's `why` when the state folder cannot be made; paid_verdict names /smartuse:doctor for it, not the adapter
 PAID_LONG = "the state folder's path is too long for the counter's files"   # 0.7.2 F3: `why` when a counter file's own path passes 259 characters on Windows (long paths off); paid_verdict names /smartuse:doctor for it too
+PAID_TWO = "two state folders hold a counter"   # 0.7.2 D9: `why` when the full-key folder and the short-key folder each hold paid-runs.json (a folder copy can plant one); paid_verdict names /smartuse:doctor for it too
 
 
 def paid_why(path, extra=0):
@@ -3275,7 +3292,8 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
                 again = next((h for h in hits if h[2] or low.count(h[1].lower()) > 1), None)
                 if again:
                     return (head(again) + f"a loop or repeat runs {clip(again[1])} more than once in one call; run it once per call so each run is counted.")
-                r = paid_count(data, paid_state_dir(project), [(c[1], c[2], c[0][1], c[0][3]) for c in covered], text, deadline)
+                r = ((True, PAID_TWO, 0) if paid_two_counters(project)
+                     else paid_count(data, paid_state_dir(project), [(c[1], c[2], c[0][1], c[0][3]) for c in covered], text, deadline))
                 if r:
                     first = covered[r[2]][0]
                     why, rule = (r[1], "") if r[0] else ("", r[1])
@@ -3283,7 +3301,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         why = str(e)
     except Exception:
         why = "the check failed"
-    if why in (PAID_SDIR, PAID_LONG):                         # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written; 0.7.2 F3: nor for a path too long for its files
+    if why in (PAID_SDIR, PAID_LONG, PAID_TWO):               # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written; 0.7.2 F3: nor for a path too long for its files; D9: nor for two counters
         return head(first) + f"could not verify the go ({why}); run /smartuse:doctor. Nothing was spent."
     if why:
         return head(first) + f"could not verify the go ({why}); put it in .claude/smartuse.local.md. Nothing was spent."

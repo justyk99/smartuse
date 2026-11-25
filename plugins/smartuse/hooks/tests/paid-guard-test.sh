@@ -2128,27 +2128,74 @@ if [ "$LK" -lt 60 ]; then skip "39 skipped: HOME is $BL characters, too long to 
   [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39 the real ~/.claude/smartuse gained no folder from these cases" || ko "39 a test folder reached the real ~/.claude/smartuse/projects"
   rm -rf "$D/lp"
 fi
-# ===== 39b. 0.7.2 F2 (D-YK19), making a state folder keeps the paid count. A project whose state folder is 220 characters is on the short key (no full-key
-# folder yet: a file would not fit with room to spare). Run 1 is counted in the short folder. A shell then makes the full-key folder (a file fits in it, so
-# 0.7.1's rule moved to it and the count restarted at used 1). Now the folder that already holds the counter wins: run 2 shows used 2 in the short folder, and
-# the made folder stays empty. Windows only: elsewhere a short key arises past 255 characters, where its full-key folder cannot be made.
+# ===== 39b. 0.7.2 F2 (D-YK19), making a state folder keeps the paid count. A project whose state folder is 205 characters (the real reset window: 195 to 209 with
+# long paths off, where a 30-character tool_use_id's marker fits) is on the short key (no full-key folder yet: a 64-character name would not fit). Run 1 is counted
+# in the short folder. A shell then makes the full-key folder (a file fits in it, so 0.7.1's rule moved to it and the count restarted at used 1). Now the folder that
+# already holds the counter wins: run 2 shows used 2 in the short folder, and the made folder stays empty. Card A: with a go WITHOUT test ok, run 2 is refused with
+# "waits for the owner's test ok" (the count survived; before, it ran as a new run 1). Windows only: elsewhere a short key arises past 255 characters, where its
+# full-key folder cannot be made.
 if [ "$NT" != 1 ]; then skip "39b skipped here (not Windows: no short key can meet a full-key folder that can be made)"; else
-  LK=$(( 219 - BL ))
-  if [ "$LK" -lt 60 ]; then skip "39b skipped: HOME is $BL characters, too long to build a state folder of 220"; else
+  LK=$(( 204 - BL )); ID1=toolu_01ABCDEFGHIJKLMNOPQRSTUV; ID2=toolu_02ABCDEFGHIJKLMNOPQRSTUV   # two 30-character ids, as Claude Code makes them (marker paid.<id>.done is 40)
+  if [ "$LK" -lt 60 ]; then skip "39b skipped: HOME is $BL characters, too long to build a state folder of 205"; else
     rm -rf "$D/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW")
     fresh; mkdir -p "$LP/.claude"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
     [ "${#LKEY}" = "$LK" ] && ok "39b the project folder's key is $LK characters (state folder $(( BL + 1 + LK )) on this HOME)" || ko "39b the key is ${#LKEY} characters, wanted $LK"
-    guard 'python render.py --images 1' toolu_M1 "$LPW"
+    [ "${#ID1}" = 30 ] && ok "39b the tool_use_id is 30 characters (marker 40), the state folder $(( BL + 1 + LK ))" || ko "39b id ${#ID1}"
+    guard 'python render.py --images 1' "$ID1" "$LPW"
     LS=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/ledger.py" --state-dir </dev/null); LS=${LS%$'\r'}; LN=${LS##*[/\\]}; LR="$HOME/.claude/smartuse/projects/$LN/paid-runs.json"
     [ -z "$OUT" ] && [ -z "$ERR" ] && [ -n "$LN" ] && [ "$LN" != "$LKEY" ] && [ -f "$LR" ] && [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 1 ] && ok "39b run 1 is counted in the short-key folder ($LN): used 1" || ko "39b run 1: stdout '${OUT:0:300}' stderr '$ERR' short folder '$LN', counter: $(cat "$LR" 2>&1)"
     mkdir -p "$HOME/.claude/smartuse/projects/$LKEY"
-    guard 'python render.py --images 1' toolu_M2 "$LPW"
+    guard 'python render.py --images 1' "$ID2" "$LPW"
     LS2=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/ledger.py" --state-dir </dev/null); LS2=${LS2%$'\r'}; LN2=${LS2##*[/\\]}
     [ "$LN2" = "$LN" ] && ok "39b after the shell made the full-key folder, ledger.py --state-dir still names the short folder" || ko "39b ledger.py now names '$LN2' (was '$LN')"
     [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 2 ] && ok "39b run 2 shows used 2 in the short-key folder: the count survived" || ko "39b run 2: stdout '${OUT:0:300}' stderr '$ERR' short counter: $(cat "$LR" 2>&1) full-key folder: $(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>&1 | tr '\n' ' ')"
     [ -z "$(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>/dev/null)" ] && ok "39b the full-key folder the shell made stays empty (no counter, no marker moved into it)" || ko "39b the full-key folder holds: $(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>&1 | tr '\n' ' ')"
+    # Card A: a go WITHOUT test ok. Run 1 is counted in the short folder, the shell makes the full-key folder, run 2 is refused (the count survived; before, run 2 was a new run 1)
+    fresh; mkdir -p "$LP/.claude"; printf 'paid: render.py x 10, cap RM5\n' > "$LP/.claude/smartuse.local.md"
+    guard 'python render.py --images 1' "$ID1" "$LPW"
+    [ -z "$OUT" ] && [ -z "$ERR" ] && [ -f "$LR" ] && ok "39b Card A: run 1 (a go without test ok) is allowed and counted in the short-key folder" || ko "39b Card A run 1: stdout '${OUT:0:300}' stderr '$ERR'"
+    mkdir -p "$HOME/.claude/smartuse/projects/$LKEY"
+    guard 'python render.py --images 1' "$ID2" "$LPW"
+    case "$OUT" in *"run 1 of 10 is done; the batch waits for the owner's "*"test ok"*) ok "39b Card A: after the shell made the full-key folder, run 2 is refused: the batch waits for the owner's test ok";; *) ko "39b Card A run 2: stdout '${OUT:0:400}' stderr '$ERR' counter: $(cat "$LR" 2>&1)";; esac
+    [ "$(py "$CW" entry "$(wp "$LR")" used </dev/null 2>/dev/null)" = 1 ] && [ -z "$(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>/dev/null)" ] && ok "39b Card A: the count stays used 1 in the short folder and the made folder stays empty" || ko "39b Card A state: short counter $(cat "$LR" 2>&1) full-key folder: $(ls -A "$HOME/.claude/smartuse/projects/$LKEY" 2>&1 | tr '\n' ' ')"
     [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39b the real ~/.claude/smartuse gained no folder from these cases" || ko "39b a test folder reached the real ~/.claude/smartuse/projects"
-    rm -rf "$D/lp"
+    rm -rf "${D:?}/lp"
+  fi
+fi
+# ===== 39d. 0.7.2 D9 (the review's proven exploit), a folder copy plants a counter. owner-file matches only names in the command text and file-guard only paths under projects/<key>/,
+# so `cp -r <tmp>/snap <state>/projects/<short>` puts a paid-runs.json holding {} in the short-key folder without either guard seeing it. A kept full-key project (a counter
+# there, used 1) then moved to the short folder, where the count was {}. Now a counter in BOTH folders makes the paid check deny ("two state folders hold a counter", naming
+# /smartuse:doctor): no single planted counter wins, in either direction. The copy is a real cp -r here. Windows only (a made full-key folder next to a short key).
+if [ "$NT" != 1 ]; then skip "39d skipped here (not Windows: no short key can meet a full-key folder that can be made)"; else
+  LK=$(( 204 - BL )); ID1=toolu_01ABCDEFGHIJKLMNOPQRSTUV; ID2=toolu_02ABCDEFGHIJKLMNOPQRSTUV
+  if [ "$LK" -lt 60 ]; then skip "39d skipped: HOME is $BL characters, too long to build a state folder of 205"; else
+    rm -rf "${D:?}/lp" "${D:?}/snap"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); PR="$HOME/.claude/smartuse/projects"
+    FP="$PR/$LKEY"; FR="$FP/paid-runs.json"
+    LNAME=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$LKEY" </dev/null)   # the short-key folder's name, worked out the suite's own way
+    SP="$PR/$LNAME"; SR="$SP/paid-runs.json"
+    # (a) the kept full-key project: its folder exists, its counter says used 1; (b) the planted copy; (c) run 2 must be denied
+    fresh; mkdir -p "$LP/.claude" "$FP" "$D/snap"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+    guard 'python render.py --images 1' "$ID1" "$LPW"
+    [ -z "$OUT" ] && [ -z "$ERR" ] && [ -f "$FR" ] && [ "$(py "$CW" entry "$(wp "$FR")" used </dev/null 2>/dev/null)" = 1 ] && ok "39d the kept full-key project holds its counter: used 1" || ko "39d run 1: stdout '${OUT:0:300}' stderr '$ERR' full-key folder: $(ls -A "$FP" 2>&1 | tr '\n' ' ')"
+    printf '{}' > "$D/snap/paid-runs.json"; cp -r "$D/snap" "$SP"
+    [ -f "$SR" ] && ok "39d the folder copy planted a counter ({}) in the short-key folder ($LNAME)" || ko "39d the copy did not land: $(ls -A "$PR" 2>&1 | tr '\n' ' ')"
+    guard 'python render.py --images 1' "$ID2" "$LPW"
+    case "$OUT" in *'could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'*) ok "39d run 2 is denied: two state folders hold a counter, the reason names /smartuse:doctor";; *) ko "39d run 2: stdout '${OUT:0:400}' stderr '$ERR' full counter: $(cat "$FR" 2>&1) short counter: $(cat "$SR" 2>&1)";; esac
+    case "$OUT" in *'smartuse.local.md'*) ko "39d the reason must not send the owner to the adapter: $OUT";; *) ok "39d ... and does not send the owner to smartuse.local.md";; esac
+    [ "$(py "$CW" entry "$(wp "$FR")" used </dev/null 2>/dev/null)" = 1 ] && [ "$(cat "$SR" 2>/dev/null)" = '{}' ] && [ ! -e "$FP/paid.$ID2.done" ] && [ ! -e "$SP/paid.$ID2.done" ] && ok "39d nothing was counted: the full-key counter still says used 1, the planted one is untouched, no marker for run 2" || ko "39d state: full $(cat "$FR" 2>&1) short $(cat "$SR" 2>&1) markers: $(ls -A "$FP" "$SP" 2>&1 | tr '\n' ' ')"
+    # the other direction: a live short-key counter, a copy plants one in the full-key folder
+    rm -rf "${D:?}/lp" "${D:?}/snap"; LP=$(mklong "$LK"); fresh; mkdir -p "$LP/.claude" "$D/snap"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"
+    guard 'python render.py --images 1' "$ID1" "$LPW"
+    [ -z "$OUT" ] && [ -z "$ERR" ] && [ -f "$SR" ] && [ "$(py "$CW" entry "$(wp "$SR")" used </dev/null 2>/dev/null)" = 1 ] && ok "39d the short-key project holds its counter: used 1" || ko "39d short run 1: stdout '${OUT:0:300}' stderr '$ERR' folders: $(ls -A "$PR" 2>&1 | tr '\n' ' ')"
+    printf '{}' > "$D/snap/paid-runs.json"; cp -r "$D/snap" "$FP"
+    guard 'python render.py --images 1' "$ID2" "$LPW"
+    case "$OUT" in *'could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'*) ok "39d the other direction (a counter copied into the full-key folder): run 2 is denied too";; *) ko "39d other direction run 2: stdout '${OUT:0:400}' stderr '$ERR' short counter: $(cat "$SR" 2>&1)";; esac
+    [ "$(py "$CW" entry "$(wp "$SR")" used </dev/null 2>/dev/null)" = 1 ] && ok "39d ... and the short-key counter still says used 1" || ko "39d short counter: $(cat "$SR" 2>&1)"
+    # a delete still resets the count (documented in SECURITY.md): remove the planted folder, the live counter runs again
+    rm -rf "${FP:?}"; guard 'python render.py --images 1' "$ID2" "$LPW"
+    [ -z "$OUT" ] && [ -z "$ERR" ] && [ "$(py "$CW" entry "$(wp "$SR")" used </dev/null 2>/dev/null)" = 2 ] && ok "39d with the planted folder removed, run 2 is counted: used 2" || ko "39d after the delete: stdout '${OUT:0:300}' stderr '$ERR' counter: $(cat "$SR" 2>&1)"
+    [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39d the real ~/.claude/smartuse gained no folder from these cases" || ko "39d a test folder reached the real ~/.claude/smartuse/projects"
+    rm -rf "${D:?}/lp" "${D:?}/snap"
   fi
 fi
 # ===== 39c. 0.7.2 F3 (D-YK20, the honest half), a kept state folder too long for paid runs is said aloud. A full-key folder that already exists is kept while a file

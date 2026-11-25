@@ -75,8 +75,9 @@ def fit_key(full, base, nt):
     (<HOME>/.claude/smartuse/projects); nt = os.name == "nt". `full` itself while the folder and its longest file name fit (a whole path may hold
     259 characters on Windows, E1; one name 255 elsewhere), else the last 40 characters of it, "-", and 12 hex of the sha1 of the whole key. A folder
     that already exists under the full key is kept while a file fits in it (D7a), or whatever its length when Windows long paths are on (D8: the
-    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json: the counter wins, so
-    a made full-key folder cannot restart a paid count (0.7.2 F2). Reads folder and file names and one registry value, never content. Never raises:
+    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json and the full-key folder
+    does not: that counter wins, so a made full-key folder cannot restart a paid count (0.7.2 F2); a counter in both folders keeps the full key and
+    the paid check denies (D9: a folder copy can plant one, so neither alone may win). Reads folder and file names and one registry value, never content. Never raises:
     any error returns `full`.
     The same text is copied into heartbeat.py, ledger.py, recall.py, until-done.py, wait-gate.py and bash-guard.py (the tests assert it equal)."""
     try:
@@ -105,7 +106,8 @@ def fit_key(full, base, nt):
             return full
         s = short()
         if (os.path.isdir(base + os.sep + full) and (not nt or dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX or long_paths())
-                and not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json")):
+                and (os.path.isfile(base + os.sep + full + os.sep + "paid-runs.json")
+                     or not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json"))):
             return full
         return s
     except Exception:

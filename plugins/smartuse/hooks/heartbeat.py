@@ -166,8 +166,9 @@ def fit_key(full, base, nt):
     (<HOME>/.claude/smartuse/projects); nt = os.name == "nt". `full` itself while the folder and its longest file name fit (a whole path may hold
     259 characters on Windows, E1; one name 255 elsewhere), else the last 40 characters of it, "-", and 12 hex of the sha1 of the whole key. A folder
     that already exists under the full key is kept while a file fits in it (D7a), or whatever its length when Windows long paths are on (D8: the
-    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json: the counter wins, so
-    a made full-key folder cannot restart a paid count (0.7.2 F2). Reads folder and file names and one registry value, never content. Never raises:
+    LongPathsEnabled switch is read, only when the length test fails), unless the short-key folder already holds paid-runs.json and the full-key folder
+    does not: that counter wins, so a made full-key folder cannot restart a paid count (0.7.2 F2); a counter in both folders keeps the full key and
+    the paid check denies (D9: a folder copy can plant one, so neither alone may win). Reads folder and file names and one registry value, never content. Never raises:
     any error returns `full`.
     The same text is copied into heartbeat.py, ledger.py, recall.py, until-done.py, wait-gate.py and bash-guard.py (the tests assert it equal)."""
     try:
@@ -196,11 +197,17 @@ def fit_key(full, base, nt):
             return full
         s = short()
         if (os.path.isdir(base + os.sep + full) and (not nt or dirlen + 1 + KEPT_ROOM <= WIN_PATH_MAX or long_paths())
-                and not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json")):
+                and (os.path.isfile(base + os.sep + full + os.sep + "paid-runs.json")
+                     or not os.path.isfile(base + os.sep + s + os.sep + "paid-runs.json"))):
             return full
         return s
     except Exception:
         return full
+
+
+def full_key(project):
+    """The whole key of a project: its full resolved path with every character outside [A-Za-z0-9._-] replaced by "-" and a leading "-" dropped."""
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
 
 
 def project_key(project):
@@ -208,8 +215,7 @@ def project_key(project):
     and a leading "-" dropped (/home/u/proj -> home-u-proj, C:/Users/u/proj -> C--Users-u-proj), the way Claude Code keys
     ~/.claude/projects/. Two repos that share a folder name get two state dirs. A path too long for a state folder to hold its files
     is shortened by fit_key() (0.7.1)."""
-    full = re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(project).resolve())).lstrip("-") or "root"
-    return fit_key(full, str(HOME / ".claude" / "smartuse" / "projects"), os.name == "nt")
+    return fit_key(full_key(project), str(HOME / ".claude" / "smartuse" / "projects"), os.name == "nt")
 
 
 def state_dir(project, create=False):
@@ -594,7 +600,23 @@ def cli_sdir():
     return state_dir(project_dir())
 
 
-LONG_FOLDER = "path too long"   # can_write's `why` when the short throwaway works but the 40-character one (a paid run's claim marker) does not (0.7.2 F3)
+LONG_FOLDER = "path too long"   # can_write's `why` when the short throwaway works but the 49-character one (the longest claim marker of a paid run) does not (0.7.2 F3)
+LONG_NAME = 49                  # the longest fixed file name a paid run keeps in the state folder: paid.<30-character id>.<8>.done (bash-guard.py, the second script's marker)
+WIN_PATH_MAX = 259              # the longest whole file path on Windows without long-path support (the same as fit_key's)
+
+
+def two_counters(project, base):
+    """(full key, short key) when the project's full-key folder and its short-key folder under `base` each hold paid-runs.json (0.7.2 D9: a folder
+    copy or link can plant one, so the paid check denies and doctor names both), else None. The short name is fit_key's own answer for a base that
+    cannot exist (a "?" run as long as the real one); it differs from the full key only when the key is too long for its folder. Names only."""
+    try:
+        full = full_key(project)
+        short = fit_key(full, "?" * len(base), os.name == "nt")
+        if short != full and os.path.isfile(os.path.join(base, full, "paid-runs.json")) and os.path.isfile(os.path.join(base, short, "paid-runs.json")):
+            return full, short
+    except Exception:
+        pass
+    return None
 
 
 def can_write(d):
@@ -610,8 +632,8 @@ def can_write(d):
         with open(probe, "w", encoding="utf-8") as fh:
             fh.write("x")
         os.remove(probe)
-        if p == str(d) and os.name == "nt":   # 0.7.2 F3: the folder exists. A paid run keeps a 40-character claim marker there (paid.<30-character id>.done): a second throwaway of that length
-            probe = os.path.join(p, (f".doctor-{os.getpid()}-" + "x" * 40)[:36] + ".tmp")
+        if p == str(d) and os.name == "nt":   # 0.7.2 F3: the folder exists. A paid run keeps claim markers there up to 49 characters (paid.<30-character id>.<8>.done): a second throwaway of that length
+            probe = os.path.join(p, (f".doctor-{os.getpid()}-" + "x" * LONG_NAME)[:LONG_NAME - 4] + ".tmp")
             try:
                 with open(probe, "w", encoding="utf-8") as fh:
                     fh.write("x")
@@ -655,9 +677,15 @@ def doctor_lines(sdir, now=None):
     else:
         out.append("level: unknown · no options recorded for this session: restart Claude Code")
     ok, why = can_write(sdir)
+    too_long = why == LONG_FOLDER and len(str(sdir)) + 1 + LONG_NAME > WIN_PATH_MAX   # the length claim only when the path really is over 209 characters
+    if why == LONG_FOLDER and not too_long:
+        why = f"a {LONG_NAME}-character test file could not be made there"
     out.append("state folder: writable" if ok
-               else f"state folder: FAIL · paid runs cannot be counted here: its path is {len(str(sdir))} characters, too long for the 40-character files a paid run keeps in it: turn on Windows long paths, or delete this folder so smartuse uses a short name (only if it holds no paid-runs.json; its old receipts go with it)" if why == LONG_FOLDER
+               else f"state folder: FAIL · paid runs cannot be counted here: its path is {len(str(sdir))} characters, too long for the {LONG_NAME}-character files a paid run keeps in it: turn on Windows long paths, or delete this folder so smartuse uses a short name (only if it holds no paid-runs.json; its old receipts go with it)" if too_long
                else f"state folder: FAIL · cannot be written ({why}): the heartbeat cannot save its state; check that ~/.claude/smartuse is a folder you may write to")
+    two = two_counters(project_dir(), str(pathlib.Path(sdir).parent))   # 0.7.2 D9
+    if two:
+        out.append(f"state folder: FAIL · two state folders hold a paid counter: {two[0]} and {two[1]}: the paid check refuses every paid run until you delete the one that is wrong (its count and receipts go with it)")
     return out
 
 
