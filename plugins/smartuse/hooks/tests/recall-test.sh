@@ -25,6 +25,7 @@ key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pa
 fail=0
 ok() { echo "PASS $1"; }
 ko() { echo "FAIL $1"; fail=1; }
+skip() { echo "SKIP $1"; }   # a case that did not run on this machine: never a PASS, never sets fail
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
 # RECALL_REF=<git ref> runs the same cases against recall.py as that commit had it (read into this run's temp dir): how a new case is
 # shown failing on the code before the change. Unset, the working copy is tested.
@@ -630,7 +631,7 @@ has "handoff: a \\\\?\\ device path is not read" "$NR"
 adapter "handoff: docs"; run "$(ev SessionStart startup -)"
 has "handoff: a directory is not read" "$NR"
 case "$OSTYPE" in
-  msys*|cygwin*) ok "(skipped on Windows: no symlinks)";;
+  msys*|cygwin*) skip "handoff: a link inside the project that points outside is not read: Windows, no symlinks";;
   *) ln -s "$D/outside.md" "$D/proj/docs/LINK.md"; adapter "handoff: docs/LINK.md"; run "$(ev SessionStart startup -)"
      has "handoff: a link inside the project that points outside is not read" "$NR"
      lacks "handoff: the link's target is not printed" "OUTSIDE-LINE";;
@@ -679,12 +680,12 @@ if mkln "$D/proj/docs" "$D/proj/dlink"; then
   lacks "handoff: the linked folder prints none of the file" "HANDOFF-LINE-01"
   adapter "handoff: ./docs//STATUS.md"; run "$(ev SessionStart startup -)"
   has "handoff: a ./ part and a doubled separator are fine (control: no link on the way)" "HANDOFF-LINE-01"
-else ok "(skipped: no folder link can be made here without admin rights)"; fi
+else skip "(no folder link can be made here without admin rights)"; fi
 if mkln "$D/proj/docs/STATUS.md" "$D/proj/docs/FLINK.md"; then
   adapter "handoff: docs/FLINK.md"; run "$(ev SessionStart startup -)"
   has "handoff: a linked file (pointing inside the project) is not read" "$NR"
   lacks "handoff: the linked file prints none of the target" "HANDOFF-LINE-01"
-else ok "(skipped: no file link can be made here without admin rights)"; fi
+else skip "(no file link can be made here without admin rights)"; fi
 adapter "handoff: docs/NOPE.md"; run "$(ev SessionStart startup -)"
 has "handoff: a missing file is still said to be missing (control)" "docs/NOPE.md was not found"
 # .git as a link: no stale line (control first: the same git dir reached by a gitdir: file does give one)
@@ -697,7 +698,7 @@ if mkln "$D/gdreal" "$D/proj5/.git"; then
   CPDIR=$(wp "$D/proj5"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
   has "links: .git as a link: the handoff is still printed" "HANDOFF-LINE-01"
   lacks "links: .git as a link gives no stale line" "stale:"
-else ok "(skipped: no .git link can be made here without admin rights)"; fi
+else skip "(no .git link can be made here without admin rights)"; fi
 # the git dir's logs folder as a link
 oldproj proj6; mkdir -p "$D/proj6/.git/logs" "$D/logsreal"; newlog "$D/proj6/.git/logs/HEAD"; newlog "$D/logsreal/HEAD"
 CPDIR=$(wp "$D/proj6"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
@@ -707,7 +708,7 @@ if mkln "$D/logsreal" "$D/proj6/.git/logs"; then
   CPDIR=$(wp "$D/proj6"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
   has "links: .git/logs as a link: the handoff is still printed" "HANDOFF-LINE-01"
   lacks "links: .git/logs as a link gives no stale line" "stale:"
-else ok "(skipped: no logs link can be made here without admin rights)"; fi
+else skip "(no logs link can be made here without admin rights)"; fi
 r=$(py "$D/chk.py" linkstat "$HOOK" </dev/null); [ "$r" = ok ] && ok "links: a cloud-sync reparse point is not a link; a symlink and a mount point are; no reparse attribute follows st_mode" || ko "link predicate: $r"
 # the automount prefixes: decided on the text (a unit check of the allowlist, then the run: nothing is touched)
 r=$(py "$D/chk.py" plain "$HOOK" </dev/null); [ "$r" = ok ] && ok "gitdir: /net/host/x and /Network/x (any case) are not plain local; /netx/a and other local spellings still are" || ko "plain_local_target: $r"
@@ -732,7 +733,7 @@ if mkln "$D/gdparent" "$D/proj8/lnk"; then
   printf 'gitdir: real/../lnk/gd\n' > "$D/proj8/.git"
   CPDIR=$(wp "$D/proj8"); run "$(ev SessionStart startup -)"; CPDIR="$PW"
   lacks "links: a link behind a .. part is looked at too" "stale:"
-else ok "(skipped: no folder link can be made here without admin rights)"; fi
+else skip "(no folder link can be made here without admin rights)"; fi
 
 adapter $'sources: jobs/demo/plan.pdf, photos/a.jpg\nhandoff: docs/STATUS.md'; run "$(ev SessionStart startup -)"
 has "startup: sources are listed" "jobs/demo/plan.pdf"
@@ -756,7 +757,7 @@ printf '{"hook_event_name":"PreCompact","session_id":"s","cwd":"%s","custom_inst
 has "a UTF-8 character in the event is kept" "NOTE-UTF8"
 case "$OSTYPE" in
   msys*|cygwin*) runf "$D/t/ev-backslash.json"; has "an event with backslash paths (cwd, transcript) works" "PROMPT-10 after the squeeze";;
-  *) ok "(skipped off Windows: a backslash path is not a path here)";;
+  *) skip "(a backslash path is not a path here)";;
 esac
 
 # ===== 9. which project dir

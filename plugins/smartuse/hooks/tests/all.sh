@@ -11,6 +11,7 @@
 # The suites run in parallel (each makes its own temp HOME where it needs one), their output is printed in the fixed
 # order above, and the summary is ALWAYS the last line, so `bash all.sh | tail -1` is the line the README quotes.
 # A suite that exits non-zero, prints a FAIL line or no ALL PASS makes this script exit 1 after the summary.
+# A case that did not run on this machine prints "SKIP <label>": each suite's == line shows its count (" · M SKIP", only when M > 0); the summary line counts PASS only, and a SKIP never fails a suite.
 # A FAIL line is "FAIL <check>" (one per failed check); the bare FAILURES line a failed suite ends with is not one, so it is not counted.
 # Usage: bash plugins/smartuse/hooks/tests/all.sh        every suite's full output, then the summary
 #        bash plugins/smartuse/hooks/tests/all.sh -q     only FAIL lines, one result line per suite, then the summary
@@ -30,12 +31,12 @@ wait
 summary=""; bad=0
 for n in $NAMES; do
   out="$W/$n.out"; rc=$(cat "$W/$n.rc")
-  pass=$(grep -c '^PASS' "$out"); fails=$(grep -c '^FAIL ' "$out")
+  pass=$(grep -c '^PASS' "$out"); fails=$(grep -c '^FAIL ' "$out"); skips=$(grep -c '^SKIP' "$out"); sk=""; [ "$skips" -gt 0 ] && sk=" · $skips SKIP"
   if [ "$quiet" = 1 ]; then grep '^FAIL ' "$out"; else cat "$out"; fi
   if [ "$rc" != 0 ] || [ "$fails" != 0 ] || ! grep -q '^ALL PASS' "$out"; then
-    echo "== $n: FAILED (exit $rc · $pass PASS · $fails FAIL) — $(script_of "$n")"; bad=1
+    echo "== $n: FAILED (exit $rc · $pass PASS · $fails FAIL$sk) — $(script_of "$n")"; bad=1
   else
-    echo "== $n: $pass PASS"
+    echo "== $n: $pass PASS$sk"
   fi
   summary="$summary${summary:+ · }$n $pass"
 done

@@ -30,6 +30,7 @@ wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf 
 fail=0
 ok() { echo "PASS $1"; }
 ko() { echo "FAIL $1"; fail=1; }
+skip() { echo "SKIP $1"; }   # a case that did not run on this machine: never a PASS, never sets fail
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
 MSYS=0; command -v cygpath >/dev/null 2>&1 && MSYS=1
 # FRESH_GUARD_REF=<git ref> runs the same cases against the guard as that commit had it (read into this run's temp dir): how a new
@@ -1394,7 +1395,7 @@ done
 py "$D/chk.py" results "$D/c" "$D/r" </dev/null > "$D/results.txt"
 cat "$D/results.txt"
 grep -q '^FAIL' "$D/results.txt" && fail=1
-while IFS= read -r l; do [ -n "$l" ] && ok "(skipped the link cases: $l)"; done < "$D/c/skipped.txt"
+while IFS= read -r l; do [ -n "$l" ] && skip "the link cases: $l"; done < "$D/c/skipped.txt"
 [ "$(grep -c '^PASS\|^FAIL' "$D/results.txt")" = "$(grep -c . "$D/c/order.txt")" ] && ok "every case printed exactly one result ($(grep -c . "$D/c/order.txt") cases)" || ko "some case printed no result line"
 
 # --- the 2 MB transcript: the pass has a 3 s budget of its own and a pass over it ends in an allow, not a "could not verify" deny
