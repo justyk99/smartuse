@@ -300,17 +300,31 @@ PY
 # --- 0.7.3 F1: two Stop hooks at once must leave one line. A hook that renamed pending.json to pending.<pid>.claimed reads it; while the other
 # hook still holds a handle for its own rename, that read raises PermissionError (Windows sharing violation). It is retried (5 x 20 ms) and the
 # claimed file is deleted only when its content is bad; one still unreadable after 5 tries is left, bytes unchanged (D-YK24).
-# L2..L5 load the hook in process (as above) and stand in for Path.read_text of the claimed file; L1 holds a real handle (Windows only).
+# L2..L7 load the hook in process (as above) and stand in for Path.read_text of the claimed file (a pass-through wrapper that counts the reads);
+# L1 also holds a real handle (hold.py, Windows only) and asserts 2 or more reads, so it fails when the read lands after the release.
+# L6 (0.7.3 fix round A): content too deeply nested for the parser raises RecursionError, not ValueError: bad content, deleted as bad JSON is.
+# L7: a leftover pending.<this pid>.claimed (a reused PID after the 5-try path) must not block the next claim: os.replace, not os.rename.
 cat > "$D/l.py" <<'PY'
-import os, sys, json, pathlib, tempfile, time
+import os, sys, json, pathlib, tempfile, time, subprocess
 src, case = sys.argv[1], sys.argv[2]
 ns = {}; exec(compile(open(src, encoding="utf-8").read().replace("\nmain()\n", "\n"), "ledger", "exec"), ns)
 tmp = pathlib.Path(tempfile.mkdtemp(dir=os.environ["HOME"])); proj = tmp / "proj"; proj.mkdir()
 ns["PROJECTS"] = tmp / "projects"; ns["LEDGER"] = tmp / "ledger.jsonl"   # the hook's own globals, pointed at the temp HOME
 os.environ["CLAUDE_PROJECT_DIR"] = str(proj)
 sdir = ns["state_dir"](proj, create=True); pending = sdir / "pending.json"; claimed = sdir / f"pending.{os.getpid()}.claimed"
-raw = b'{"skill": ' if case == "L4" else ('{"skill":"make-prompt","task":"%s","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' % case).encode()
+raw = b'{"skill": ' if case == "L4" else b"[" * 100000 if case == "L6" else ('{"skill":"make-prompt","task":"%s","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' % case).encode()
+if case == "L7":
+    claimed.write_bytes(b"stale bytes left by an earlier hook that had this PID")   # a 5-try leftover under this very PID (Windows PID reuse)
 pending.write_bytes(raw)
+holder = None
+if case == "L1":   # a real handle on pending.json (Windows only), as hold.py opens it; hold.py ends about 30 ms after a claimed name appears
+    ready = tmp / "l1.ready"
+    holder = subprocess.Popen([sys.executable, sys.argv[3], str(pending), str(ready)])
+    for _ in range(200):
+        if ready.exists():
+            break
+        time.sleep(0.05)
+    assert ready.exists(), "L1: the helper never got its handle"
 reads = []; orig = pathlib.Path.read_text
 def fake(self, *a, **k):
     if self.name.endswith(".claimed"):
@@ -329,8 +343,19 @@ except Exception as e:
 dt = time.time() - t0; pathlib.Path.read_text = orig
 lines = [json.loads(l) for l in ns["LEDGER"].read_text(encoding="utf-8").splitlines()] if ns["LEDGER"].exists() else []
 n = len([r for r in lines if r.get("task") == case]); left = sorted(os.listdir(sdir))
+hrc = holder.wait(timeout=30) if holder else 0
 assert err is None, ("the hook raised", err)
-if case == "L2":
+if case == "L1":
+    assert hrc == 0, ("the helper did not see a claimed name", hrc)
+    assert len(reads) >= 2 and n == 1 and left == [], (n, len(reads), left)
+    print("PASS L1: pending.json held open with delete access (a rename in progress), released about 30 ms after the claim -> %d reads (the first ones hit the held handle), one line, no pending.json, no claimed file left" % len(reads))
+elif case == "L6":
+    assert n == 0 and len(reads) == 1 and left == [], (n, len(reads), left)
+    print("PASS L6: nesting too deep for the parser (RecursionError, '[' * 100000) -> no line, one read, claimed file deleted")
+elif case == "L7":
+    assert n == 1 and left == [], (n, len(reads), left)
+    print("PASS L7: a stale pending.<this pid>.claimed already there -> the claim still works: one line for the fresh task, no pending or claimed file left")
+elif case == "L2":
     assert n == 1 and len(reads) == 3 and left == [], (n, len(reads), left)
     print("PASS L2: claimed file unreadable twice (PermissionError) then readable -> one line after 3 reads, no claimed file left")
 elif case == "L3":
@@ -356,21 +381,14 @@ ready.write_text("held")
 end = time.time() + 20
 while time.time() < end and (d / "pending.json").exists() and not list(d.glob("pending.*.claimed")):   # a claimed name appears (pending.json is gone too: the hook may delete a claimed file between two polls)
     time.sleep(0.001)
-time.sleep(0.01)   # let go about 10 ms after a claimed name appears
+time.sleep(0.03)   # let go about 30 ms after a claimed name appears: the hook's first read comes within microseconds, so a busy machine still sees 2 or more reads (the retry waits 20 ms)
 k.CloseHandle(h)
 sys.exit(0 if time.time() < end else 2)
 PY
 if [ "$(py -c 'import os; print(os.name)')" = nt ]; then
-  PW1="$(wp "$D/l1proj")"; mkdir -p "$D/l1proj"; K1=$(key "$PW1"); P1="$HOME/.claude/smartuse/projects/$K1"; mkdir -p "$P1"
-  echo '{"skill":"make-prompt","task":"l1-held","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' > "$P1/pending.json"
-  py "$D/hold.py" "$(wp "$P1/pending.json")" "$(wp "$D/l1.ready")" & HOLD=$!
-  for _ in $(seq 1 200); do [ -f "$D/l1.ready" ] && break; sleep 0.05; done
-  [ -f "$D/l1.ready" ] || { echo "FAIL L1: the helper never got its handle"; exit 1; }
-  echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s-l1\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW1\"}" | CLAUDE_PROJECT_DIR="$PW1" py "$H/ledger.py"
-  wait $HOLD || { echo "FAIL L1: the helper did not see a claimed name"; exit 1; }
-  [ "$(grep -c '"task": "l1-held"' "$L")" = 1 ] && [ ! -e "$P1/pending.json" ] && [ -z "$(ls "$P1" | grep '^pending\.')" ] && echo "PASS L1: pending.json held open with delete access (a rename in progress), released 10 ms after the claim -> one line, no pending.json, no claimed file left" || { echo "FAIL L1: lines $(grep -c '"task": "l1-held"' "$L"), state dir: $(ls -A "$P1")"; exit 1; }
+  py "$D/l.py" "$H/ledger.py" L1 "$(wp "$D/hold.py")" || { echo "FAIL L1 (see the assertion above)"; exit 1; }   # in process, with the real handle from hold.py and a counting wrapper on Path.read_text
 else
   echo "SKIP L1 held handle: Windows only"
 fi
-for c in L2 L3 L4 L5; do py "$D/l.py" "$H/ledger.py" $c || { echo "FAIL $c (see the assertion above)"; exit 1; }; done
+for c in L2 L3 L4 L5 L6 L7; do py "$D/l.py" "$H/ledger.py" $c || { echo "FAIL $c (see the assertion above)"; exit 1; }; done
 echo "ALL PASS"
