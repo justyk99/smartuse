@@ -138,4 +138,18 @@ mkc c6; printf 'a\015b\015zebrafish\n' > "$W/c6/cr.txt"
 git -C "$W/c6" add cr.txt; gcm "$W/c6" -m 'add a cr-only note'
 out=$(scan2 "$W/c6" --history); got=$?
 okc "c6 F3 pin: a file with bare CRs only, the term in its third piece: the tree label keeps cr.txt:3, and history reports it" "$(ex1)$(has "$(sect "$out" private#1)" 'cr.txt:3')$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
+# 0.7.3 fix round A: the author / committer name lines are scanned in their carriage-return pieces too, as a file line is, so a private
+# pattern anchored with ^ or $ next to a bare CR still matches; no raw CR is printed in an excerpt. Private patterns here are invented regexes.
+mkc c7; printf 're:^zebrafish\nre:okapi$\n' > "$W/c7/.smartuse-terms.local"; printf 'nothing here\n' > "$W/c7/plain.txt"
+git -C "$W/c7" add plain.txt
+GIT_AUTHOR_NAME=$'okapi\ryk\rzebrafish' gcm "$W/c7" -m 'plain subject'
+an=$(git -C "$W/c7" cat-file -p HEAD | grep '^author ' | head -c 40 | od -An -c | tr -d ' \n') # git keeps the CRs in the stored name
+out=$(scan2 "$W/c7" --history); got=$?
+n=$(nh "$out"); n2=$(sect "$out" private#2 | grep -c 'history@')
+crs=$(printf '%s\n' "$out" | sed 's/\r$//' | grep -c "$(printf '\r')") # raw CRs left once a CRLF line end is dropped (Windows Python prints \r\n)
+okc "c7 an author name 'okapi<CR>yk<CR>zebrafish' with the anchored private patterns ^term / term\$: one history@ hit each (2 in all), and no raw CR in the output" "$(ex1)$(has "$an" '\r')$([ "$n" = 1 ] && [ "$n2" = 1 ] && echo 1 || echo 0)$(has "$out" '2 hits (2 private)')$([ "$crs" = 0 ] && echo 1 || echo 0)$(lacks "$out" zebrafish)$(lacks "$out" okapi)" "exit $got; stored $an; n=$n n2=$n2 crs=$crs; $out"
+mkc c8; printf 'x\015ident bob@corp-x.io\n' > "$W/c8/a.txt"
+git -C "$W/c8" add a.txt; gcm "$W/c8" -m 'add a note'; git -C "$W/c8" rm -q a.txt; gcm "$W/c8" -m 'remove it'
+out=$(scan2 "$W/c8" --history); got=$?
+okc "c8 F3 pin: the text 'ident <e-mail>' after a bare CR in a file since removed is a file line, not an ident line: a history@ hit under ## email" "$(ex1)$(has "$(sect "$out" email)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

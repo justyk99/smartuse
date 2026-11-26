@@ -224,8 +224,9 @@ def main():
                 cur, sec, hdr = line.split()[1].decode("ascii", errors="replace"), None, False
                 continue
             if line.startswith(b"ident "):
-                rs, _ = readings(line[6:])
-                scan_line(f"history@{cur}", ln, rs, private, private, hits)
+                for piece in line[6:].split(b"\r"):  # a name may hold a bare CR: its pieces are scanned as a file line's are (an anchored pattern, no raw CR in an excerpt)
+                    rs, _ = readings(piece)
+                    scan_line(f"history@{cur}", ln, rs, private, private, hits)
                 continue
             if line.startswith(b"diff --git "):
                 flush()

@@ -308,7 +308,7 @@ def on_stop(data):
     # Two Stop hooks may run at once (a user-level copy and the plugin's): claim the file atomically so only one writes.
     claimed = pending.with_name(f"pending.{os.getpid()}.claimed")
     try:
-        os.rename(pending, claimed)
+        os.replace(pending, claimed)   # not os.rename: Windows refuses an existing target, and a claimed file left under this PID (a reused PID, the 5-try path) would block the claim for good; a live PID's name is no other running hook's
     except OSError:
         return
     p = MISSING = object()
@@ -321,7 +321,7 @@ def on_stop(data):
         except PermissionError:     # still open for the other hook's rename (Windows sharing violation): wait, as write_json does
             if attempt < 4:
                 time.sleep(0.02)
-        except ValueError:          # bad JSON or bad bytes: the file is garbage, delete it
+        except (ValueError, RecursionError):   # bad JSON or bad bytes, or nesting too deep for the parser ('[' * 100000): the file is garbage, delete it
             claimed.unlink(missing_ok=True)
             return
     if p is MISSING:                # not readable after 5 tries: the file stays with its bytes, nothing is deleted (0.7.3 D-YK24)
