@@ -15,15 +15,15 @@
 # is not executable), or a Windows Store alias (WindowsApps, any case) is ignored and probed again, and the file is rewritten. The file is
 # read up to 16 characters and written only when ~/.claude/smartuse/ already exists (the hooks create it) and the file is a
 # regular file or a new one (never a symlink, a FIFO or another special file), so a first event costs no extra process.
-# Every Python this file starts (the remembered name, the probe, the proven path, the candidate itself) gets the same flags, $ISO = -I -S -X utf8, so a hook
-# starts the same way on every machine whatever the session's environment holds. -I: every PYTHON* variable is ignored (a PYTHONPATH folder with a json.py, a
+# Every Python this file starts (the remembered name, the probe, the proven path, the candidate itself) gets the same flags, $ISO = -I -S -X utf8, so no PYTHON* variable and no site folder changes how a hook
+# starts. bash itself is not isolated: it reads its own start-up settings and PATH from the session's environment before this file's first line (SECURITY.md). -I: every PYTHON* variable is ignored (a PYTHONPATH folder with a json.py, a
 # wrong PYTHONHOME), the user site folder is left out, and no entry for the working folder or the script's folder goes on sys.path. -S: `site` is never imported,
 # so no .pth line and no sitecustomize in the interpreter's own site folder runs (-I alone still reads them). -X utf8 is the UTF-8 mode PYTHONUTF8=1 gave every hook (on
 # Windows, stdin/stdout and open() would otherwise use the ANSI code page), by option, because -I ignores the variable. The probe carries the flags too, so an
 # interpreter that refuses one fails the probe and is skipped, as the Store stub is. One variable is carried over, as -B: PYTHONDONTWRITEBYTECODE, the documented opt-out
 # of the bytecode cache below. PYTHONUTF8=1 is still exported and nothing is unset: a hook's own child process (until-done's check:) inherits the environment as before.
-# A flag never reaches an interpreter that was not proven with it in this very run (the probe) or marked as proven (the file's -I): Python exits 2 on an option it does not know,
-# and exit 2 blocks a PreToolUse call. A Python that cannot start isolated (it refuses a flag, or needs PYTHONHOME to find its library) still runs the hooks: when all three candidates
+# The file's -I is a proof for the Python PATH gave that name then, not the one it gives now. So the remembered start is not an exec: Python exits 2 on an option it does not know,
+# exit 2 blocks a call, and on a 2 the same name is asked once more with the flags. It starts: the 2 is the hook's own and is handed on. It refuses: the event is unread, and the probe below runs. A Python that cannot start isolated (it refuses a flag, or needs PYTHONHOME to find its library) still runs the hooks: when all three candidates
 # failed the isolated probe, a second try starts them the 0.7.4 way (no flags, a WindowsApps hit skipped: the Store stub was already started once), and writes nothing, so it is never remembered.
 # One optional FIRST word, --say-missing (an exact comparison, dropped before the hook path; in any later position it reaches the
 # interpreter untouched): with no interpreter the launcher prints one fixed sentence on stderr and exits 2 instead of exiting 0 in
@@ -54,7 +54,12 @@ if [ -n "$C" ] && [ -f "$C" ] && { read -r -n 16 P || [ -n "$P" ]; } < "$C"; the
     if command -v "$W" >/dev/null 2>&1; then                        # builtin: PATH scan, no process
       R=""; [ "${BASH_VERSINFO[0]}" -ge 4 ] && { hash "$W" 2>/dev/null; R=${BASH_CMDS[$W]}; }   # bash 3.2 has no BASH_CMDS: there $W would be read as arithmetic (an env var named python aborted the launcher)
       [ -n "$R" ] || R=$(command -v "$W")                           # the fork happens on bash 3.2, or when hash cannot find the name
-      case "$R" in *[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]*) ;; *) [ -x "$R" ] && exec $P $ISO "$@";; esac   # a Store alias (any case) is never trusted, and the hit must be executable or it is probed instead (exec of a non-executable hit exits 2, which blocks a PreToolUse hook); $P unquoted: "py -3" is two words
+      # a Store alias (any case) is never trusted, and the hit must be executable or it is probed instead (exec of a non-executable hit exits 2, which blocks a PreToolUse hook); $P unquoted: "py -3" is two words
+      case "$R" in *[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]*) ;; *) if [ -x "$R" ]; then
+        command $P $ISO "$@"; E=$?                                             # not exec: bash must see the exit code. `command`: PATH only, never a shell function, as exec did
+        [ "$E" = 2 ] || exit "$E"                                              # every code but 2 is handed on at once: one Python start per event
+        command $P $ISO -c "import sys" </dev/null >/dev/null 2>&1 && exit 2   # the same name starts with the flags, so the 2 was the hook's own (or Python's for a script that is not there)
+      fi;; esac                                                                # it refuses the flags: Python stopped at the option before it read stdin, the event is unread: probe again below
     fi;;
   esac
 fi
