@@ -196,7 +196,7 @@ elif mode == "paidwhy":  # paidwhy GUARD: 0.7.4 F3 r1, paid_why picks "too long"
         if got != want:
             bad.append("%s: wanted %r got %r" % (what, want[:30], str(got)[:40]))
     # the write helper hands its last error back through an optional list and never raises
-    import tempfile, pathlib
+    import tempfile, pathlib, shutil
     wj = ns["paid_write_json"]; td = pathlib.Path(tempfile.mkdtemp()); errs = []
     try:
         if wj(td / "no-such-folder" / "paid-runs.json", {"yk": 1}, errs) is not False or len(errs) != 1 or not isinstance(errs[0], OSError):
@@ -207,6 +207,8 @@ elif mode == "paidwhy":  # paidwhy GUARD: 0.7.4 F3 r1, paid_why picks "too long"
             bad.append("paid_write_json without a list did not return False")
     except Exception as e:
         bad.append("paid_write_json raised %s: %s" % (type(e).__name__, e))
+    finally:
+        shutil.rmtree(td, ignore_errors=True)   # the suite removes only what it made: this folder is outside $D
     print("ok" if not bad else "; ".join(bad))
 elif mode == "longform":   # longform GUARD: 0.7.4 F1 (39h), long_form is pure text and answers the same on every OS. The table is written with | for a backslash.
     src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "longform"}
@@ -2510,7 +2512,7 @@ except Exception:
       if [ "$GL" = 250 ]; then   # 0.7.4 F2, the doctor half of g1: heartbeat.py --doctor for the same project names the same two folders the refusal is about, 250 characters, and the way out E1e proved (it said "writable" only)
         DOUT=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/heartbeat.py" --doctor </dev/null); DN=$(printf '%s
 ' "$DOUT" | wc -l)
-        case "$DOUT" in *"state folder: FAIL"*"$LKEY (250 characters)"*"$LNAME"*"delete $LKEY with rm -rf in Git Bash"*) [ "$DN" -le 8 ] && ok "39g g1 doctor for the same project names the same two folders, 250 characters and rm -rf in Git Bash ($DN lines)" || ko "39g g1 doctor has $DN lines (limit 8)";; *) ko "39g g1 doctor: $(printf '%s' "$DOUT" | grep 'state folder')";; esac
+        case "$DOUT" in *"state folder: FAIL"*"$LKEY (250 characters)"*"$LNAME"*"delete ~/.claude/smartuse/projects/$LKEY with rm -rf in Git Bash"*) [ "$DN" -le 8 ] && ok "39g g1 doctor for the same project names the same two folders, 250 characters and rm -rf in Git Bash ($DN lines)" || ko "39g g1 doctor has $DN lines (limit 8)";; *) ko "39g g1 doctor: $(printf '%s' "$DOUT" | grep 'state folder')";; esac
         [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(ls -A "$FP" | tr '
 ' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39g g1 doctor left both folders as they were" || ko "39g g1 doctor touched the folders: full $(ls -A "$FP" 2>&1 | tr '
 ' ' ') short '$(ls -A "$PR/$LNAME" 2>&1 | tr '
