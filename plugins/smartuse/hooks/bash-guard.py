@@ -3370,7 +3370,7 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
     if why == PAID_RO:                                        # 0.7.4 F3 (D-YK31): an adapter go needs the same counter, so the adapter is never the fix for a counter-side cause
         return head(first) + f"could not verify the go ({why}); run this call again. If it repeats, run /smartuse:doctor, then check that paid-runs.json in the state folder is not read-only. Nothing was spent."
     if why == PAID_BUSY:
-        return head(first) + f"could not verify the go ({why}); another paid call holds the counter; run this call again. Nothing was spent."
+        return head(first) + f"could not verify the go ({why}); the counter lock could not be taken (another paid call may hold it); run this call again. If it repeats, run /smartuse:doctor. Nothing was spent."
     if why == PAID_BAD:
         return head(first) + f"could not verify the go ({why}); ask the owner to repair paid-runs.json in this project's state folder. Nothing was spent."
     if why:
