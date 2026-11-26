@@ -210,7 +210,15 @@ def main():
         def flush():
             if sec and not sec[1]:  # a diff whose first 8 KB holds a NUL is binary: read, not counted as not-UTF-8
                 stats["bad"] += sec[0]
-        for ln, line in enumerate(log.splitlines(), 1):
+        # Git ends its lines with a newline, so the output is framed on b"\n" only (one trailing CR dropped: CRLF text reads as before).
+        # A bare CR inside a file line or a message line stays inside it: git's own lines are known on the whole newline line, and a
+        # content line is then scanned in its CR pieces. `ln` counts newline lines.
+        lines = log.split(b"\n")
+        if lines and lines[-1] == b"":  # git's last line ends with a newline
+            lines.pop()
+        for ln, line in enumerate(lines, 1):
+            if line.endswith(b"\r"):
+                line = line[:-1]
             if line.startswith(b"commit "):
                 flush()
                 cur, sec, hdr = line.split()[1].decode("ascii", errors="replace"), None, False
@@ -232,12 +240,13 @@ def main():
             if re.match(rb"Binary files .* differ$", line):
                 stats["binary"] += 1  # git prints no content for it; its paths are on the diff --git line above
                 continue
-            rs, bad = readings(line)
-            if sec:
-                sec[0] += bad
-            else:
-                stats["bad"] += bad
-            scan_line(f"history@{cur}", ln, rs, patterns, private, hits)  # `diff --git` lines carry the paths
+            for piece in line.split(b"\r"):  # the pieces the tree scan reads (`:167` splits on a bare CR too)
+                rs, bad = readings(piece)
+                if sec:
+                    sec[0] += bad
+                else:
+                    stats["bad"] += bad
+                scan_line(f"history@{cur}", ln, rs, patterns, private, hits)  # `diff --git` lines carry the paths
         flush()
     rows = hits.rows
     npriv = sum(1 for h in rows if h[2].startswith("private#"))

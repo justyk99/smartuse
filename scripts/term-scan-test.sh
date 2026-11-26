@@ -104,4 +104,38 @@ git -C "$W/r13" add a.txt b.txt; gcm "$W/r13" -m 'add two notes'; git -C "$W/r13
 out=$(scan2 "$W/r13" --history); got=$?
 n=$(sect "$out" private#1 | grep -c 'history@')
 okc "r13 a patch line that looks like a file header (--- term, +++ term) inside a hunk is scanned: 4 history hits, not 2" "$(ex1)$([ "$n" = 4 ] && echo 1 || echo 0)$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
+# 0.7.3 F3: the history reader frames git's output on newlines only. A bare carriage return (CR, octal 015) inside a file line or a
+# commit message stays inside that line, so the text after it must not pass for one of git's own lines. Each repo turns core.autocrlf off,
+# so the bytes git stores are the bytes written here.
+mkc() { mkr "$1"; git -C "$W/$1" config core.autocrlf false; printf 'zebrafish\n' > "$W/$1/.smartuse-terms.local"; } # $1 = a short name
+nh() { sect "$1" private#1 | grep -c 'history@'; } # how many history@ private#1 hits the output holds
+mkc c1; printf 'x\015commit zebrafish and more\n' > "$W/c1/a.txt"
+git -C "$W/c1" add a.txt; gcm "$W/c1" -m 'add a note'; git -C "$W/c1" rm -q a.txt; gcm "$W/c1" -m 'remove it'
+out=$(scan2 "$W/c1" --history); got=$?
+n=$(nh "$out")
+okc "c1 F3 a term after a bare CR and the word commit, in a file since removed: history@ private#1 hits (added and removed line), never printed" "$(ex1)$([ "$n" = 2 ] && echo 1 || echo 0)$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
+mkc c2; printf 'plain subject\n\nbody x\015commit zebrafish more\n' > "$W/c2msg.txt"
+gcm "$W/c2" --allow-empty -F "$W/c2msg.txt"
+out=$(scan2 "$W/c2" --history); got=$?
+n=$(nh "$out")
+okc "c2 F3 the same in a commit message body (git keeps a bare CR there): one history@ private#1 hit, never printed" "$(ex1)$([ "$n" = 1 ] && echo 1 || echo 0)$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
+mkc c3; printf 'x\015diff --git a b\n++ zebrafish\n' > "$W/c3/a.txt"
+git -C "$W/c3" add a.txt; gcm "$W/c3" -m 'add a note'
+out=$(scan2 "$W/c3" --history); got=$?
+n=$(nh "$out")
+okc "c3 F3 a bare CR then diff --git inside a hunk does not turn header mode on: the added line '++ term' is a history@ hit" "$(ex1)$([ "$n" = 1 ] && echo 1 || echo 0)$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
+mkc c4; printf 'x\015Binary files zebrafish differ\n' > "$W/c4/a.txt"
+git -C "$W/c4" add a.txt; gcm "$W/c4" -m 'add a note'; git -C "$W/c4" rm -q a.txt; gcm "$W/c4" -m 'remove it'
+out=$(scan2 "$W/c4" --history); got=$?
+n=$(nh "$out")
+okc "c4 F3 a bare CR then 'Binary files term differ' in a file since removed: history@ hits, and no binary diff counted" "$(ex1)$([ "$n" = 2 ] && echo 1 || echo 0)$(lacks "$out" 'binary diffs not read')$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
+mkc c5; printf 'zebrafish\015\n' > "$W/c5/crlf.txt"
+git -C "$W/c5" add crlf.txt; gcm "$W/c5" -m 'add a crlf note'
+out=$(scan2 "$W/c5" --history); got=$?
+n=$(nh "$out")
+okc "c5 F3 pin: a CRLF file holding the term: the tree hit crlf.txt:1, one history@ hit, 2 hits in all" "$(ex1)$(has "$(sect "$out" private#1)" 'crlf.txt:1')$([ "$n" = 1 ] && echo 1 || echo 0)$(has "$out" '2 hits (2 private)')$(lacks "$out" zebrafish)" "exit $got; n=$n; $out"
+mkc c6; printf 'a\015b\015zebrafish\n' > "$W/c6/cr.txt"
+git -C "$W/c6" add cr.txt; gcm "$W/c6" -m 'add a cr-only note'
+out=$(scan2 "$W/c6" --history); got=$?
+okc "c6 F3 pin: a file with bare CRs only, the term in its third piece: the tree label keeps cr.txt:3, and history reports it" "$(ex1)$(has "$(sect "$out" private#1)" 'cr.txt:3')$(has "$(sect "$out" private#1)" 'history@')$(lacks "$out" zebrafish)" "exit $got; $out"
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
