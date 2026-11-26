@@ -311,10 +311,20 @@ def on_stop(data):
         os.rename(pending, claimed)
     except OSError:
         return
-    try:
-        p = json.loads(claimed.read_text(encoding="utf-8"))
-    except Exception:
-        claimed.unlink(missing_ok=True)
+    p = MISSING = object()
+    for attempt in range(5):
+        try:
+            p = json.loads(claimed.read_text(encoding="utf-8"))
+            break
+        except FileNotFoundError:   # the other hook's rename took the file: that hook writes the line
+            return
+        except PermissionError:     # still open for the other hook's rename (Windows sharing violation): wait, as write_json does
+            if attempt < 4:
+                time.sleep(0.02)
+        except ValueError:          # bad JSON or bad bytes: the file is garbage, delete it
+            claimed.unlink(missing_ok=True)
+            return
+    if p is MISSING:                # not readable after 5 tries: the file stays with its bytes, nothing is deleted (0.7.3 D-YK24)
         return
     pending = claimed
     since = parse_ts(p.get("started_at") or "")

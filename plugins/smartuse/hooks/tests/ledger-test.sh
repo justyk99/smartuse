@@ -297,4 +297,80 @@ assert os.name=="nt" or np("/c/Users/x/t.jsonl")=="/c/Users/x/t.jsonl", "must be
 os.name="nt"; assert np("/c/Users/x/t.jsonl")=="C:/Users/x/t.jsonl" and np("/tmp/tmp.X/t.jsonl")=="/tmp/tmp.X/t.jsonl" and np("C:/Users/x")=="C:/Users/x" and np("")=="" and np(None) is None
 print("PASS native_path: /c/Users/x -> C:/Users/x on Windows only; /tmp/... and C:/... untouched")
 PY
+# --- 0.7.3 F1: two Stop hooks at once must leave one line. A hook that renamed pending.json to pending.<pid>.claimed reads it; while the other
+# hook still holds a handle for its own rename, that read raises PermissionError (Windows sharing violation). It is retried (5 x 20 ms) and the
+# claimed file is deleted only when its content is bad; one still unreadable after 5 tries is left, bytes unchanged (D-YK24).
+# L2..L5 load the hook in process (as above) and stand in for Path.read_text of the claimed file; L1 holds a real handle (Windows only).
+cat > "$D/l.py" <<'PY'
+import os, sys, json, pathlib, tempfile, time
+src, case = sys.argv[1], sys.argv[2]
+ns = {}; exec(compile(open(src, encoding="utf-8").read().replace("\nmain()\n", "\n"), "ledger", "exec"), ns)
+tmp = pathlib.Path(tempfile.mkdtemp(dir=os.environ["HOME"])); proj = tmp / "proj"; proj.mkdir()
+ns["PROJECTS"] = tmp / "projects"; ns["LEDGER"] = tmp / "ledger.jsonl"   # the hook's own globals, pointed at the temp HOME
+os.environ["CLAUDE_PROJECT_DIR"] = str(proj)
+sdir = ns["state_dir"](proj, create=True); pending = sdir / "pending.json"; claimed = sdir / f"pending.{os.getpid()}.claimed"
+raw = b'{"skill": ' if case == "L4" else ('{"skill":"make-prompt","task":"%s","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' % case).encode()
+pending.write_bytes(raw)
+reads = []; orig = pathlib.Path.read_text
+def fake(self, *a, **k):
+    if self.name.endswith(".claimed"):
+        reads.append(1)
+        if (case == "L2" and len(reads) <= 2) or case == "L3":
+            raise PermissionError(13, "sharing violation")
+        if case == "L5":
+            raise FileNotFoundError(2, "the other hook's rename took the file")
+    return orig(self, *a, **k)
+pathlib.Path.read_text = fake
+err = None; t0 = time.time()
+try:
+    ns["on_stop"]({"session_id": "s-" + case, "transcript_path": "", "cwd": str(proj)})
+except Exception as e:
+    err = e
+dt = time.time() - t0; pathlib.Path.read_text = orig
+lines = [json.loads(l) for l in ns["LEDGER"].read_text(encoding="utf-8").splitlines()] if ns["LEDGER"].exists() else []
+n = len([r for r in lines if r.get("task") == case]); left = sorted(os.listdir(sdir))
+assert err is None, ("the hook raised", err)
+if case == "L2":
+    assert n == 1 and len(reads) == 3 and left == [], (n, len(reads), left)
+    print("PASS L2: claimed file unreadable twice (PermissionError) then readable -> one line after 3 reads, no claimed file left")
+elif case == "L3":
+    assert n == 0 and len(reads) == 5 and left == [claimed.name] and claimed.read_bytes() == raw and dt < 0.5, (n, len(reads), left, dt)
+    print("PASS L3: claimed file unreadable on all 5 tries -> no line, exactly 5 reads, file left with its bytes, wait %.0f ms" % (dt * 1000))
+elif case == "L4":
+    assert n == 0 and len(reads) == 1 and left == [], (n, len(reads), left)
+    print("PASS L4: broken JSON in the claimed file -> no line, one read, claimed file deleted")
+elif case == "L5":
+    assert n == 0 and len(reads) == 1 and left == [claimed.name] and claimed.read_bytes() == raw, (n, len(reads), left)
+    print("PASS L5: claimed file gone (FileNotFoundError: the other hook's rename took it) -> no line, one read, nothing created or deleted")
+PY
+cat > "$D/hold.py" <<'PY'
+import ctypes, ctypes.wintypes as w, sys, time, pathlib
+path, ready = sys.argv[1], pathlib.Path(sys.argv[2]); d = pathlib.Path(path).parent
+k = ctypes.WinDLL("kernel32", use_last_error=True)
+k.CreateFileW.restype = w.HANDLE; k.CreateFileW.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, w.LPVOID, w.DWORD, w.DWORD, w.HANDLE]
+k.CloseHandle.argtypes = [w.HANDLE]
+h = k.CreateFileW(path, 0x80000000 | 0x00010000, 7, None, 3, 0x80, None)   # read + delete access, share read/write/delete, open existing: what a rename in progress holds
+if h in (None, ctypes.c_void_p(-1).value):
+    sys.exit("cannot open " + path)
+ready.write_text("held")
+end = time.time() + 20
+while time.time() < end and (d / "pending.json").exists() and not list(d.glob("pending.*.claimed")):   # a claimed name appears (pending.json is gone too: the hook may delete a claimed file between two polls)
+    time.sleep(0.001)
+time.sleep(0.01)   # let go about 10 ms after a claimed name appears
+k.CloseHandle(h)
+sys.exit(0 if time.time() < end else 2)
+PY
+if [ "$(py -c 'import os; print(os.name)')" = nt ]; then
+  PW1="$(wp "$D/l1proj")"; mkdir -p "$D/l1proj"; K1=$(key "$PW1"); P1="$HOME/.claude/smartuse/projects/$K1"; mkdir -p "$P1"
+  echo '{"skill":"make-prompt","task":"l1-held","mode":"quick","started_at":"2026-01-01T00:00:00Z"}' > "$P1/pending.json"
+  py "$D/hold.py" "$(wp "$P1/pending.json")" "$(wp "$D/l1.ready")" & HOLD=$!
+  for _ in $(seq 1 200); do [ -f "$D/l1.ready" ] && break; sleep 0.05; done
+  [ -f "$D/l1.ready" ] || { echo "FAIL L1: the helper never got its handle"; exit 1; }
+  echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s-l1\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW1\"}" | CLAUDE_PROJECT_DIR="$PW1" py "$H/ledger.py"
+  wait $HOLD || { echo "FAIL L1: the helper did not see a claimed name"; exit 1; }
+  [ "$(grep -c '"task": "l1-held"' "$L")" = 1 ] && [ ! -e "$P1/pending.json" ] && [ -z "$(ls "$P1" | grep '^pending\.')" ] && echo "PASS L1: pending.json held open with delete access (a rename in progress), released 10 ms after the claim -> one line, no pending.json, no claimed file left" || { echo "FAIL L1: lines $(grep -c '"task": "l1-held"' "$L"), state dir: $(ls -A "$P1")"; exit 1; }
+else
+  echo "SKIP L1 held handle: Windows only"
+fi
+for c in L2 L3 L4 L5; do py "$D/l.py" "$H/ledger.py" $c || { echo "FAIL $c (see the assertion above)"; exit 1; }; done
 echo "ALL PASS"
