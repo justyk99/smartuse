@@ -152,8 +152,62 @@ elif mode == "twolock":  # twolock GUARD HOME: 0.7.2 D14, paid_count called dire
         os.path.isfile = real
     left = sorted(x.name for x in sdir.iterdir()) if sdir.is_dir() else None
     r2 = ns["paid_count"]({"tool_use_id": "toolu_y"}, sdir, items, "python render.py", None, proj)
-    ok = r1 == (True, ns["PAID_TWO"], 0) and left == [] and r2 is None and (sdir / "paid-runs.json").is_file()
-    print("ok" if ok else "r1=%r left=%r r2=%r" % (r1, left, r2))
+    ok = r1 == (True, ns.get("PAID_LEFT"), 0) and left == [] and r2 is None and (sdir / "paid-runs.json").is_file()   # 0.7.4 F3 r5: the folder in use holds no counter, the other one does: one counter left behind
+    seen = sorted(x.name for x in sdir.iterdir())
+    os.path.isfile = lambda p: True if os.path.normpath(str(p)) == target else real(p)
+    try:
+        r3 = ns["paid_count"]({"tool_use_id": "toolu_z"}, sdir, items, "python render.py", None, proj)   # the folder in use holds a counter now (r2 made it): a counter in each folder
+    finally:
+        os.path.isfile = real
+    ok = ok and r3 == (True, ns["PAID_TWO"], 0) and sorted(x.name for x in sdir.iterdir()) == seen
+    print("ok" if ok else "r1=%r left=%r r2=%r r3=%r" % (r1, left, r2, r3))
+elif mode == "paidwhy":  # paidwhy GUARD: 0.7.4 F3 r1, paid_why picks "too long" by the error the system gave (Windows, a path past 259, FileNotFoundError), not by the length alone; any OS, in process
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "paidwhy"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    pw, LONG, NW = ns["paid_why"], ns["PAID_LONG"], "the counter is not writable"
+    BS = chr(92)
+    p300 = "C:" + BS + ("d" * 99 + BS) * 2 + "f" * 97                      # 300 characters
+    p200 = "C:" + BS + "d" * 99 + BS + "f" * 97                              # 200 characters
+    p250 = "C:" + BS + "d" * 99 + BS + "e" * 99 + BS + "f" * 47              # 250 characters
+    assert (len(p300), len(p200), len(p250)) == (300, 200, 250), (len(p300), len(p200), len(p250))
+    PE, FE, EE = PermissionError(13, "x"), FileNotFoundError(2, "x"), OSError(22, "x")
+    rows = [   # (what, call, wanted)
+        ("300 chars, nt, PermissionError", lambda: pw(p300, 0, PE, True), NW),
+        ("300 chars, nt, FileNotFoundError", lambda: pw(p300, 0, FE, True), LONG),
+        ("300 chars, nt, another OSError", lambda: pw(p300, 0, EE, True), NW),
+        ("200 chars, nt, FileNotFoundError: never too long", lambda: pw(p200, 0, FE, True), NW),
+        ("200 chars, nt, PermissionError", lambda: pw(p200, 0, PE, True), NW),
+        ("300 chars, not nt, FileNotFoundError: never", lambda: pw(p300, 0, FE, False), NW),
+        ("300 chars, not nt, PermissionError", lambda: pw(p300, 0, PE, False), NW),
+        ("250 chars + 20 (the temporary name), nt, FileNotFoundError", lambda: pw(p250, 20, FE, True), LONG),
+        ("250 chars + 5, nt, FileNotFoundError", lambda: pw(p250, 5, FE, True), NW),
+        ("250 chars + 20, nt, PermissionError", lambda: pw(p250, 20, PE, True), NW),
+        ("no error object, 300 chars, nt: today's length rule", lambda: pw(p300, 0, None, True), LONG),
+        ("no error object, 200 chars, nt", lambda: pw(p200, 0, None, True), NW),
+        ("no error object, 300 chars, not nt", lambda: pw(p300, 0, None, False), NW),
+        ("a path object, nt, FileNotFoundError", lambda: pw(__import__("pathlib").PurePath(p300), 0, FE, True), LONG),
+    ]
+    bad = []
+    for what, call, want in rows:
+        try:
+            got = call()
+        except Exception as e:
+            got = "raised " + type(e).__name__ + ": " + str(e)
+        if got != want:
+            bad.append("%s: wanted %r got %r" % (what, want[:30], str(got)[:40]))
+    # the write helper hands its last error back through an optional list and never raises
+    import tempfile, pathlib
+    wj = ns["paid_write_json"]; td = pathlib.Path(tempfile.mkdtemp()); errs = []
+    try:
+        if wj(td / "no-such-folder" / "paid-runs.json", {"yk": 1}, errs) is not False or len(errs) != 1 or not isinstance(errs[0], OSError):
+            bad.append("paid_write_json into a missing folder: errs=%r" % (errs,))
+        if wj(td / "paid-runs.json", {"yk": 1}) is not True or wj(td / "paid-runs.json", {"yk": 2}, []) is not True:
+            bad.append("paid_write_json without the list, or with an empty one, did not write")
+        if wj(td / "no-such-folder" / "x.json", {"yk": 1}) is not False or wj(td / "no-such-folder" / "x.json", {"yk": 1}, None) is not False:
+            bad.append("paid_write_json without a list did not return False")
+    except Exception as e:
+        bad.append("paid_write_json raised %s: %s" % (type(e).__name__, e))
+    print("ok" if not bad else "; ".join(bad))
 elif mode == "longform":   # longform GUARD: 0.7.4 F1 (39h), long_form is pure text and answers the same on every OS. The table is written with | for a backslash.
     src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "longform"}
     exec(compile(src, "bash-guard", "exec"), ns)
@@ -562,6 +616,15 @@ deny() { # $1 = label, $2 = command, $3 = a text the reason must hold, $4 = tool
   if [ -n "$OUT" ] && [ -z "$ERR" ]; then case "$OUT" in *"bash-guard: paid call ("*"$3"*) ok "$1";; *) ko "$1 -- the reason lacks '$3': $OUT";; esac; else ko "$1 -- wanted a deny, got stdout '$OUT' stderr '$ERR'"; fi
 }
 allow() { guard "$2" "${3:-}"; [ -z "$OUT" ] && [ -z "$ERR" ] && ok "$1" || ko "$1 -- wanted silence, got stdout '$OUT' stderr '$ERR'"; }
+endrule() { # $1 = label, $2 = "noadapter" (a counter-side reason): the deny in $OUT passes the shape check, ends "Nothing was spent." then " [rule paid]", and names no way to reset a count; "noadapter" also names no adapter (0.7.4 F3)
+  case "$OUT" in *'Nothing was spent. [rule paid]"}}') ;; *) ko "$1 -- the reason does not end Nothing was spent. [rule paid]: $OUT"; return;; esac
+  case "$OUT" in *reset*|*Reset*) ko "$1 -- the reason says how to reset a count: $OUT"; return;; esac
+  if [ "${2:-}" = noadapter ]; then case "$OUT" in *smartuse.local.md*|*adapter*|*'put it in'*) ko "$1 -- a counter-side reason must not send the owner to the adapter: $OUT"; return;; esac; fi
+  [ "$(py "$CW" shape "$OUT" </dev/null 2>&1)" = ok ] && ok "$1" || ko "$1 -- the deny JSON shape: $OUT"
+}
+T_RO="could not verify the go (the counter is not writable); run this call again. If it repeats, run /smartuse:doctor, then check that paid-runs.json in the state folder is not read-only. Nothing was spent."   # 0.7.4 F3 (D-YK31): the three counter-side tails
+T_BUSY="could not verify the go (the counter is busy); another paid call holds the counter; run this call again. Nothing was spent."
+T_UNR="could not verify the go (paid-runs.json is unreadable); ask the owner to repair paid-runs.json in this project's state folder. Nothing was spent."
 field() { py "$CW" entry "$(wp "$R")" "$1" </dev/null; }
 IMP=$(printf 'import %s' openai)                                  # the SDK line, never spelled whole in this file
 mkpaid() { printf '%s\nprint("would call")\n' "$IMP" > "$D/proj/render.py"; }   # render.py: names an SDK -> a paid script
@@ -658,11 +721,14 @@ allow "... and the built-in list still stands for what it does not name (api.git
 # ===== 6. a verification error after a positive detection DENIES; the counter is never reset; a detection error does not
 fresh; mkpaid; mkdir "$D/proj/.claude/smartuse.local.md"
 deny "the adapter exists but cannot be read -> deny: could not verify the go" 'python render.py' 'could not verify the go (the adapter is unreadable); put it in .claude/smartuse.local.md. Nothing was spent.'
+endrule "... 0.7.4 F3 r7 (pin): the adapter-unreadable reason keeps its adapter tail and still ends Nothing was spent. [rule paid]"
 fresh; adapter 'paid: render.py x 10, cap RM5\n'; mkpaid; guard 'python render.py' toolu_1; mkdir -p "$P"; printf '{broken' > "$R"
 deny "a corrupt paid-runs.json -> deny: could not verify the go" 'python render.py' 'could not verify the go (paid-runs.json is unreadable)' toolu_2
+deny "... 0.7.4 F3 r4: the tail says to ask the owner to repair the file, in this project's state folder" 'python render.py' "$T_UNR" toolu_2
+endrule "... r4/r7: the unreadable-counter reason is one ASCII line, ends Nothing was spent. [rule paid], names no adapter" noadapter
 [ "$(cat "$R")" = '{broken' ] && ok "... and the file is left as it was: never a silent reset" || ko "the corrupt counter was changed: $(cat "$R")"
 printf '[1,2]' > "$R"
-deny "a counter file that is JSON but not an object -> deny" 'python render.py' 'could not verify the go (paid-runs.json is unreadable)' toolu_3
+deny "a counter file that is JSON but not an object -> deny" 'python render.py' "$T_UNR" toolu_3
 fresh; adapter 'paid: render.py x 10, cap RM5\n'; mkpaid; mkdir -p "$HOME/.claude/smartuse/projects"; : > "$P"
 deny "the state dir cannot be created (a file sits where it goes) -> deny: could not verify the go" 'python render.py' 'could not verify the go (' toolu_4
 case "$OUT" in *'could not verify the go (the state folder cannot be written); run /smartuse:doctor. Nothing was spent.'*) ok "... 0.7.1 F2: the reason names the state folder and /smartuse:doctor";; *) ko "state folder reason: $OUT";; esac
@@ -754,7 +820,7 @@ deny "... and polish.py is used up on its own" 'python polish.py --n 1' 'the go 
 # ===== 10. the counter file: corrupt -> deny, restored -> carries on (never a reset); unwritable -> deny
 fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, test ok\n'
 guard 'python render.py --n 1' toolu_k1; cp "$R" "$D/saved.json"; printf '{broken' > "$R"
-deny "a corrupt counter -> deny: could not verify the go" 'python render.py --n 1' 'could not verify the go (paid-runs.json is unreadable)' toolu_k2
+deny "a corrupt counter -> deny: could not verify the go" 'python render.py --n 1' "$T_UNR" toolu_k2
 cp "$D/saved.json" "$R"
 allow "the file restored: the same go carries on" 'python render.py --n 1' toolu_k3
 [ "$(used)" = 2 ] && ok "... used 2: counted on from the restored file, never reset to 0" || ko "used after the restore: $(used)"
@@ -762,7 +828,8 @@ fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, test ok\n'
 guard 'python render.py --n 1' toolu_w1
 chmod a-w "$R" "$P" 2>/dev/null   # POSIX: the read-only dir blocks the lock / marker; Windows: the read-only counter file blocks os.replace
 guard 'python render.py --n 1' toolu_w2
-if [ -n "$OUT" ]; then case "$OUT" in *'could not verify the go (the counter is not writable); put it in .claude/smartuse.local.md. Nothing was spent.'*) ok "an unwritable counter -> deny: could not verify the go (the counter is not writable)";; *) ko "unwritable reason: $OUT";; esac
+if [ -n "$OUT" ]; then case "$OUT" in *"$T_RO"*) ok "an unwritable counter -> deny: could not verify the go (the counter is not writable), 0.7.4 F3 r2: run the call again, then doctor and the read-only check";; *) ko "unwritable reason: $OUT";; esac
+  endrule "... r2/r7: the unwritable-counter reason is one ASCII line, ends Nothing was spent. [rule paid], and does not send the owner to smartuse.local.md" noadapter
 elif [ "$(id -u 2>/dev/null)" = 0 ]; then skip "an unwritable counter: skipped (root ignores read-only)"; else ko "an unwritable counter let the call through: '$OUT' '$ERR'"; fi
 chmod u+w "$P" "$R" 2>/dev/null
 [ "$(used)" = 1 ] && [ ! -e "$P/paid.toolu_w2.done" ] && ok "... nothing counted (used 1) and the claim marker released" || ko "after the unwritable deny: used $(used), $(ls "$P")"
@@ -771,7 +838,8 @@ allow "writable again: the same call passes" 'python render.py --n 1' toolu_w2
 
 # ===== 11. the lock around the read-modify-write: held -> deny (fail closed); stale -> taken over; parallel calls cannot both pass the cap
 fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, test ok\n'; mkdir -p "$P"; : > "$P/paid-runs.lock"
-deny "a lock held by another call -> deny after a short wait: the counter is busy" 'python render.py --n 1' 'could not verify the go (the counter is busy); put it in .claude/smartuse.local.md. Nothing was spent.' toolu_l1
+deny "a lock held by another call -> deny after a short wait: the counter is busy, 0.7.4 F3 r3: run this call again" 'python render.py --n 1' "$T_BUSY" toolu_l1
+endrule "... r3/r7: the busy reason is one ASCII line, ends Nothing was spent. [rule paid], and does not send the owner to smartuse.local.md" noadapter
 [ -e "$P/paid-runs.lock" ] && [ ! -e "$R" ] && ok "... the other holder's lock is left alone and nothing was counted" || ko "after a busy deny: $(ls "$P")"
 py "$CW" age "$(wp "$P/paid-runs.lock")" 120 </dev/null
 allow "a stale lock (120 s old) is taken over: the call passes" 'python render.py --n 1' toolu_l2
@@ -1022,10 +1090,12 @@ case "$OUT" in *'bash-guard: fresh-source'*) ok "a paid call the fresh-source ga
 fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'; mkdir -p "$P"; : > "$P/paid-runs.lock"
 r=$(py "$CW" inproc "$(wp "$G")" "$PW" lock </dev/null 2>&1)
 case "$r" in *'could not verify the go (the counter is busy)'*'[rule paid]'*) ok "a counter lock held past the deadline denies: could not verify the go (the counter is busy)";; *) ko "lock past the deadline: $r";; esac
+case "$r" in *"$T_BUSY [rule paid]"*) ok "... 0.7.4 F3: with the busy tail (run this call again), no adapter";; *) ko "lock past the deadline, the tail: $r";; esac
 dt=$(printf '%s' "$r" | awk '{print $2}'); awk -v x="$dt" 'BEGIN{exit !(x+0 < 0.8)}' && ok "... and the wait ends at the deadline (0.3 s here), not after the lock's own second: $dt s" || ko "the lock wait ran to $dt s"
 fresh; mkpaid; adapter 'paid: render.py x 10, cap RM5, count none\n'
 r=$(py "$CW" inproc "$(wp "$G")" "$PW" deadline </dev/null 2>&1)
 case "$r" in *'could not verify the go (the hook ran past its deadline)'*'[rule paid]'*) ok "a call already seen as paid, past the hook's deadline: denied (could not verify)";; *) ko "past the deadline: $r";; esac
+case "$r" in *'could not verify the go (the hook ran past its deadline); put it in .claude/smartuse.local.md. Nothing was spent. [rule paid]'*) ok "... 0.7.4 F3 r7 (pin): the deadline reason keeps its adapter tail";; *) ko "the deadline reason's tail: $r";; esac
 [ ! -e "$R" ] && ok "... and nothing is counted" || ko "a deadline deny was counted: $(cat "$R")"
 
 # ===== 22. V10: a command the guard cannot read cleanly (over the heredoc cap, or tagged by complexity()) is denied only when it also holds a paid word
@@ -2114,9 +2184,11 @@ tallow "an adapter go works beside a 6 MB transcript with no go in it" big_head 
 
 # --- 37e. cannot verify: a typed go needs a transcript the guard can read (the adapter go does not)
 fresh; mkpaid
-tdeny "a missing transcript, no adapter go: could not verify the go (the transcript is missing)" nowhere 'python render.py --n 1' 'could not verify the go (the transcript is missing)' toolu_j1
+tdeny "a missing transcript, no adapter go: could not verify the go (the transcript is missing)" nowhere 'python render.py --n 1' 'could not verify the go (the transcript is missing); put it in .claude/smartuse.local.md. Nothing was spent.' toolu_j1
+endrule "... 0.7.4 F3 r7 (pin): the transcript reason keeps its adapter tail and ends Nothing was spent. [rule paid]"
 mkdir -p "$D/t/adir.jsonl"
-tdeny "a transcript path that is a folder: could not verify the go (the transcript is unreadable)" adir 'python render.py --n 1' 'could not verify the go (the transcript is unreadable)' toolu_j2
+tdeny "a transcript path that is a folder: could not verify the go (the transcript is unreadable)" adir 'python render.py --n 1' 'could not verify the go (the transcript is unreadable); put it in .claude/smartuse.local.md. Nothing was spent.' toolu_j2
+endrule "... 0.7.4 F3 r7 (pin): the unreadable-transcript reason keeps its adapter tail and ends Nothing was spent. [rule paid]"
 [ ! -e "$P" ] && ok "... nothing written" || ko "a could-not-verify deny wrote state: $(ls "$P")"
 fresh; mkpaid
 tallow "a 6 MB transcript, the go in its last 4 MB: found" big_tail 'python render.py --n 1' toolu_j3
@@ -2344,8 +2416,8 @@ if [ "$NT" != 1 ]; then skip "39d skipped here (not Windows: no short key can me
   fi
 fi
 # ===== 39e. 0.7.2 D14, any OS. paid_count is called with the folder it will use (the short-key one) and a full-key sibling that holds a counter: it denies under the lock and
-# leaves the folder empty; with no counter beside it, the same call counts. The sibling's counter is faked through os.path.isfile (a 240-character name cannot be made everywhere).
-mkdir -p "$D/tl"; r=$(py "$CW" twolock "$(wp "$G")" "$(wp "$D/tl")" </dev/null 2>&1); [ "$r" = ok ] && ok "39e paid_count under the lock: a counter in the other state folder is denied (two state folders hold a counter), nothing is written; without one the run is counted" || ko "39e twolock: $r"
+# leaves the folder empty (0.7.4 F3 r5: PAID_LEFT, the folder in use holds no counter; a counter in the folder in use too is PAID_TWO); with no counter beside it, the same call counts. The sibling's counter is faked through os.path.isfile (a 240-character name cannot be made everywhere).
+mkdir -p "$D/tl"; r=$(py "$CW" twolock "$(wp "$G")" "$(wp "$D/tl")" </dev/null 2>&1); [ "$r" = ok ] && ok "39e paid_count under the lock: a counter in the other state folder and none in the folder in use is denied as PAID_LEFT, nothing is written; without one the run is counted; then a counter in each folder is denied as PAID_TWO (0.7.4 F3 r5)" || ko "39e twolock: $r"
 rm -rf "${D:?}/tl"
 # ===== 39c. 0.7.2 F3 (D-YK20, the honest half), a kept state folder too long for paid runs is said aloud. A full-key folder that already exists is kept while a file
 # of 26 characters fits in it (up to 232), but a real 30-character tool_use_id makes the claim marker paid.<id>.done 40 characters: in a folder of 219 to 232 characters,
@@ -2382,7 +2454,7 @@ except Exception:
 fi
 # ===== 39f. 0.7.3 F2 (D-YK25, E1), a real counter left in a folder fit_key no longer uses. A project whose full-key state folder is 240 characters (E1: 233 to 244 characters is where plain file
 # calls still reach a counter, its own path is at most 259; from 245 the paid check cannot see it) holds paid-runs.json. With Windows long paths off fit_key sends the project to the short key. This
-# is a pin, green on 54f4b75 by trace: the paid call is refused with the 39d words ("two state folders hold a counter"), nothing is counted, the counter's bytes stay (39e fakes the file check, so
+# is a pin, green on 54f4b75 by trace: the paid call is refused (0.7.4 F3 r6: now with the left-behind words, "the paid counter is in a state folder that is no longer used"; 54f4b75 said "two state folders hold a counter"), nothing is counted, the counter's bytes stay (39e fakes the file check, so
 # no test had run it on a real folder). Then heartbeat.py --doctor for the same project names the same two folders (it said "writable" only). Windows only, and only with LongPathsEnabled = 0.
 if [ "$NT" != 1 ]; then skip "39f skipped here (not Windows: the 259-character path limit is Windows-only)"; else
   LPON=$(py -c 'import sys
@@ -2400,7 +2472,8 @@ except Exception:
     fresh; mkdir -p "$LP/.claude" "$FP"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"; printf '{}' > "$FR"
     [ "${#LKEY}" = "$LK" ] && [ -f "$FR" ] && ok "39f the full-key folder is $(( BL + 1 + LK )) characters and holds paid-runs.json" || ko "39f key ${#LKEY} (wanted $LK), counter: $(ls -A "$FP" 2>&1 | tr '\n' ' ')"
     guard 'python render.py --images 1' "$ID1" "$LPW"
-    case "$OUT" in *'could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'*) ok "39f the paid call is refused: two state folders hold a counter, the reason names /smartuse:doctor";; *) ko "39f paid call: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+    case "$OUT" in *'could not verify the go (the paid counter is in a state folder that is no longer used); run /smartuse:doctor. Nothing was spent.'*) ok "39f the paid call is refused: the paid counter is in a state folder that is no longer used (0.7.4 F3 r6), the reason names /smartuse:doctor";; *) ko "39f paid call: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+    endrule "39f the left-behind reason is one ASCII line and ends Nothing was spent. [rule paid]" noadapter
     [ "$(cat "$FR" 2>/dev/null)" = '{}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39f nothing was counted: the counter's bytes are unchanged, no marker, the short-key folder holds nothing" || ko "39f state: full $(ls -A "$FP" 2>&1 | tr '\n' ' ') counter '$(cat "$FR" 2>&1)' short '$(ls -A "$PR/$LNAME" 2>&1 | tr '\n' ' ')'"
     DOUT=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/heartbeat.py" --doctor </dev/null); DN=$(printf '%s\n' "$DOUT" | wc -l)
     case "$DOUT" in *"state folder: FAIL"*"$LKEY"*"(240 characters)"*"$LNAME"*) [ "$DN" -le 8 ] && ok "39f doctor for the same project names the same two folders and 240 characters ($DN lines)" || ko "39f doctor has $DN lines (limit 8)";; *) ko "39f doctor: $(printf '%s' "$DOUT" | grep 'state folder')";; esac
@@ -2412,8 +2485,8 @@ fi
 # ===== 39g. 0.7.4 F1 (E1), a counter in the other state folder is seen at ANY length. 39f is the 240-character window, where plain file calls still reach the counter. From 245 characters
 # the counter's own path passes 259, os.path.isfile says "no" with Windows long paths off, and the paid call was allowed and counted again in the short folder (used 1). Now the check also
 # looks through the extended-length form. Real folders, made the way E1e proved (Git Bash mkdir -p and a redirect; rm -rf takes them away): g1 250 characters with a counter and an adapter
-# go -> refused with the 39d words, the counter's bytes unchanged, nothing in the short folder; g2 the same at 245 and 270; g3 a counter in BOTH folders at 250 -> the same refusal; g4 pin:
-# 240 keeps 39f's outcome. Windows only, and only with LongPathsEnabled = 0 (read only).
+# go -> refused with the left-behind words (0.7.4 F3 r6), the counter's bytes unchanged, nothing in the short folder; g2 the same at 245 and 270; g3 a counter in BOTH folders at 250 -> the 39d words
+# (two state folders hold a counter); g4 pin: 240 keeps 39f's outcome. Windows only, and only with LongPathsEnabled = 0 (read only).
 if [ "$NT" != 1 ]; then skip "39g skipped here (not Windows: the 259-character path limit is Windows-only)"; else
   LPON=$(py -c 'import sys
 try:
@@ -2422,7 +2495,7 @@ try:
         sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
 except Exception:
     sys.stdout.write("0")' </dev/null)   # the same read as 39c and 39f: this machine's long-path switch (read only)
-  ID1=toolu_01ABCDEFGHIJKLMNOPQRSTUV; GOUT='could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'
+  ID1=toolu_01ABCDEFGHIJKLMNOPQRSTUV; GOUT='could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'; GLEFT='could not verify the go (the paid counter is in a state folder that is no longer used); run /smartuse:doctor. Nothing was spent.'
   if [ "$LPON" = 1 ]; then skip "39g skipped: Windows long paths are on here (LongPathsEnabled = 1), a long full-key folder is kept and plain calls see it, so the layout cannot arise"
   elif [ $(( 239 - BL )) -lt 60 ]; then skip "39g skipped: HOME is $BL characters, too long to build a state folder of 240"; else
     for GL in 250 245 270 240; do   # the state folder's length: g1, g2, g2, g4 (the pin)
@@ -2432,7 +2505,7 @@ except Exception:
       fresh; mkdir -p "$LP/.claude" "$FP"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"; printf '{"yk":1}' > "$FR"
       [ "${#LKEY}" = "$LK" ] && [ -f "$FR" ] && ok "39g $T the full-key folder is $GL characters (the counter's path $(( GL + 15 ))) and holds paid-runs.json" || ko "39g $T key ${#LKEY} (wanted $LK), counter: $(ls -A "$FP" 2>&1 | tr '\n' ' ')"
       guard 'python render.py --images 1' "$ID1" "$LPW"
-      case "$OUT" in *"$GOUT"*) ok "39g $T the paid call is refused at $GL characters: two state folders hold a counter, the reason names /smartuse:doctor";; *) ko "39g $T paid call at $GL: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+      case "$OUT" in *"$GLEFT"*) ok "39g $T the paid call is refused at $GL characters: the paid counter is in a state folder that is no longer used (0.7.4 F3 r6), the reason names /smartuse:doctor";; *) ko "39g $T paid call at $GL: stdout '${OUT:0:400}' stderr '$ERR'";; esac
       [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39g $T nothing was counted: the counter's bytes are unchanged, no marker, the short-key folder holds no counter and no marker" || ko "39g $T state: full $(ls -A "$FP" 2>&1 | tr '\n' ' ') counter '$(cat "$FR" 2>&1)' short '$(ls -A "$PR/$LNAME" 2>&1 | tr '\n' ' ')'"
       if [ "$GL" = 250 ]; then   # 0.7.4 F2, the doctor half of g1: heartbeat.py --doctor for the same project names the same two folders the refusal is about, 250 characters, and the way out E1e proved (it said "writable" only)
         DOUT=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/heartbeat.py" --doctor </dev/null); DN=$(printf '%s
@@ -2447,6 +2520,7 @@ except Exception:
         mkdir -p "$PR/$LNAME"; printf '{"yk":2}' > "$PR/$LNAME/paid-runs.json"
         guard 'python render.py --images 1' "$ID1" "$LPW"
         case "$OUT" in *"$GOUT"*) ok "39g g3 a counter in both folders at 250 characters: the paid call is refused with the two-counters words";; *) ko "39g g3 paid call: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+        endrule "39g g3 the two-counters reason is one ASCII line and ends Nothing was spent. [rule paid]" noadapter
         [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(cat "$PR/$LNAME/paid-runs.json" 2>/dev/null)" = '{"yk":2}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(ls -A "$PR/$LNAME" | tr '\n' ' ')" = "paid-runs.json " ] && ok "39g g3 both counters' bytes are unchanged and no marker was made" || ko "39g g3 state: full '$(cat "$FR" 2>&1)' short '$(cat "$PR/$LNAME/paid-runs.json" 2>&1)' folders: $(ls -A "$FP" "$PR/$LNAME" 2>&1 | tr '\n' ' ')"
       fi
     done
@@ -2464,6 +2538,8 @@ r=$(py "$CW" counterin "$(wp "$G")" </dev/null 2>&1); [ "$r" = ok ] && ok "39h c
 # a project whose key does not fit does call it (the control, so the count cannot be zero by accident).
 mkdir -p "$D/tl"; r=$(py "$CW" nocall "$(wp "$G")" "$(wp "$D/tl")" </dev/null 2>&1); [ "$r" = ok ] && ok "39i a project whose key fits makes no call to counter_in (early check and under the lock); one that does not fit does" || ko "39i nocall: $r"
 rm -rf "${D:?}/tl"
+# ===== 39j. 0.7.4 F3 r1, any OS, in process. paid_why picks the too-long words by the error the system gave (E1d: a name that does not fit is a FileNotFoundError on Windows past 259; a read-only counter is a PermissionError), not by the length.
+r=$(py "$CW" paidwhy "$(wp "$G")" </dev/null 2>&1); [ "$r" = ok ] && ok "39j F3 r1 paid_why: too long only on Windows, past 259, with a FileNotFoundError (a PermissionError or another error says not writable; 200 characters and not Windows never too long; no error object keeps the length rule); paid_write_json hands its error back through a list" || ko "39j paid_why: $r"
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

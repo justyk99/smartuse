@@ -2071,22 +2071,30 @@ def paid_project_key(project):
     return fit_key(full, str(paid_home() / ".claude" / "smartuse" / "projects"), os.name == "nt")
 
 
-def paid_write_json(path, obj):
-    """Atomic (copy of ledger.py's): tmp file + os.replace, 5 tries 20 ms apart on Windows; True when written. Never raises."""
+def paid_write_json(path, obj, errs=None):
+    """Atomic (copy of ledger.py's): tmp file + os.replace, 5 tries 20 ms apart on Windows; True when written. Never raises. 0.7.4 F3: `errs`, an
+    optional list, gets the last error when the write fails (paid_why picks its words by the error the system gave); None changes nothing."""
     tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    last = None
     try:
         tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
         for attempt in range(5):
             try:
                 os.replace(tmp, path)
                 return True
-            except OSError:
+            except OSError as e:
+                last = e
                 if attempt < 4:
                     time.sleep(0.02)
+    except Exception as e:
+        last = e
+    try:
+        tmp.unlink()
     except Exception:
         pass
     try:
-        tmp.unlink()
+        if errs is not None and last is not None:
+            errs.append(last)
     except Exception:
         pass
     return False
@@ -3124,12 +3132,19 @@ def paid_count_flags(args, extra=""):
 PAID_SDIR = "the state folder cannot be written"   # 0.7.1 F2: paid_count's `why` when the state folder cannot be made; paid_verdict names /smartuse:doctor for it, not the adapter
 PAID_LONG = "the state folder's path is too long for the counter's files"   # 0.7.2 F3: `why` when a counter file's own path passes 259 characters on Windows (long paths off); paid_verdict names /smartuse:doctor for it too
 PAID_TWO = "two state folders hold a counter"   # 0.7.2 D9: `why` when the full-key folder and the short-key folder each hold paid-runs.json (a folder copy can plant one); paid_verdict names /smartuse:doctor for it too
+PAID_LEFT = "the paid counter is in a state folder that is no longer used"   # 0.7.4 F3: `why` when the other state folder holds a counter and the folder in use holds none; paid_verdict names /smartuse:doctor for it too
+PAID_RO = "the counter is not writable"   # 0.7.4 F3: the lock, a marker or the counter's write was refused; paid_verdict's tail: run the call again, then doctor and the read-only check (not the adapter: a go needs the same counter)
+PAID_BUSY = "the counter is busy"   # 0.7.4 F3: another paid call holds the lock; paid_verdict's tail: run this call again
+PAID_BAD = "paid-runs.json is unreadable"   # 0.7.4 F3: the counter is not a JSON object; paid_verdict's tail: ask the owner to repair it
 
 
-def paid_why(path, extra=0):
-    """paid_count's `why` for a counter file it could not create: PAID_LONG when this is Windows and the file's path (plus `extra` characters
-    of a temporary name made beside it) is past the 259 a path may hold without long-path support (0.7.2 F3), else "the counter is not writable"."""
-    return PAID_LONG if os.name == "nt" and len(str(path)) + extra > 259 else "the counter is not writable"
+def paid_why(path, extra=0, err=None, nt=None):
+    """paid_count's `why` for a counter file it could not create: PAID_LONG when this is Windows (`nt`, default os.name == "nt"), the file's path
+    (plus `extra` characters of a temporary name made beside it) is past the 259 a path may hold without long-path support (0.7.2 F3), AND the
+    system gave a FileNotFoundError, which is what it raises for a name that does not fit (0.7.4 E1d); any other error (a read-only counter is a
+    PermissionError) is PAID_RO. `err` None means no error object is at hand: then today's length rule alone decides. Every caller passes its error."""
+    nt = os.name == "nt" if nt is None else nt
+    return PAID_LONG if nt and len(str(path)) + extra > 259 and (err is None or isinstance(err, FileNotFoundError)) else PAID_RO
 
 
 def paid_counter_lock(sdir, deadline=None):
@@ -3174,24 +3189,24 @@ def paid_count(data, sdir, items, text, deadline=None, project=None):
         return True, PAID_SDIR, 0                             # 0.7.1 F2: a named cause (a file where the folder goes, no permission), not "the check failed"
     try:
         lock = paid_counter_lock(sdir, deadline)
-    except OSError:
-        return True, "the counter is not writable", 0
+    except OSError as e:
+        return True, paid_why(sdir / "paid-runs.lock", 0, e), 0   # 0.7.4 F3: the lock's own path too long (FileNotFoundError) or not writable, by the error
     if not lock:
-        return True, "the counter is busy", 0
+        return True, PAID_BUSY, 0
     claimed = []
     try:
         if project is not None:
             base, full, short = paid_keys(project)
             other = short if sdir.name == full else full if sdir.name == short else ""
             if other and other != sdir.name and counter_in(base, other, os.name == "nt"):
-                return True, PAID_TWO, 0                      # D14: the other folder holds a counter; nothing is read or written here
+                return True, (PAID_TWO if counter_in(base, sdir.name, os.name == "nt") else PAID_LEFT), 0   # D14: the other folder holds a counter; nothing is read or written here. 0.7.4 F3: a counter in the folder in use too is two, none there is one left behind
         f = sdir / "paid-runs.json"
         try:
             state = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
         except Exception:
             state = None
         if not isinstance(state, dict):
-            return True, "paid-runs.json is unreadable", 0
+            return True, PAID_BAD, 0
         tid = re.sub(r"[^A-Za-z0-9._-]", "-", str(data.get("tool_use_id") or ""))
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         todo = []                                             # (index, go_id, entry, ok, marker) of the runs to count
@@ -3208,8 +3223,9 @@ def paid_count(data, sdir, items, text, deadline=None, project=None):
                 if not e.get("stopped"):                      # F5: the first sight of the stop is written down, so it cannot scroll out of the last 4 MB of the transcript
                     e["stopped"], e["stopped_at"] = True, go.get("stopped_at")   # with the stop record's own time: a typed go takes over only when it is later
                     state[go_id] = e
-                    if not paid_write_json(f, state):
-                        return True, "the counter is not writable", k
+                    errs = []
+                    if not paid_write_json(f, state, errs):
+                        return True, paid_why(f, len(str(os.getpid())) + 5, errs[-1] if errs else None), k
                 return False, 'the owner said "paid stop": no more runs of this go. The owner types a new "paid go: …" to start again.', k
             if used >= runs:
                 return False, f"the go for {clip(script)} is used up ({runs} of {runs}). Ask the owner for a new go.", k
@@ -3234,8 +3250,8 @@ def paid_count(data, sdir, items, text, deadline=None, project=None):
                     os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
                 except FileExistsError:
                     continue
-                except Exception:
-                    return True, paid_why(marker), k             # 0.7.2 F3: a 40-character marker in a long kept folder: the path, not the adapter
+                except Exception as e:
+                    return True, paid_why(marker, 0, e), k       # 0.7.2 F3: a 40-character marker in a long kept folder: the path, not the adapter; 0.7.4 F3: by the error
                 claimed.append(marker)
             if not int(e.get("used") or 0):
                 e["run1_at"] = time.time()                    # F5: a typed test ok counts for this go only when its record is later than this (the first run)
@@ -3243,10 +3259,11 @@ def paid_count(data, sdir, items, text, deadline=None, project=None):
             state[go_id] = e
         if not todo or (not claimed and any(m for *_, m in todo)):
             return None                                       # nothing to count, or the other copy of the hook claimed every run
-        if paid_write_json(f, state):
+        errs = []
+        if paid_write_json(f, state, errs):
             claimed = []
             return None
-        return True, paid_why(f, len(str(os.getpid())) + 5), 0   # the temporary file beside it is paid-runs.json.<pid>.tmp
+        return True, paid_why(f, len(str(os.getpid())) + 5, errs[-1] if errs else None), 0   # the temporary file beside it is paid-runs.json.<pid>.tmp
     finally:
         for m in claimed:
             try:
@@ -3348,8 +3365,14 @@ def paid_verdict(data, cmd, text, strict=True, deadline=None, blind=False, ps=Fa
         why = str(e)
     except Exception:
         why = "the check failed"
-    if why in (PAID_SDIR, PAID_LONG, PAID_TWO):               # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written; 0.7.2 F3: nor for a path too long for its files; D9: nor for two counters
+    if why in (PAID_SDIR, PAID_LONG, PAID_TWO, PAID_LEFT):    # 0.7.1 F2: the adapter is not the fix for a folder that cannot be written; 0.7.2 F3: nor for a path too long for its files; D9: nor for two counters; 0.7.4 F3: nor for one left behind
         return head(first) + f"could not verify the go ({why}); run /smartuse:doctor. Nothing was spent."
+    if why == PAID_RO:                                        # 0.7.4 F3 (D-YK31): an adapter go needs the same counter, so the adapter is never the fix for a counter-side cause
+        return head(first) + f"could not verify the go ({why}); run this call again. If it repeats, run /smartuse:doctor, then check that paid-runs.json in the state folder is not read-only. Nothing was spent."
+    if why == PAID_BUSY:
+        return head(first) + f"could not verify the go ({why}); another paid call holds the counter; run this call again. Nothing was spent."
+    if why == PAID_BAD:
+        return head(first) + f"could not verify the go ({why}); ask the owner to repair paid-runs.json in this project's state folder. Nothing was spent."
     if why:
         return head(first) + f"could not verify the go ({why}); put it in .claude/smartuse.local.md. Nothing was spent."
     if rule:
