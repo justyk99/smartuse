@@ -4,9 +4,13 @@ H="$(cd "$(dirname "$0")/.." && pwd)"; G="$H/bash-guard.py"; fail=0
 export CLAUDE_PLUGIN_OPTION_STRICT=true   # the 0.6.0 cases below are the strict bar: every rule on. The light block (ocheck) sets the level itself.
 unset CLAUDE_PLUGIN_OPTION_RULES_OFF
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
+REAL=$(py -c "import sys; sys.stdout.write(sys.executable)")   # the interpreter the launcher found: a case with a code page starts it directly, because the launcher's -I ignores PYTHONIOENCODING (0.7.5)
+guard() { # $1 = code page the guard's stdin is decoded in (optional; cp1252 = Windows ANSI): then the interpreter is started directly, with the environment hooks had before 0.7.5; reads the event on stdin
+  if [ -n "${1:-}" ]; then env PYTHONUTF8=1 PYTHONIOENCODING="$1" "$REAL" "$G"; else bash "$H/py.sh" "$G"; fi
+}
 check() { # $1 = expected (deny|allow), $2 = command, $3 = code page the guard's stdin is decoded in (optional; cp1252 = Windows ANSI)
   # The event JSON keeps non-ASCII raw (ensure_ascii=False), so an "Á" reaches the guard as UTF-8 bytes, the way Claude Code sends it.
-  out=$(py - "$2" <<'PY' | env ${3:+PYTHONIOENCODING=$3} bash "$H/py.sh" "$G"
+  out=$(py - "$2" <<'PY' | guard "${3:-}"
 import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}, ensure_ascii=False))
 PY
 )
@@ -1256,7 +1260,7 @@ export HOME="$PD/home"; mkdir -p "$HOME/.claude/smartuse" "$PD/proj"           #
 if command -v cygpath >/dev/null 2>&1; then PJ=$(cygpath -m "$PD/proj"); PWIN=$(cygpath -w "$PD/proj"); SEP='\'; else PJ="$PD/proj"; PWIN="$PD/proj"; SEP='/'; fi
 jstr() { local s=$1; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\t'/\\t}; printf '%s' "$s"; }   # a JSON string body, non-ASCII bytes kept raw
 paidcheck() { # $1 = expected (deny|allow), $2 = command, $3 = code page the guard's stdin is decoded in (optional)
-  out=$(printf '{"tool_name":"Bash","cwd":"%s","tool_use_id":"toolu_run","tool_input":{"command":"%s"}}' "$PJ" "$(jstr "$2")" | env ${3:+PYTHONIOENCODING=$3} bash "$H/py.sh" "$G")
+  out=$(printf '{"tool_name":"Bash","cwd":"%s","tool_use_id":"toolu_run","tool_input":{"command":"%s"}}' "$PJ" "$(jstr "$2")" | guard "${3:-}")
   if [ "$1" = deny ]; then got=$([ -n "$out" ] && echo deny || echo allow); else got=$([ -z "$out" ] && echo allow || echo deny); fi
   lbl=${2//$'\n'/ }; lbl=${lbl:0:60}   # one line per case
   if [ "$got" = "$1" ]; then echo "PASS $1  paid: $lbl"; else echo "FAIL expected $1 got $got  paid: $lbl"; fail=1; fi
