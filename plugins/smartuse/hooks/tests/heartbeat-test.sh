@@ -536,8 +536,8 @@ CLAUDE_PLUGIN_OPTION_RULES_OFF="sudo" evo "$(SS g7)"; ev "{\"hook_event_name\":\
 CLAUDE_PLUGIN_OPTION_RULES_OFF="sudo" evo "$(SS g7 compact)"
 [ "$OUTO" = "rc=0" ] && echo "PASS F5b a compact of the same session does not repeat the message" || { echo "FAIL F5b compact message: $OUTO"; fail=1; }
 expect "F5b ... and the suffix stays on the line" " · 1 rule off"
-# the literal copy of bash-guard.py's RULE_NAMES in heartbeat.py (no import between hooks) must match it; skipped while bash-guard.py has no RULE_NAMES
-CMP=$(py - "$H/heartbeat.py" "$H/bash-guard.py" <<'PY'
+# the literal copy of bash-guard.py's RULE_NAMES in heartbeat.py (no import between hooks) must match it; 0.7.3 F4: a bash-guard.py without RULE_NAMES is BAD, never a skip (m1 below proves it)
+rncmp() { py - "$1" "$2" <<'PY'
 import ast, sys
 def tup(path, name):
     for n in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
@@ -551,14 +551,19 @@ if theirs is not None:
 if mine is None:
     print("BAD heartbeat.py has no KNOWN_RULES")
 elif theirs is None:
-    print("SKIP bash-guard.py has no RULE_NAMES yet (the tracks are not merged)")
+    print("BAD bash-guard.py has no RULE_NAMES")
 elif sorted(mine) == sorted(theirs) and len(set(mine)) == len(mine):
     print("OK %d names" % len(mine))
 else:
     print("BAD only in heartbeat.py: %s; only in bash-guard.py: %s" % (sorted(set(mine) - set(theirs)), sorted(set(theirs) - set(mine))))
 PY
-)
-case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; SKIP*) echo "SKIP F5b KNOWN_RULES vs RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
+}
+CMP=$(rncmp "$H/heartbeat.py" "$H/bash-guard.py")
+case "$CMP" in OK*) echo "PASS F5b KNOWN_RULES in heartbeat.py equals bash-guard.py RULE_NAMES: $CMP";; *) echo "FAIL F5b KNOWN_RULES vs RULE_NAMES: $CMP"; fail=1;; esac
+# m1 (0.7.3 F4), a mutation: a temp copy of bash-guard.py whose RULE_NAMES is renamed goes through the same comparison and must be BAD (it was a SKIP, which left heartbeat's copy unchecked and the suite green)
+sed 's/RULE_NAMES/RULE_NAMEX/g' "$H/bash-guard.py" > "$D/bg-mut.py"
+CMPM=$(rncmp "$H/heartbeat.py" "$D/bg-mut.py")
+case "$CMPM" in "BAD bash-guard.py has no RULE_NAMES") echo "PASS F5b m1 a bash-guard.py without RULE_NAMES is BAD, not a skip: $CMPM";; *) echo "FAIL F5b m1 a bash-guard.py without RULE_NAMES: $CMPM"; fail=1;; esac
 # --- 0.6.1 F6: --guard, the second optional first word of py.sh, on the three guard commands. No interpreter and Strict guards on (the option
 # text is anything but empty / off / false / no / 0) -> a fixed sentence on stderr and exit 2: the call is blocked and Claude is told why.
 # Light (the default, also when no option is set) -> silent exit 0 as before. With an interpreter nothing changes.
@@ -799,6 +804,67 @@ for n, want in ((209, "cannot be written"), (210, "some paid runs (two scripts i
 print("ok" if not bad else "; ".join(bad))
 PY
 r=$(py "$D/dl.py" "$H" </dev/null 2>&1 | tail -3); [ "$r" = ok ] && echo "PASS F3 doctor: a failed 49-character probe in a folder of 209 characters says cannot be written (no length claim); at 210 to 218 it says some paid runs (two scripts in one command) cannot be counted, and from 219 that paid runs cannot" || { echo "FAIL F3 doctor probe length check: $r"; fail=1; }
+# ===== 0.7.3 F2 (D-YK25): a paid counter left in the folder that is no longer used. With Windows long paths off fit_key sends a project whose full-key folder is too long to the short key, whatever the
+# short folder holds, so a counter that sits in the full-key folder stays behind: the paid check refuses ("two state folders hold a counter") while doctor said "writable". Doctor now prints its own
+# FAIL line: both folders, the length of the one holding the counter, and both ways out (long paths on: the count carries on; delete that folder: it starts again). It says what is in the folders,
+# never how it got there, and it never creates or fills a folder. h1 to h3, any OS: fit_key is stood in (it answers a short name) over real folders under a temp base; h4, below, is the real Windows layout.
+cat > "$D/cl.py" <<'PY'
+import os, pathlib, sys, tempfile
+src = open(os.path.join(sys.argv[1], "heartbeat.py"), encoding="utf-8").read()
+cut = src.index("\ntry:\n    main()")
+ns = {"__name__": "counter_probe", "__file__": os.path.join(sys.argv[1], "heartbeat.py")}
+tmp = tempfile.mkdtemp(dir=sys.argv[2])
+proj = os.path.join(tmp, "proj"); os.makedirs(proj)
+os.environ["CLAUDE_PROJECT_DIR"] = proj
+exec(compile(src[:cut], "heartbeat", "exec"), ns)
+full = ns["full_key"](proj)
+SHORT = "short-kkkkkkkkkk"
+ns["fit_key"] = lambda f, b, nt: SHORT   # the project's key is too long for its folder: the short key is the one that is used
+TWO = "state folder: FAIL · two state folders hold a paid counter: %s and %s: the paid check refuses every paid run until you delete the one that is wrong (its count and receipts go with it)" % (full, SHORT)
+N = [0]
+
+def tree(base):
+    return sorted(os.path.join(r, n)[len(base):] for r, ds, fs in os.walk(base) for n in ds + fs)
+
+def case(have_full, have_short, in_use):   # have_*: None (no folder) | "empty" | "counter"; in_use: the folder doctor is given
+    N[0] += 1
+    base = os.path.join(tmp, "projects%d" % N[0]); os.makedirs(base)
+    for name, have in ((full, have_full), (SHORT, have_short)):
+        if have:
+            os.makedirs(os.path.join(base, name))
+            if have == "counter":
+                open(os.path.join(base, name, "paid-runs.json"), "w").write("{}")
+    before = tree(base)
+    lines = ns["doctor_lines"](pathlib.Path(base) / in_use)
+    return base, lines, tree(base) == before
+
+def fails(lines):
+    return [l for l in lines if l.startswith("state folder: FAIL")]
+
+res = {"h1": [], "h2": [], "h3": []}
+for label, hs in (("short folder not made yet", None), ("short folder made, empty", "empty")):   # h1: the counter only in the full-key folder
+    base, lines, same = case("counter", hs, SHORT)
+    st = fails(lines)
+    want = "(%d characters)" % len(str(pathlib.Path(base) / full))
+    if len(st) != 1 or not all(x in st[0] for x in (full, SHORT, want, "refuses every paid run", "long paths", "delete")) or "two state folders" in st[0]:
+        res["h1"].append("%s: %s" % (label, st or lines))
+    if len(lines) > 8 or not same or not any(l == "state folder: writable" for l in lines):
+        res["h1"].append("%s: %d lines, folders untouched %s, lines %s" % (label, len(lines), same, lines))
+base, lines, same = case("counter", "counter", SHORT)   # h2: a counter in both folders: today's line, byte for byte, and not the new one
+if fails(lines) != [TWO] or any("the paid counter is in" in l for l in lines) or len(lines) > 8 or not same:
+    res["h2"].append("%s" % (lines,))
+for label, args in (("a counter only in the folder used", (None, "counter", SHORT)), ("no counter at all", (None, None, SHORT)),
+                    ("a kept full-key folder, its counter in it, in use", ("counter", None, full)), ("the short folder holds a counter, the full-key one is empty", ("empty", "counter", SHORT))):
+    base, lines, same = case(*args)   # h3: no FAIL line
+    if fails(lines) or not same or not any(l == "state folder: writable" for l in lines):
+        res["h3"].append("%s: %s" % (label, lines))
+for k in ("h1", "h2", "h3"):
+    print(k, "ok" if not res[k] else "; ".join(res[k])[:600])
+PY
+r=$(py "$D/cl.py" "$H" "$D" </dev/null 2>&1) || true
+l=$(printf '%s\n' "$r" | grep '^h1 ' | head -1); case "$l" in "h1 ok") echo "PASS F2 h1 doctor, a counter only in the full-key folder: its own FAIL line names both folders, the length of the one holding the counter and both ways out; folders untouched, at most 8 lines";; *) echo "FAIL F2 h1 doctor, a counter left behind: ${l:-$r}"; fail=1;; esac
+l=$(printf '%s\n' "$r" | grep '^h2 ' | head -1); case "$l" in "h2 ok") echo "PASS F2 h2 doctor, a counter in both folders: today's two-counters line byte for byte, not the new one";; *) echo "FAIL F2 h2 doctor, two counters: ${l:-$r}"; fail=1;; esac
+l=$(printf '%s\n' "$r" | grep '^h3 ' | head -1); case "$l" in "h3 ok") echo "PASS F2 h3 doctor, a counter only in the folder used, none at all, a kept full-key folder: no FAIL line";; *) echo "FAIL F2 h3 doctor, a false FAIL: ${l:-$r}"; fail=1;; esac
 # D9: a counter in both the full-key and the short-key folder is one FAIL line naming both (Windows: a short key beside a full-key folder that can be made)
 if [ "$NT" = 1 ]; then
   if [ $(( 204 - BL2 )) -lt 20 ]; then echo "SKIP D9 doctor, two counters: HOME is $BL2 characters, too long to build a state folder of 205"
@@ -816,5 +882,20 @@ if [ "$NT" = 1 ]; then
     rm -rf "$H2/.claude/smartuse/projects"
   fi
 else echo "SKIP D9 doctor, a counter in two state folders: Windows only"; fi
+# 0.7.3 F2 h4, the real layout (E1: a full-key folder of 233 to 244 characters is where the counter is still seen, its own path is at most 259; the paid check refuses there, 245 and up it cannot see
+# the counter): a full-key folder of 240 characters holding paid-runs.json, long paths off, so fit_key uses the short key. Windows only, LongPathsEnabled = 0 (read at the F3 block above).
+if [ "$NT" = 1 ]; then
+  if [ "$LPON" = 1 ]; then echo "SKIP F2 h4 doctor, a counter left in a 240-character folder: Windows long paths are on here (LongPathsEnabled = 1), that folder is kept"
+  elif [ $(( 239 - BL2 )) -lt 20 ]; then echo "SKIP F2 h4 doctor, a counter left in a 240-character folder: HOME is $BL2 characters, too long to build it"
+  else
+    rm -rf "$H2/.claude/smartuse/projects"
+    pw=$(lpath $(( 239 - BL2 ))); fk=$(key "$pw"); pr="$H2/.claude/smartuse/projects"
+    mkdir -p "$pr/$fk"; printf '{}' > "$pr/$fk/paid-runs.json"
+    OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+    case "$OUT" in *"state folder: FAIL"*"$fk"*"(240 characters)"*"long paths"*"delete"*) [ "$N" -le 8 ] && echo "PASS F2 h4 doctor, a real 240-character full-key folder holding a counter (long paths off): its own FAIL line names the folders, 240 characters and both ways out ($N lines)" || { echo "FAIL F2 h4 doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL F2 h4 doctor, a counter left in a 240-character folder: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+    [ "$(ls -A "$pr" | tr '\n' ' ')" = "$fk " ] && [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(cat "$pr/$fk/paid-runs.json")" = "{}" ] && echo "PASS F2 h4 doctor left the folders as they were (no short-key folder made, the counter untouched)" || { echo "FAIL F2 h4 doctor touched the folders: $(ls -A "$pr" "$pr/$fk" | tr '\n' ' ')"; fail=1; }
+    rm -rf "$H2/.claude/smartuse/projects"
+  fi
+else echo "SKIP F2 h4 doctor, a counter left in a 240-character folder: Windows only"; fi
 
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
