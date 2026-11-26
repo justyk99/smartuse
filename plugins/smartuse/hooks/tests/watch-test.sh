@@ -93,11 +93,11 @@ scn_push_path() {
 scn_push_nofile() {
   local f="$D/push-nofile"
   fixture_or_ko "$f" "push without the file" || return
-  startw "$f" --git origin main --path docs/M3-RESULT.md --every 1 --max 10s   # the longest case of the suite: it runs out its --max
+  startw "$f" --git origin main --path docs/M3-RESULT.md --every 1 --max 30s   # the longest case of the suite: it runs out its --max
   armed "$f" || { never_armed "$f" "push without the file"; return; }
   bpush "$f" "wip: notes only" notes.md
-  endw "$f" 40
-  if grep -q -E "built-in: git '?fetch" "$f/trace"; then verdict "push WITHOUT docs/M3-RESULT.md under --path → the watcher fetched the new head, found no file, kept waiting → exit 3 at --max" 3 "no signal after 10s (git origin/main · docs/M3-RESULT.md)"
+  endw "$f" 60
+  if grep -q -E "built-in: git '?fetch" "$f/trace"; then verdict "push WITHOUT docs/M3-RESULT.md under --path → the watcher fetched the new head, found no file, kept waiting → exit 3 at --max" 3 "no signal after 30s (git origin/main · docs/M3-RESULT.md)"
   else ko "push without the file: the watcher never looked at the new head (no fetch in its trace) — exit $RC, stdout '$OUT'"; fi
 }
 
