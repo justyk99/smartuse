@@ -190,7 +190,7 @@ OUT=$(cd "$D/sd2/old" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py
 same "$OUT" "$(wp "$E5")" && [ -d "$E5" ] && [ -z "$(ls -A "$HOME/.claude/smartuse/projects/old")" ] && echo "PASS --state-dir --create with projects/old present: creates and prints the keyed dir, projects/old untouched" || { echo "FAIL --state-dir --create with projects/old present: printed '$OUT', keyed dir: $([ -d "$E5" ] && echo yes || echo no), projects/old: $(ls -A "$HOME/.claude/smartuse/projects/old")"; exit 1; }
 # --- the skills' state writes: --put / --unit / --run / --get. Claude Code treats ~/.claude/ as a sensitive path (Write / Edit there
 # prompt in default and acceptEdits mode and are denied headless), so the skills write pending.json / routing.json only through this
-# script, which their Bash(bash *) already runs. Run from the repo with CLAUDE_PROJECT_DIR unset, the way the Bash tool runs it; every
+# script, which each skill's launcher rule (py.sh, this script, one option) runs. Run from the repo with CLAUDE_PROJECT_DIR unset, the way the Bash tool runs it; every
 # write must land in that repo's keyed dir and nowhere else (others() = every file under HOME outside the keyed dir, with its hash).
 mkdir -p "$D/st/proj"; PW6=$(wp "$D/st/proj"); K6=$(key "$PW6"); E6="$HOME/.claude/smartuse/projects/$K6"
 st() { ( cd "$D/st/proj" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" "$@" ); }
