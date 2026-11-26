@@ -13,13 +13,20 @@
 # as a file that is not executable), or a Windows Store alias (WindowsApps, any case) is ignored and probed again. The file is
 # read up to 16 characters and written only when ~/.claude/smartuse/ already exists (the hooks create it) and the file is a
 # regular file or a new one (never a symlink, a FIFO or another special file), so a first event costs no extra process.
-# PYTHONUTF8=1 puts every hook in UTF-8 mode: on Windows, stdin/stdout and open() would otherwise use the ANSI code page.
+# Every Python this file starts (the remembered name, the probe, the proven path, the candidate itself) gets the same flags, $ISO = -I -S -X utf8, so a hook
+# starts the same way on every machine whatever the session's environment holds. -I: every PYTHON* variable is ignored (a PYTHONPATH folder with a json.py, a
+# wrong PYTHONHOME), the user site folder is left out, and no entry for the working folder or the script's folder goes on sys.path. -S: `site` is never imported,
+# so no .pth line and no sitecustomize in the interpreter's own site folder runs (-I alone still reads them). -X utf8 is the UTF-8 mode PYTHONUTF8=1 gave every hook (on
+# Windows, stdin/stdout and open() would otherwise use the ANSI code page), by option, because -I ignores the variable. The probe carries the flags too, so an
+# interpreter that refuses one fails the probe and is skipped, as the Store stub is. One variable is carried over, as -B: PYTHONDONTWRITEBYTECODE, the documented opt-out
+# of the bytecode cache below. PYTHONUTF8=1 is still exported and nothing is unset: a hook's own child process (until-done's check:) inherits the environment as before.
 # One optional FIRST word, --say-missing (an exact comparison, dropped before the hook path; in any later position it reaches the
 # interpreter untouched): with no interpreter the launcher prints one fixed sentence on stderr and exits 2 instead of exiting 0 in
 # silence. Only the SessionStart heartbeat command carries it: the docs say a SessionStart hook that exits 2 "shows stderr to user
 # only" and the session goes on, so the user learns the guards are off. With an interpreter nothing changes.
 # Usage: bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" [--say-missing] "${CLAUDE_PLUGIN_ROOT}/hooks/<hook>.py" [args…]
 export PYTHONUTF8=1
+ISO="-I -S -X utf8"; [ -n "${PYTHONDONTWRITEBYTECODE:-}" ] && ISO="$ISO -B"   # the flags of every start below, unquoted there on purpose: several words
 SAY=""; [ "${1:-}" = "--say-missing" ] && { SAY=1; shift; }
 # A second optional first word, --guard (the three guard commands carry it; not together with --say-missing): with no interpreter and Strict
 # guards on (the plugin option's text is anything but empty / off / false / no / 0), one fixed sentence on stderr and exit 2, which blocks
@@ -29,10 +36,10 @@ GUARD=""; [ -z "$SAY" ] && [ "${1:-}" = "--guard" ] && { GUARD=1; shift; }
 # is ~60 ms on every Bash call. When the first word (after the two options above) is an existing *.py file, it runs through a short loader
 # passed with -c: one Python start, no extra file, and the script is read through importlib's source loader, which keeps its bytecode in
 # hooks/__pycache__/ and reuses it while the source's mtime and size are unchanged. The cache is only a speed-up: PYTHONDONTWRITEBYTECODE,
-# or a folder that cannot be written, means no pyc and the same run as before. `-c` puts '' (the cwd, the user's project) first on sys.path,
-# so the loader replaces it with the script's own folder BEFORE it imports anything beyond sys and os (both loaded at start-up): a json.py
-# planted in the project is never imported. With PYTHONSAFEPATH set, Python adds no such entry and the loader leaves sys.path alone, as a
-# script run would. Anything that is not an existing *.py file (-c "...", -, a missing path) is passed to the interpreter untouched.
+# or a folder that cannot be written, means no pyc and the same run as before. With the flags above Python adds no entry of its own
+# to sys.path (`-c` alone would put '' there: the cwd, the user's project), so the loader leaves sys.path alone, as it does with PYTHONSAFEPATH set, and a json.py
+# planted in the project or beside the hooks is never imported. (Started without -I the loader would replace that '' with the script's own folder BEFORE it imports
+# anything beyond sys and os, both loaded at start-up.) Anything that is not an existing *.py file (-c "...", -, a missing path) is passed to the interpreter untouched.
 LDR='import sys,os; p=sys.argv[1]; sys.path[0]=sys.path[0] or os.path.dirname(os.path.realpath(p)); sys.argv=sys.argv[1:]; import types; from importlib.machinery import SourceFileLoader as L; a=os.path.abspath(p); l=L("__main__",a); m=types.ModuleType("__main__"); m.__file__=a; m.__loader__=l; sys.modules["__main__"]=m; exec(l.get_code("__main__"),m.__dict__)'
 case "$1" in -*) ;; *.py) [ -f "$1" ] && set -- -c "$LDR" "$@";; esac
 C="${HOME:+$HOME/.claude/smartuse/interpreter}"; P=""
@@ -42,19 +49,19 @@ if [ -n "$C" ] && [ -f "$C" ] && { read -r -n 16 P || [ -n "$P" ]; } < "$C"; the
     if command -v "$W" >/dev/null 2>&1; then                        # builtin: PATH scan, no process
       R=""; [ "${BASH_VERSINFO[0]}" -ge 4 ] && { hash "$W" 2>/dev/null; R=${BASH_CMDS[$W]}; }   # bash 3.2 has no BASH_CMDS: there $W would be read as arithmetic (an env var named python aborted the launcher)
       [ -n "$R" ] || R=$(command -v "$W")                           # the fork happens on bash 3.2, or when hash cannot find the name
-      case "$R" in *[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]*) ;; *) [ -x "$R" ] && exec $P "$@";; esac   # a Store alias (any case) is never trusted, and the hit must be executable or it is probed instead (exec of a non-executable hit exits 2, which blocks a PreToolUse hook); $P unquoted: "py -3" is two words
+      case "$R" in *[Ww][Ii][Nn][Dd][Oo][Ww][Ss][Aa][Pp][Pp][Ss]*) ;; *) [ -x "$R" ] && exec $P $ISO "$@";; esac   # a Store alias (any case) is never trusted, and the hit must be executable or it is probed instead (exec of a non-executable hit exits 2, which blocks a PreToolUse hook); $P unquoted: "py -3" is two words
     fi;;
   esac
 fi
 for cand in "python3" "python" "py -3"; do
   # sys.executable with forward slashes: Git Bash runs C:/Users/... as it is. $cand unquoted on purpose: "py -3" is two words.
-  P=$($cand -c "import sys; print(sys.executable.replace(chr(92), '/'))" </dev/null 2>/dev/null) || continue
+  P=$($cand $ISO -c "import sys; print(sys.executable.replace(chr(92), '/'))" </dev/null 2>/dev/null) || continue
   P=${P%$'\r'}
   if [ -n "$P" ] && [ -x "$P" ]; then
     [ -n "$C" ] && [ -d "${C%/*}" ] && [ ! -L "$C" ] && { [ -f "$C" ] || [ ! -e "$C" ]; } && printf '%s\n' "$cand" > "$C" 2>/dev/null   # remember the NAME, only into a regular file or a new one: never through a symlink, never a FIFO or other special file (a write to a FIFO blocks)
-    exec "$P" "$@"
+    exec "$P" $ISO "$@"
   fi
-  exec $cand "$@"
+  exec $cand $ISO "$@"
 done
 [ -n "$SAY" ] && { echo "smartuse: Python 3 was not found (tried python3, python, py -3). Its guards, gates and status line are OFF. Install Python 3.9 or newer and restart Claude Code." >&2; exit 2; }
 if [ -n "$GUARD" ]; then

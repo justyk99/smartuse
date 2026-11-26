@@ -644,7 +644,7 @@ K="$D/d15"; mkdir -p "$K/hooks" "$K/proj"; cp "$H/py.sh" "$H/bash-guard.py" "$H/
 cat > "$K/hooks/probe.py" <<'PROBE'
 import os, sys
 data = sys.stdin.read()
-sys.stdout.write("out:" + data + "|" + __name__ + "|" + os.path.basename(__file__) + "|" + str(os.path.isabs(__file__)) + "|" + os.path.basename(sys.argv[0]) + "|" + repr(sys.argv[1:]) + "|" + str(os.path.normcase(sys.path[0]) == os.path.normcase(os.path.dirname(os.path.realpath(__file__)))) + "|" + str(sys.modules["__main__"].__file__ == __file__) + "\n")
+sys.stdout.write("out:" + data + "|" + __name__ + "|" + os.path.basename(__file__) + "|" + str(os.path.isabs(__file__)) + "|" + os.path.basename(sys.argv[0]) + "|" + repr(sys.argv[1:]) + "|" + str(not any(os.path.normcase(p) in ("", os.path.normcase(os.path.dirname(os.path.realpath(__file__)))) for p in sys.path)) + "|" + str(sys.modules["__main__"].__file__ == __file__) + "\n")
 sys.stderr.write("err:ok\n")
 if __name__ == "__main__":
     sys.exit(int(os.environ.get("PROBE_RC", "0")))
@@ -654,10 +654,10 @@ pyc() { ls "$K/hooks/__pycache__/$1".*.pyc 2>/dev/null | head -1 || true; }
 BGEV='{"tool_name":"Bash","tool_input":{"command":"sudo ls"}}'; BGOK='{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
 FGEV='{"tool_name":"Write","tool_input":{"file_path":"/repo/.claude/smartuse.local.md","content":"x"}}'
 for RCV in 0 2 7; do
-  REF=$(printf 'in put' | PROBE_RC=$RCV PYTHONUTF8=1 "$REAL" "$K/hooks/probe.py" a "b c" --guard 2>"$D/d15.rerr"; echo "rc=$?")
+  REF=$(printf 'in put' | PROBE_RC=$RCV "$REAL" -I -S -X utf8 "$K/hooks/probe.py" a "b c" --guard 2>"$D/d15.rerr"; echo "rc=$?")   # 0.7.5 F1: the plain run the launcher must equal is the isolated one
   GOT=$(printf 'in put' | PROBE_RC=$RCV bash "$K/hooks/py.sh" "$K/hooks/probe.py" a "b c" --guard 2>"$D/d15.gerr"; echo "rc=$?")
   if [ "$REF" = "$GOT" ] && cmp -s "$D/d15.rerr" "$D/d15.gerr"; then
-    case "$GOT" in *"out:in put|__main__|probe.py|True|probe.py|['a', 'b c', '--guard']|True|True"*"rc=$RCV") echo "PASS D15 R1 the loader runs a script as python does (stdin, args after it, stderr, exit code $RCV, __name__, absolute __file__, sys.path[0] = its folder)";; *) echo "FAIL D15 R1 exit $RCV: $GOT"; fail=1;; esac
+    case "$GOT" in *"out:in put|__main__|probe.py|True|probe.py|['a', 'b c', '--guard']|True|True"*"rc=$RCV") echo "PASS D15 R1 the loader runs a script as python does (stdin, args after it, stderr, exit code $RCV, __name__, absolute __file__, its folder is not on sys.path)";; *) echo "FAIL D15 R1 exit $RCV: $GOT"; fail=1;; esac
   else echo "FAIL D15 R1 exit $RCV differs from a plain run: ref '$REF' got '$GOT'"; fail=1; fi
 done
 for EV in "bash-guard|$BGEV" "bash-guard|$BGOK" "file-guard|$FGEV"; do
@@ -667,7 +667,7 @@ for EV in "bash-guard|$BGEV" "bash-guard|$BGOK" "file-guard|$FGEV"; do
   case "$GOT" in *rc=0) [ "$REF" = "$GOT" ] && echo "PASS D15 R1 $N through --guard prints what the plain run prints: ${GOT:0:60}" || { echo "FAIL D15 R1 $N: ref '$REF' got '$GOT'"; fail=1; };; *) echo "FAIL D15 R1 $N: $GOT"; fail=1;; esac
 done
 case "$GOT" in *deny*) ;; *) echo "FAIL D15 R1 the guard events must include a deny: $GOT"; fail=1;; esac
-OUT=$(bash "$K/hooks/py.sh" -c "import sys; print(repr(sys.path[0]))" 2>&1) || true; [ "$OUT" = "''" ] && echo "PASS D15 -c is untouched: no loader, sys.path[0] stays ''" || { echo "FAIL D15 -c: $OUT"; fail=1; }
+OUT=$(bash "$K/hooks/py.sh" -c "import sys; print('' in sys.path)" 2>&1) || true; [ "$OUT" = "False" ] && echo "PASS D15 -c is untouched: no loader, and no '' on sys.path" || { echo "FAIL D15 -c: $OUT"; fail=1; }
 OUT=$(printf 'print(40+2)\n' | bash "$K/hooks/py.sh" - 2>&1) || true; [ "$OUT" = 42 ] && echo "PASS D15 '-' (a script on stdin) is untouched" || { echo "FAIL D15 stdin script: $OUT"; fail=1; }
 RC=0; OUT=$(bash "$K/hooks/py.sh" "$K/hooks/nope.py" 2>&1) || RC=$?; RC0=0; "$REAL" "$K/hooks/nope.py" >/dev/null 2>&1 || RC0=$?
 if [ "$RC" = "$RC0" ] && [ "$RC" != 0 ]; then
@@ -685,7 +685,7 @@ for EV in "bash-guard|$BGEV" "bash-guard|$BGOK" "file-guard|$FGEV" "heartbeat|{\
   OUT=$(cd "$K/proj" && printf '%s' "$E" | CLAUDE_PLUGIN_OPTION_STRICT=true CLAUDE_PROJECT_DIR="$PW" bash "$K/hooks/py.sh" "$K/hooks/$N.py" 2>&1; echo "rc=$?")
   case "$OUT" in *PLANTED*|*Traceback*|*Error*) echo "FAIL D15 R2 $N imported something from the project folder: $OUT"; fail=1;; *rc=0) echo "PASS D15 R2 $N with json.py, re.py and importlib/util.py planted in the cwd: none imported";; *) echo "FAIL D15 R2 $N: $OUT"; fail=1;; esac
 done
-OUT=$(cd "$K/proj" && printf 'q' | bash "$K/hooks/py.sh" "$K/hooks/probe.py" 2>&1) || true; case "$OUT" in *"|True|True"*) echo "PASS D15 R2 sys.path[0] is the script's folder, not '' (checked in the script itself)";; *) echo "FAIL D15 R2 sys.path[0]: $OUT"; fail=1;; esac
+OUT=$(cd "$K/proj" && printf 'q' | bash "$K/hooks/py.sh" "$K/hooks/probe.py" 2>&1) || true; case "$OUT" in *"|True|True"*) echo "PASS D15 R2 neither '' nor the script's folder is on sys.path (checked in the script itself)";; *) echo "FAIL D15 R2 sys.path[0]: $OUT"; fail=1;; esac
 # R3: the cache is written on the first run, left alone on the second, and really used
 rm -rf "$K/hooks/__pycache__"
 printf '%s' "$BGOK" | bash "$K/hooks/py.sh" --guard "$K/hooks/bash-guard.py" >/dev/null 2>&1 || true; PY1=$(pyc bash-guard)
@@ -726,6 +726,203 @@ chmod u+w "$K/ro" 2>/dev/null || true
 # the repo ignores the cache folder, and py.sh stays bash 3.2 safe (nothing from bash 4+ was added)
 if [ -f "$H/../../../.gitignore" ]; then grep -qx '__pycache__/' "$H/../../../.gitignore" && echo "PASS D15 .gitignore ignores __pycache__/" || { echo "FAIL D15 .gitignore lacks __pycache__/"; fail=1; }; fi
 if grep -nE 'declare -[Aan]|mapfile|readarray|\|&|&>>|coproc|;;&' "$H/py.sh" >/dev/null; then echo "FAIL D15 py.sh uses a bash 4 feature: $(grep -nE 'declare -[Aan]|mapfile|readarray|\|&|&>>|coproc' "$H/py.sh" | head -2)"; fail=1; else echo "PASS D15 py.sh has no bash 4 feature (declare -A/-n, mapfile, readarray, |&, &>>, coproc, ;;&)"; fi
+# ===== 0.7.5 F1: every hook starts Python isolated. py.sh passes `-I -S -X utf8` (and `-B` when PYTHONDONTWRITEBYTECODE is set) on every start it makes: the
+# remembered-name exec, the probe, the proven-path exec and the candidate exec. -I: no PYTHON* variable, no user site, no path entry for the working folder or the script's folder;
+# -S: the interpreter's site folder is never read (no .pth line, no sitecustomize); -X utf8: the UTF-8 mode the hooks had by PYTHONUTF8, which -I ignores. Plants live on a COPY of the hooks
+# in the temp folder, HOME is a temp folder, and a plant writes a marker file ($IMARK) when it runs, so "it ran" is proved by the file, never by output alone. Every deny event is run
+# clean through the same pipe first, so an empty answer is read as "allowed". A temp HOME does not move Python's user site on Windows: that plant goes through PYTHONUSERBASE.
+IMARK="$D/iso/mark"; IMW=$(wp "$IMARK"); HI="$D/homeI"; HN="$D/homeIN"; IH="$D/iso/hooks"
+mkdir -p "$IH" "$D/iso/empty" "$D/iso/plant" "$D/iso/proj" "$HI/.claude/smartuse" "$HN/.claude/smartuse"
+cp "$H/py.sh" "$H"/*.py "$IH/"
+printf 'import os\nopen(os.environ["PLANT_MARK"], "a").write("json")\nprint("PLANTED")\n' > "$D/iso/plant/json.py"
+cat > "$IH/probe3.py" <<'PROBE'
+import sys
+f = sys.flags
+sys.stdout.write("\u00b7 wo=%r insp=%d verb=%d opt=%d dev=%d enc=%s/%s/%s pfx=%r utf8=%d\n" % (sys.warnoptions, f.inspect, f.verbose, f.optimize, f.dev_mode, sys.stdin.encoding, sys.stdout.encoding, sys.stderr.encoding, sys.pycache_prefix, f.utf8_mode))
+PROBE
+cat > "$IH/probe4.py" <<'PROBE'
+import os, sys
+try:
+    import site
+    us = site.getusersitepackages()
+except Exception:
+    us = None
+nc = lambda p: os.path.normcase(os.path.normpath(p)) if p else ""
+paths = [nc(p) for p in sys.path]
+f = sys.flags
+print("isolated=%d ignore_environment=%d no_user_site=%d no_site=%d utf8_mode=%d empty=%d here=%d usersite=%d" % (f.isolated, f.ignore_environment, f.no_user_site, f.no_site, f.utf8_mode, "" in paths, nc(os.path.dirname(os.path.realpath(__file__))) in paths, bool(us) and nc(us) in paths))
+PROBE
+cat > "$IH/probe7.py" <<'PROBE'
+import os, sys
+sys.stdout.write("%s|%s\n" % (os.environ.get("PYTHONUTF8"), os.environ.get("PYTHONPATH")))
+PROBE
+HBEV="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_use_id\":\"t75\",\"session_id\":\"s75\",\"cwd\":\"$PW\"}"
+irun() { # $1 hook (no .py), $2 the event on stdin, $3 an optional first launcher word -> stdout, then "rc=N"; stderr in $D/iso.err. HOME is $IHOME and the hooks folder $IHD (defaults: $HI, $IH)
+  printf '%s' "$2" | CLAUDE_PLUGIN_OPTION_STRICT=true CLAUDE_PROJECT_DIR="$PW" PLANT_MARK="$IMW" HOME="${IHOME:-$HI}" bash "${IHD:-$IH}/py.sh" ${3:+"$3"} "${IHD:-$IH}/$1.py" 2>"$D/iso.err"; echo "rc=$?"
+}
+iplant() { # $1 label, $2 hook, $3 event, $4 launcher word, $5 the clean answer; the plant sits in the caller's environment or folders. PASS = the clean answer, nothing on stderr, the marker never written
+  local got ran=no; rm -f "$IMARK"; got=$(irun "$2" "$3" "$4"); [ -e "$IMARK" ] && ran="yes ($(cat "$IMARK"))"
+  if [ "$got" = "$5" ] && [ "$ran" = no ] && [ ! -s "$D/iso.err" ]; then echo "PASS $1"; else echo "FAIL $1: plant ran: $ran; answer '${got:0:160}' (clean '${5:0:60}'); stderr $(wc -c < "$D/iso.err" | tr -d ' ') bytes"; fail=1; fi
+}
+CLN_BG=$(irun bash-guard "$BGEV" --guard); E1=$(wc -c < "$D/iso.err" | tr -d ' ')
+CLN_OK=$(irun bash-guard "$BGOK" --guard); E2=$(wc -c < "$D/iso.err" | tr -d ' ')
+CLN_FG=$(irun file-guard "$FGEV" --guard); E3=$(wc -c < "$D/iso.err" | tr -d ' ')
+CLN_HB=$(irun heartbeat "$HBEV"); E4=$(wc -c < "$D/iso.err" | tr -d ' ')
+case "$CLN_BG|$CLN_OK|$CLN_FG|$CLN_HB" in
+  *deny*"rc=0|rc=0|"*deny*"rc=0|rc=0") [ "$E1$E2$E3$E4" = 0000 ] && echo "PASS 0.7.5 F1 reference: through the launcher in a clean shell the guards deny sudo ls and a doc-folder adapter write, allow echo hello, the heartbeat answers rc 0, stderr empty (the pipe is proven before an empty answer is trusted)" || { echo "FAIL 0.7.5 F1 reference: stderr bytes $E1 $E2 $E3 $E4"; fail=1; };;
+  *) echo "FAIL 0.7.5 F1 reference run: '$CLN_BG' | '$CLN_OK' | '$CLN_FG' | '$CLN_HB'"; fail=1;; esac
+# i1: PYTHONPATH names a folder with a json.py (every hook imports json): the plant must not run and the answer must be the clean one. Before 0.7.5 the plant ran inside the guard and no deny came out.
+PLW=$(wp "$D/iso/plant"); rm -f "$IMARK"; PYTHONPATH="$PLW" PLANT_MARK="$IMW" "$REAL" -c "import json" >/dev/null 2>&1 || true
+if [ -e "$IMARK" ]; then echo "PASS 0.7.5 F1 i1 the plant is live: a plain interpreter with PYTHONPATH at the folder runs the planted json.py"; else echo "FAIL 0.7.5 F1 i1 the PYTHONPATH plant does not run on a plain interpreter: the premise is wrong"; fail=1; fi
+PYTHONPATH="$PLW" iplant "0.7.5 F1 i1 PYTHONPATH names a folder with a json.py: bash-guard still denies sudo ls, the plant never runs" bash-guard "$BGEV" --guard "$CLN_BG"
+PYTHONPATH="$PLW" iplant "0.7.5 F1 i1 the same plant: bash-guard still allows echo hello" bash-guard "$BGOK" --guard "$CLN_OK"
+PYTHONPATH="$PLW" iplant "0.7.5 F1 i1 the same plant: file-guard still denies the adapter write" file-guard "$FGEV" --guard "$CLN_FG"
+PYTHONPATH="$PLW" iplant "0.7.5 F1 i1 the same plant: the heartbeat answers as before, the plant never runs" heartbeat "$HBEV" "" "$CLN_HB"
+# i1u: the user site folder (usercustomize and a .pth line). PYTHONUSERBASE moves it into the temp folder; the real user site is never written.
+UB="$D/iso/userbase"; mkdir -p "$UB"
+US=$(PYTHONUSERBASE="$(wp "$UB")" "$REAL" -c "import site, sys; sys.stdout.write(site.getusersitepackages().replace(chr(92), '/'))" 2>/dev/null) || US=""
+if [ -n "$US" ]; then
+  mkdir -p "$US"; printf 'import os\nopen(os.environ["PLANT_MARK"], "a").write("usercustomize")\nprint("PLANTED")\n' > "$US/usercustomize.py"
+  printf 'import os; open(os.environ["PLANT_MARK"], "a").write("pth")\n' > "$US/plant75.pth"
+  rm -f "$IMARK"; PYTHONUSERBASE="$(wp "$UB")" PLANT_MARK="$IMW" "$REAL" -c "pass" >/dev/null 2>&1 || true
+  if [ -e "$IMARK" ]; then
+    PYTHONUSERBASE="$(wp "$UB")" iplant "0.7.5 F1 i1 a user site folder with usercustomize.py and a .pth line (PYTHONUSERBASE): bash-guard still denies, neither runs" bash-guard "$BGEV" --guard "$CLN_BG"
+  else echo "SKIP 0.7.5 F1 i1 user site plant: this interpreter does not read a user site folder from PYTHONUSERBASE, so the plant is not live"; fi
+else echo "SKIP 0.7.5 F1 i1 user site plant: the user site folder could not be worked out"; fi
+# i2: PYTHONHOME names an empty folder. Before 0.7.5 a remembered name died at start (exit 1, no deny) and with no remembered name every probe failed (silent exit 0).
+EH=$(wp "$D/iso/empty")
+PYTHONHOME="$EH" iplant "0.7.5 F1 i2 PYTHONHOME names an empty folder, name remembered: bash-guard still denies sudo ls" bash-guard "$BGEV" --guard "$CLN_BG"
+rm -f "$HN/.claude/smartuse/interpreter"
+IHOME="$HN" PYTHONHOME="$EH" iplant "0.7.5 F1 i2 PYTHONHOME names an empty folder, no remembered name (the probe runs with the flags): bash-guard still denies sudo ls" bash-guard "$BGEV" --guard "$CLN_BG"
+# i3: one row per variable E1d tried. A probe script through the launcher, a deny event and an allow event: stdout, stderr and exit code equal the clean run byte for byte,
+# and a `·` printed while PYTHONIOENCODING=cp1252 is set arrives as UTF-8 (c2 b7).
+iall() { # the probe, a deny and an allow event under the caller's environment -> $D/iso.all.out (stdout and rc lines) and $D/iso.all.err (all stderr)
+  : > "$D/iso.all.out"; : > "$D/iso.all.err"
+  irun probe3 "" >> "$D/iso.all.out"; cat "$D/iso.err" >> "$D/iso.all.err"
+  irun bash-guard "$BGEV" --guard >> "$D/iso.all.out"; cat "$D/iso.err" >> "$D/iso.all.err"
+  irun bash-guard "$BGOK" --guard >> "$D/iso.all.out"; cat "$D/iso.err" >> "$D/iso.all.err"
+}
+iall; cp "$D/iso.all.out" "$D/iso.clean.out"; cp "$D/iso.all.err" "$D/iso.clean.err"
+if [ ! -s "$D/iso.clean.err" ] && [ "$(od -An -tx1 < "$D/iso.clean.out" | tr -d ' \n' | cut -c1-4)" = c2b7 ]; then echo "PASS 0.7.5 F1 i3 reference: the clean run has an empty stderr and prints the probe's · as UTF-8"; else echo "FAIL 0.7.5 F1 i3 reference run: stderr $(wc -c < "$D/iso.clean.err" | tr -d ' ') bytes, first bytes $(od -An -tx1 < "$D/iso.clean.out" | tr -d ' \n' | cut -c1-8)"; fail=1; fi
+PFX=$(wp "$D/iso/pfx")
+for V in PYTHONWARNINGS=error PYTHONINSPECT=1 PYTHONVERBOSE=1 PYTHONOPTIMIZE=2 PYTHONDEVMODE=1 PYTHONPROFILEIMPORTTIME=1 PYTHONIOENCODING=cp1252 PYTHONPYCACHEPREFIX="$PFX" PYTHONDONTWRITEBYTECODE=1; do
+  rm -rf "$D/iso/pfx"; ( export "$V"; iall )
+  HX=$(od -An -tx1 < "$D/iso.all.out" | tr -d ' \n' | cut -c1-4); PFXOK=yes; [ "${V%%=*}" = PYTHONPYCACHEPREFIX ] && [ -n "$(ls -A "$D/iso/pfx" 2>/dev/null)" ] && PFXOK=no
+  if cmp -s "$D/iso.all.out" "$D/iso.clean.out" && cmp -s "$D/iso.all.err" "$D/iso.clean.err" && [ "$HX" = c2b7 ] && [ "$PFXOK" = yes ]; then echo "PASS 0.7.5 F1 i3 ${V%%=*} set in front of the launcher: probe, deny and allow answers equal the clean run byte for byte"
+  else echo "FAIL 0.7.5 F1 i3 ${V%%=*}: answers differ from the clean run (stdout equal: $(cmp -s "$D/iso.all.out" "$D/iso.clean.out" && echo yes || echo no), stderr $(wc -c < "$D/iso.all.err" | tr -d ' ') bytes vs $(wc -c < "$D/iso.clean.err" | tr -d ' '), first bytes $HX, prefix folder empty: $PFXOK)"; fail=1; fi
+done
+# i4: the probe through the launcher reports the start mode: isolated, ignore_environment, no_user_site, no_site, utf8_mode all 1; '' , the script's folder and the user site are not on sys.path
+P4=$(irun probe4 "" | tr -d '\r')
+[ "$P4" = "$(printf 'isolated=1 ignore_environment=1 no_user_site=1 no_site=1 utf8_mode=1 empty=0 here=0 usersite=0\nrc=0')" ] && echo "PASS 0.7.5 F1 i4 the launcher starts a hook isolated: isolated, ignore_environment, no_user_site, no_site, utf8_mode are all 1; '', the script's folder and the user site are not on sys.path" || { echo "FAIL 0.7.5 F1 i4 start mode: $P4"; fail=1; }
+# i5: a json.py beside the copied hooks is not imported (the script's folder used to be the first import folder)
+mkdir -p "$D/iso5"; cp "$H/py.sh" "$H/bash-guard.py" "$D/iso5/"; cp "$D/iso/plant/json.py" "$D/iso5/json.py"
+IHD="$D/iso5" iplant "0.7.5 F1 i5 a json.py beside the hooks is not imported: bash-guard still denies sudo ls" bash-guard "$BGEV" --guard "$CLN_BG"
+# i6: the interpreter's own site folder: a venv made without pip, its python first on PATH and remembered, with sitecustomize.py and a .pth line in its site folder. -I alone does not close this, -S does.
+VB=""
+if "$REAL" -m venv --without-pip "$D/venv" >"$D/venv.log" 2>&1; then for X in "$D/venv/Scripts" "$D/venv/bin"; do [ -z "$VB" ] && [ -d "$X" ] && VB="$X"; done; fi
+VS=""; [ -n "$VB" ] && VS=$("$VB/python" -c "import sysconfig, sys; sys.stdout.write(sysconfig.get_paths()['purelib'].replace(chr(92), '/'))" 2>/dev/null) || true
+if [ -n "$VS" ] && [ -d "$VS" ]; then
+  printf 'import os\nopen(os.environ["PLANT_MARK"], "a").write("sitecustomize")\nprint("PLANTED")\n' > "$VS/sitecustomize.py"
+  printf 'import os; open(os.environ["PLANT_MARK"], "a").write("pth")\n' > "$VS/plant75.pth"
+  rm -f "$IMARK"; PLANT_MARK="$IMW" "$VB/python" -c "pass" >/dev/null 2>&1 || true
+  if [ -e "$IMARK" ]; then
+    mkdir -p "$D/homeV/.claude/smartuse"; printf 'python\n' > "$D/homeV/.claude/smartuse/interpreter"
+    IHOME="$D/homeV" PATH="$VB:$PATH" iplant "0.7.5 F1 i6 a venv first on PATH with sitecustomize.py and a .pth line in its site folder: bash-guard still denies sudo ls, neither runs" bash-guard "$BGEV" --guard "$CLN_BG"
+  else echo "SKIP 0.7.5 F1 i6 venv plant: the planted sitecustomize does not run on a plain venv python here, so the plant is not live"; fi
+else echo "SKIP 0.7.5 F1 i6 venv plant: a venv could not be made without a download ($(head -c 120 "$D/venv.log" 2>/dev/null | tr '\r\n' '  '))"; fi
+# i7 (a pin: green before and after): what a hook hands on is untouched. A probe through the launcher sees PYTHONUTF8=1 (the export stays) and the caller's PYTHONPATH as it was set.
+I7=$(IHOME="$HI" PYTHONPATH="$PLW" irun probe7 "" | tr -d '\r'); I7R=$(PYTHONPATH="$PLW" PYTHONUTF8=1 "$REAL" -I -c "import os, sys; sys.stdout.write('%s|%s' % (os.environ.get('PYTHONUTF8'), os.environ.get('PYTHONPATH')))" | tr -d '\r')
+[ "$I7" = "$(printf '%s\nrc=0' "$I7R")" ] && [ "${I7R%%|*}" = 1 ] && echo "PASS 0.7.5 F1 i7 a hook's environment is handed on untouched: PYTHONUTF8=1 and the caller's PYTHONPATH (as set) are in os.environ" || { echo "FAIL 0.7.5 F1 i7 environment: launcher '$I7' reference '$I7R'"; fail=1; }
+# i8: the documented opt-out is carried: PYTHONDONTWRITEBYTECODE set -> sys.flags.dont_write_bytecode 1 (as -B); unset or empty -> 0 and the cache is still written (the R3 and R4 cases above stay as they were)
+DWB='import sys; print(sys.flags.dont_write_bytecode)'
+O1=$(PYTHONDONTWRITEBYTECODE=1 bash "$IH/py.sh" -c "$DWB" | tr -d '\r'); O2=$( (unset PYTHONDONTWRITEBYTECODE; bash "$IH/py.sh" -c "$DWB") | tr -d '\r'); O3=$(PYTHONDONTWRITEBYTECODE= bash "$IH/py.sh" -c "$DWB" | tr -d '\r')
+[ "$O1" = 1 ] && [ "$O2" = 0 ] && [ "$O3" = 0 ] && echo "PASS 0.7.5 F1 i8 PYTHONDONTWRITEBYTECODE=1 reaches the start as -B (1); unset and empty do not (0, 0)" || { echo "FAIL 0.7.5 F1 i8 opt-out: set '$O1', unset '$O2', empty '$O3'"; fail=1; }
+# s1: every import in the eight hooks/*.py files names the standard library, from one allowlist read with ast (the 23 names are what the files import today); where sys.stdlib_module_names exists (3.10+) each name is in it too. A relative import is BAD.
+s1check() { # file paths -> "OK ..." or "BAD ..."
+  py - "$@" <<'PY'
+import ast, sys
+ALLOW = {"base64", "collections", "datetime", "fcntl", "fnmatch", "glob", "hashlib", "json", "msvcrt", "os", "pathlib", "posixpath", "re", "shlex", "shutil", "stat", "statistics", "subprocess", "sys", "threading", "time", "unicodedata", "winreg"}
+std = getattr(sys, "stdlib_module_names", None)
+seen, bad = set(), []
+for f in sys.argv[1:]:
+    name = f.replace("\\", "/").rsplit("/", 1)[-1]
+    for n in ast.walk(ast.parse(open(f, encoding="utf-8").read())):
+        if isinstance(n, ast.Import):
+            roots = [a.name.split(".")[0] for a in n.names]
+        elif isinstance(n, ast.ImportFrom):
+            roots = ["." * n.level + (n.module or "").split(".")[0]]
+        else:
+            continue
+        for r in roots:
+            seen.add(r)
+            if r not in ALLOW:
+                bad.append("%s:%d imports %s, not on the standard-library allowlist" % (name, n.lineno, r))
+            elif std is not None and r not in std:
+                bad.append("%s:%d imports %s, which sys.stdlib_module_names does not know" % (name, n.lineno, r))
+print("BAD " + "; ".join(bad) if bad else "OK %d files import only %d standard-library names" % (len(sys.argv) - 1, len(seen)))
+PY
+}
+S1=$(s1check "$H/bash-guard.py" "$H/file-guard.py" "$H/heartbeat.py" "$H/ledger.py" "$H/recall.py" "$H/until-done.py" "$H/wait-gate.py" "$H/watch.py")
+case "$S1" in "OK 8 files"*) echo "PASS 0.7.5 F1 s1 the eight hook files import the standard library only: $S1";; *) echo "FAIL 0.7.5 F1 s1 hook imports: $S1"; fail=1;; esac
+mkdir -p "$D/s1"; cp "$H/watch.py" "$D/s1/watch-mut.py"; printf '\nimport yaml\n' >> "$D/s1/watch-mut.py"
+S1M=$(s1check "$D/s1/watch-mut.py")
+case "$S1M" in "BAD watch-mut.py:"*"imports yaml"*) echo "PASS 0.7.5 F1 m2 an import yaml added to a copy of a hook is BAD: $S1M";; *) echo "FAIL 0.7.5 F1 m2 a copy with import yaml: $S1M"; fail=1;; esac
+# t1: every command in hooks.json and settings.json, and every `!` line of a skill, that names a .py file starts with the launcher (bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh"); prose that only mentions a hook script is not a command. The hooks.json half also exists at the launcher check above.
+t1check() { # $1 = a plugin folder (hooks/hooks.json, settings.json, skills/*/SKILL.md) -> "OK ..." or "BAD ..."
+  py - "$1" <<'PY'
+import glob, json, os, re, sys
+root = sys.argv[1]
+LAUNCH = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh"'
+bad, n = [], 0
+def cmds(o):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == "command" and isinstance(v, str):
+                yield v
+            else:
+                yield from cmds(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from cmds(v)
+for rel in ("hooks/hooks.json", "settings.json"):
+    for c in cmds(json.load(open(os.path.join(root, rel), encoding="utf-8"))):
+        if ".py" in c:
+            n += 1
+            if not c.startswith(LAUNCH + " "):
+                bad.append("%s: %s" % (rel, c[:80]))
+for f in sorted(glob.glob(os.path.join(root, "skills", "*", "SKILL.md"))):
+    for ln, line in enumerate(open(f, encoding="utf-8"), 1):
+        where = "%s:%d" % (f.replace("\\", "/").rsplit("/", 2)[-2], ln)
+        for m in re.finditer(r"!`([^`]*)`", line):
+            if ".py" in m.group(1):
+                n += 1
+                if not m.group(1).startswith(LAUNCH + " "):
+                    bad.append("%s: %s" % (where, m.group(1)[:80]))
+print("BAD " + "; ".join(bad) if bad or n == 0 else "OK %d commands name a hook script, each through the launcher" % n)
+PY
+}
+T1=$(t1check "$H/..")
+case "$T1" in OK*) echo "PASS 0.7.5 F1 t1 $T1";; *) echo "FAIL 0.7.5 F1 t1 a command starts a hook without the launcher: $T1"; fail=1;; esac
+for KIND in hooks/hooks.json settings.json skills/status/SKILL.md; do
+  rm -rf "$D/t1m"; mkdir -p "$D/t1m/hooks"; cp "$H/hooks.json" "$D/t1m/hooks/"; cp "$H/../settings.json" "$D/t1m/"; cp -r "$H/../skills" "$D/t1m/"
+  sed -E 's#bash \\?"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/py\.sh\\?" #python3 #' "$D/t1m/$KIND" > "$D/t1m/mut.tmp"; mv "$D/t1m/mut.tmp" "$D/t1m/$KIND"
+  T1M=$(t1check "$D/t1m")
+  case "$T1M" in BAD*) echo "PASS 0.7.5 F1 t1 mutation: $KIND with python3 in place of the launcher is BAD";; *) echo "FAIL 0.7.5 F1 t1 mutation in $KIND was not caught: $T1M"; fail=1;; esac
+done
+# t0 (an INFO line, not a check): the median of five Python starts as today and five isolated, interleaved, on this machine. It gives each CI job's number.
+T0=$(py - "$REAL" <<'PY' 2>/dev/null
+import os, statistics, subprocess, sys, time
+def one(extra):
+    t = time.perf_counter()
+    subprocess.run([sys.argv[1]] + extra + ["-c", "pass"], env=dict(os.environ, PYTHONUTF8="1"), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return (time.perf_counter() - t) * 1000
+a, b = [], []
+for _ in range(5):
+    a.append(one([])); b.append(one(["-I", "-S", "-X", "utf8"]))
+print("INFO 0.7.5 F1 t0 one Python start, median of 5 (ms): as today %.1f, isolated (-I -S -X utf8) %.1f, fastest %.1f and %.1f; Python %d.%d.%d on %s" % (statistics.median(a), statistics.median(b), min(a), min(b), sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.platform))
+PY
+) || T0=""
+echo "${T0:-INFO 0.7.5 F1 t0 not measured here}"
 # ===== 0.7.1 F1 (a): a long Windows path keeps its state. A project whose state folder passes the limit (240 characters on Windows, E1: the folder is made, then
 # no file reaches it; 300 characters of key elsewhere too: one name past 255) must still get a status.json and a live line, not "no activity recorded". The project path
 # is keyed, never made. Own temp HOME, so the cases above are not touched; the real ~/.claude/smartuse is checked after.
