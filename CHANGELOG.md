@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.4 — unreleased, "the paid count is found at any path length"
+## 0.7.4 — 2026-11-27, "the paid count is found at any path length"
 The paid check and doctor now find a paid counter left in a long state folder at any length, and each paid refusal names a fix that works. No new rule, gate, adapter key or option; `fit_key` is unchanged. Plan: `docs/notes/0.7.4-plan.md`.
 - **The paid check finds a counter left behind at any length** (F1). With Windows long paths off, a project whose full-key state folder is longer than 232 characters moves to the short key, and a `paid-runs.json` in the full-key folder stays there. From 245 characters the counter's own path passes 259, plain file calls did not see it, and the paid call was allowed with the count starting again in the short folder (0.7.3 E1). The check now looks by the plain path and then by the extended-length form (`\\?\C:\…`), so the paid run is refused at every length. Measured with long paths off (E1): the long form sees the counter at 240, 244, 245, 250 and 270 characters and with a 255-character key. A project whose key fits makes no extra call.
 - **Doctor sees the same counter** (F2). Doctor uses the same two functions, one text in two files that `heartbeat-test.sh` compares. Its `state folder: FAIL` line names both folders and the counter folder's length; past 244 characters it says to delete the folder with `rm -rf` in Git Bash, because `rd` and Windows PowerShell 5.1 left a 250-character folder in place (E1); the line names the folder under `~/.claude/smartuse/projects/`.
@@ -8,8 +8,8 @@ The paid check and doctor now find a paid counter left in a long state folder at
 - **Changed.** A machine where 0.7.3 or earlier already let a paid run through in that layout has a counter in both folders; after the update every paid run there is refused ("two state folders hold a counter") until the owner deletes one folder. Two sources that disagree fail closed.
 - **Tests.** The watch case that ran out of time at the lowest priority beside a game gives its watcher 30 s instead of 10 (F4); the ROADMAP's own `;` example, `python3 -c "import os; os.remove('.claude/smartuse.local.md')"`, is pinned as denied.
 - R1 security round: no major finding; the busy tail no longer claims another paid call holds the lock (a deny-create permission ends there too).
-- **Counts and versions.** BADGE_LINE Plugin and marketplace 0.7.4. `RULE_NAMES`, `GATE_NAMES`, the floor and `hooks.json` are unchanged. `README.md`, `SECURITY.md` and `docs/ROADMAP.md` follow.
-- Tests, PASS only, each suite run alone on the author's Windows laptop: `run 1341 · ledger 53 · until-done 50 · file-guard 103 · heartbeat 228 · ab 36 · watch 63 · wait 211 · fresh FRESH · recall 197 · paid PAID`. Against 0.7.3: heartbeat 219 → 228, run 1340 → 1341, paid 1403 → PAID.
+- **Counts and versions.** The badge said 4395 hook + 36 bench; it now says 4438 hook + 36 bench, PASS only, by the same rule. Plugin and marketplace 0.7.4. `RULE_NAMES`, `GATE_NAMES`, the floor and `hooks.json` are unchanged. `README.md`, `SECURITY.md` and `docs/ROADMAP.md` follow.
+- Tests, PASS only, each suite run alone on the author's Windows laptop: `run 1341 · ledger 53 · until-done 50 · file-guard 103 · heartbeat 228 · ab 36 · watch 63 · wait 211 · fresh 756 · recall 197 · paid 1436`. Against 0.7.3: heartbeat 219 → 228, run 1340 → 1341, paid 1403 → 1436.
 
 ## 0.7.3 — 2026-11-26, "the ledger line is kept"
 Two Stop hooks at once no longer lose a run's ledger line, doctor names a paid counter left in a folder it no longer uses, and the publish scan reads history on newlines only. No new rule, gate, adapter key or option; no line of `bash-guard.py` or `fit_key` changed. Plan: `docs/notes/0.7.3-plan.md`.

@@ -121,7 +121,7 @@ Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, 
 - [x] R1 security round: no major finding; the busy tail made neutral (a deny-create permission also ends there)
 - [x] F4 the watch case that ran out of time beside a game gets 30 s; the `;` example below is pinned as denied
 - [x] F5 docs, counts and version: README, SECURITY, CHANGELOG, both manifests at 0.7.4
-- [ ] T3 · [ ] released · [ ] tag (the maintainer's)
+- [x] T3 (2026-11-27) · [x] released 2026-11-27 · [ ] tag (the maintainer's)
 
 ## To 1.0, in order (0.7.4 plan §2b)
 1. Python starts isolated (below, "Hooks start Python without isolation"): 0.7.5, alone. Claude
