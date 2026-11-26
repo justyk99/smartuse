@@ -27,6 +27,7 @@ ok() { echo "PASS $1"; }
 ko() { echo "FAIL $1"; }
 command -v git >/dev/null 2>&1 || { echo "FAIL no git on PATH"; exit 1; }
 [ "$(py -c 'print("ok")' </dev/null 2>/dev/null)" = ok ] || { echo "FAIL no python 3 (python3, python or py -3) through $H/py.sh"; exit 1; }
+REAL=$(py -c "import sys; sys.stdout.write(sys.executable)" </dev/null)   # the interpreter the launcher found: the cp1252 scenario starts it directly (XDIRECT), because the launcher's -I ignores PYTHONIOENCODING (0.7.5)
 
 # --- fixtures and drivers (each scenario runs in its own subshell, so these globals are per scenario)
 fixture() { # $1 = dir: $1/remote.git (bare, main has one commit) · $1/a = the watcher's clone · $1/b = the builder's clone
@@ -43,9 +44,13 @@ bpush() { # $1 = fixture dir, $2 = commit subject, rest = files to add (each get
     git push -q origin main ) >/dev/null 2>&1
 }
 sha7() { git -C "$1/b" rev-parse HEAD | cut -c1-7; }   # the builder's head, as the watcher prints it
-startw() { # $1 = fixture dir, rest = watch.py arguments: the watcher runs in clone a, in the background; stdout -> $1/w.out, stderr -> $1/w.err, GIT_TRACE -> $1/trace; $XENV = one more NAME=value for it
+startw() { # $1 = fixture dir, rest = watch.py arguments: the watcher runs in clone a, in the background; stdout -> $1/w.out, stderr -> $1/w.err, GIT_TRACE -> $1/trace; $XENV = one more NAME=value for it; $XDIRECT = non-empty: no launcher, the interpreter itself with PYTHONUTF8=1, the way hooks started before 0.7.5 (the launcher's -I ignores every PYTHON* variable, so XENV could not reach the watcher)
   local f=$1; shift
-  ( cd "$f/a" && env GIT_TRACE="$(wp "$f/trace")" ${XENV:+"$XENV"} bash "$H/py.sh" "$WATCH" "$@" > "$f/w.out" 2> "$f/w.err" ) &
+  if [ -n "${XDIRECT:-}" ]; then
+    ( cd "$f/a" && env GIT_TRACE="$(wp "$f/trace")" PYTHONUTF8=1 ${XENV:+"$XENV"} "$REAL" "$WATCH" "$@" > "$f/w.out" 2> "$f/w.err" ) &
+  else
+    ( cd "$f/a" && env GIT_TRACE="$(wp "$f/trace")" ${XENV:+"$XENV"} bash "$H/py.sh" "$WATCH" "$@" > "$f/w.out" 2> "$f/w.err" ) &
+  fi
   WPID=$!
 }
 armed() { # $1 = fixture dir: waits (40 s at most) until the watcher has made two ls-remote calls: the first took the baseline, the second shows the loop runs. 1 = it ended first or never got there
@@ -220,7 +225,7 @@ scn_path_spelling() {
 scn_utf8() {
   local f="$D/utf8" want
   fixture_or_ko "$f" "UTF-8" || return
-  XENV=PYTHONIOENCODING=cp1252 startw "$f" --git origin main --every 1 --max 40s   # a console in the Windows ANSI code page: 中文 and → do not exist there
+  XDIRECT=1 XENV=PYTHONIOENCODING=cp1252 startw "$f" --git origin main --every 1 --max 40s   # a console in the Windows ANSI code page: 中文 and → do not exist there
   armed "$f" || { never_armed "$f" "UTF-8"; return; }
   bpush "$f" "Ünï 中文 → done" docs/u.md; want="pushed $(sha7 "$f") \"Ünï 中文 → done\" · main"
   endw "$f" 40

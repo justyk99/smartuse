@@ -5,6 +5,7 @@
 # non-ASCII events under cp1252, garbage input -> silent exit 0. Every hook invocation must print nothing. Exit 1 on failure.
 REAL_HOME="${HOME:-}"; set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
+REAL=$(bash "$H/py.sh" -c "import sys; sys.stdout.write(sys.executable)")   # the interpreter the launcher itself found: the cp1252 case below starts it directly (the launcher ignores PYTHONIOENCODING since 0.7.5), and the launcher cases further down reuse it
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
 key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-" (~/.claude/smartuse/projects/<key>/)
 PW=$(wp "$D/proj")   # the project path as it goes into the event JSON and CLAUDE_PROJECT_DIR
@@ -193,9 +194,24 @@ mv "$S" "$S.keep"; mkdir "$S"; ev "{\"hook_event_name\":\"PostToolUse\",\"sessio
 [ -d "$S" ] && [ -z "$(ls "$P" | grep '\.tmp$')" ] && echo "PASS replace failure -> retried, tmp file removed, exit 0, no output" || { echo "FAIL replace failure left: $(ls "$P")"; fail=1; }
 rmdir "$S"; mv "$S.keep" "$S"
 # --- non-ASCII in an event: Windows Python would decode a piped stdin as cp1252 (Á = C3 81, 0x81 undefined -> error, event lost); the hook reads bytes and decodes UTF-8
-out=$(printf '%s' "{\"hook_event_name\":\"SubagentStart\",\"session_id\":\"s3\",\"agent_id\":\"u8\",\"agent_type\":\"Á中文-agent\",$C}" | PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py"; echo "rc=$?")
+# 0.7.5 F3: the launcher starts Python with -I, which ignores PYTHONIOENCODING, so a case that sets it in front of the launcher can no longer fail. This one starts the interpreter itself, the way hooks were started before 0.7.5.
+EV1252="{\"hook_event_name\":\"SubagentStart\",\"session_id\":\"s3\",\"agent_id\":\"u8\",\"agent_type\":\"Á中文-agent\",$C}"
+out=$(printf '%s' "$EV1252" | PYTHONUTF8=1 PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" "$REAL" "$H/heartbeat.py"; echo "rc=$?")
 [ "$out" = "rc=0" ] && echo "PASS event with Á / 中文 under PYTHONIOENCODING=cp1252 -> exit 0, no output" || { echo "FAIL cp1252 event: $out"; fail=1; }
 expect "agent type with Á / 中文 recorded (stdin read as bytes, decoded as UTF-8)" "waiting on agent: Á中文-agent"
+# m3 (0.7.5 F3), a mutation: a temp copy of heartbeat.py that reads its event as text (sys.stdin.read) loses the cp1252 event, so the status line has no "Á中文-agent" after it; the real file's run, in its own temp HOME, is the control and has it. Without the control an empty answer would prove nothing.
+cp1252line() { # $1 = a heartbeat.py, $2 = a fresh HOME -> the status line after a session start through the launcher and the cp1252 event started directly
+  mkdir -p "$2"
+  printf '%s' "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s3\",\"source\":\"startup\",$C}" | HOME="$2" CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py"
+  printf '%s' "$EV1252" | HOME="$2" PYTHONUTF8=1 PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" "$REAL" "$1"
+  HOME="$2" CLAUDE_PROJECT_DIR="$PW" py "$H/heartbeat.py" --line
+}
+mkdir -p "$D/m3"; sed 's/raw = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8", "replace")/raw = sys.stdin.read().encode("utf-8", "replace")/' "$H/heartbeat.py" > "$D/m3/heartbeat.py"
+if cmp -s "$H/heartbeat.py" "$D/m3/heartbeat.py"; then echo "FAIL F3 m3 the mutation changed nothing (the line it edits moved)"; fail=1
+else
+  M3C=$(cp1252line "$H/heartbeat.py" "$D/m3/homec"); M3M=$(cp1252line "$D/m3/heartbeat.py" "$D/m3/homem")
+  case "$M3C" in *"waiting on agent: Á中文-agent"*) case "$M3M" in *"Á中文-agent"*) echo "FAIL F3 m3 a heartbeat.py that reads text still recorded the cp1252 event: $M3M"; fail=1;; *) echo "PASS F3 m3 a copy of heartbeat.py that reads its event as text loses the cp1252 event (control: the real file records it): $M3M";; esac;; *) echo "FAIL F3 m3 the control run did not record the cp1252 event: $M3C"; fail=1;; esac
+fi
 ev "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s3\",\"agent_id\":\"u8\",$C}"
 [ -z "$(ls "$P" | grep '\.tmp$')" ] && echo "PASS no temp files left behind" || { echo "FAIL temp files left: $(ls "$P")"; fail=1; }
 # --- M3: the wait gate's outcome (docs/notes/one-session-design.md). wait-gate.py writes wait.json at Stop when a hand-off is open. Rendered
@@ -298,7 +314,6 @@ jsw "d['prompt_at'] is None and d['session_id']=='w2'" && echo "PASS a new sessi
 # skips it and the next candidate, `python`, runs the hook. Here `python` wraps the interpreter the launcher itself found, so the
 # case also passes on a Mac or a minimal Linux without a `python` of its own. No usable interpreter at all -> the launcher prints
 # nothing and exits 0 (a hook must never block). HOME is a fresh dir here, so the hook must create projects/<key of $PW>/ under it.
-REAL=$(bash "$H/py.sh" -c "import sys; sys.stdout.write(sys.executable)")
 mkdir -p "$D/stub" "$D/real" "$D/home2"
 printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases."\nexit 9009\n' > "$D/stub/python3"
 printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL" > "$D/real/python"; chmod +x "$D/stub/python3" "$D/real/python"

@@ -6,6 +6,7 @@
 # the skills' state writes --put / --unit / --run / --get (keyed dir only, hook- and gate-owned fields kept, typed values).
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
+REAL=$(py -c "import sys; sys.stdout.write(sys.executable)")   # the interpreter the launcher found: the two cp1252 cases start it directly, because the launcher's -I ignores PYTHONIOENCODING (0.7.5)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
 key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-" (~/.claude/smartuse/projects/<key>/)
 T="$D/t.jsonl"; TW=$(wp "$T"); PW=$(wp "$D/proj")   # TW / PW go into the event JSON and CLAUDE_PROJECT_DIR; T and $D/proj stay for the shell itself
@@ -35,7 +36,7 @@ grep -q '"agent_id": "a1"' "$P/receipts.jsonl" && echo "PASS subagent receipt wr
 echo "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a1\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 [ "$(grep -c '"agent_id": "a1"' "$P/receipts.jsonl")" = 1 ] && echo "PASS second SubagentStop for the same agent -> no duplicate" || { echo "FAIL duplicate receipt"; exit 1; }
 # non-ASCII in the event: Windows Python would decode a piped stdin as cp1252 (Á = C3 81, 0x81 undefined -> error, receipt lost); the hook reads bytes and decodes UTF-8
-printf '%s' "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a2\",\"agent_name\":\"Á中文\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
+printf '%s' "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"s\",\"agent_id\":\"a2\",\"agent_name\":\"Á中文\",\"agent_transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | PYTHONUTF8=1 PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" "$REAL" "$H/ledger.py"
 grep -q '"agent_name": "Á中文"' "$P/receipts.jsonl" && echo "PASS receipt with Á / 中文 recorded under PYTHONIOENCODING=cp1252 (stdin read as bytes, decoded as UTF-8)" || { echo "FAIL non-ASCII receipt lost"; exit 1; }
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"s\",\"transcript_path\":\"$TW\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$H/ledger.py"
 [ "$(wc -l < "$L" | tr -d ' ')" = 1 ] && echo "PASS no pending -> no new line" || { echo "FAIL wrote without pending"; exit 1; }
@@ -193,6 +194,7 @@ same "$OUT" "$(wp "$E5")" && [ -d "$E5" ] && [ -z "$(ls -A "$HOME/.claude/smartu
 # write must land in that repo's keyed dir and nowhere else (others() = every file under HOME outside the keyed dir, with its hash).
 mkdir -p "$D/st/proj"; PW6=$(wp "$D/st/proj"); K6=$(key "$PW6"); E6="$HOME/.claude/smartuse/projects/$K6"
 st() { ( cd "$D/st/proj" && env -u CLAUDE_PROJECT_DIR bash "$H/py.sh" "$H/ledger.py" "$@" ); }
+st1252() { ( cd "$D/st/proj" && env -u CLAUDE_PROJECT_DIR PYTHONUTF8=1 PYTHONIOENCODING=cp1252 "$REAL" "$H/ledger.py" "$@" ); }   # st, started directly in a cp1252 console (0.7.5: the launcher ignores PYTHONIOENCODING)
 others() { snap "$HOME" | tr ' ' '\n' | grep -vF ".claude/smartuse/projects/$K6/" || true; }
 O0=$(others); [ ! -e "$E6" ] || { echo "FAIL $E6 exists before the first --put"; exit 1; }
 # the skills' form: the JSON as ONE single-quoted argument (Claude Code's Bash check refuses a JSON heredoc in default mode)
@@ -202,7 +204,7 @@ RC=0; OUT=$(st --put pending.json "$PJ" < /dev/null 2>&1) || RC=$?
 import json,sys; p=json.load(open(sys.argv[1],encoding="utf-8")); assert p==json.loads(sys.argv[2]) and p["task"]=="Á中文", p
 PY
 rm "$E6/pending.json"
-RC=0; OUT=$(printf '%s\n' "$PJ" | PYTHONIOENCODING=cp1252 st --put pending.json 2>&1) || RC=$?
+RC=0; OUT=$(printf '%s\n' "$PJ" | st1252 --put pending.json 2>&1) || RC=$?
 [ "$RC" = 0 ] && [ "${OUT%% → *}" = "put pending.json" ] && py - "$E6/pending.json" "$PJ" <<'PY' && echo "PASS --put pending.json < stdin (a pipe or heredoc): bytes read as UTF-8 (Á中文 under PYTHONIOENCODING=cp1252), same file" || { echo "FAIL --put pending.json from stdin: exit $RC, printed '$OUT'"; exit 1; }
 import json,sys; p=json.load(open(sys.argv[1],encoding="utf-8")); assert p==json.loads(sys.argv[2]), p
 PY

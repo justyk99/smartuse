@@ -24,6 +24,7 @@ trap 'case "$D" in */smartuse-wait.*) rm -rf "$D" 2>/dev/null;; esac' EXIT   # r
 REAL_HOME="${HOME:-}"; export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/proj" "$D/t"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
 export CLAUDE_PLUGIN_OPTION_STRICT=true; unset CLAUDE_PLUGIN_OPTION_WAIT_GATE   # 0.6.1 F6: the gate is on in strict (and with the wait_gate option), off in light, which is the default; every case below this line is the strict bar, the light block near the end sets the options itself
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
+REAL=$(py -c "import sys; sys.stdout.write(sys.executable)")   # the interpreter the launcher found: the cp1252 case starts it directly, because the launcher's -I ignores PYTHONIOENCODING (0.7.5)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it: Git Bash converts POSIX paths in arguments and environment variables for a Windows program, not inside JSON strings (cygpath -m -> C:/Users/...); elsewhere unchanged
 key() { py -c "import re,sys,pathlib; print(re.sub(r'[^A-Za-z0-9._-]','-',str(pathlib.Path(sys.argv[1]).resolve())).lstrip('-'))" "$1"; }   # the hooks' state-dir rule: the full resolved path, every character outside [A-Za-z0-9._-] -> "-", no leading "-" (~/.claude/smartuse/projects/<key>/)
 fail=0
@@ -1102,7 +1103,8 @@ done
 o=$(printf '%s' "{\"hook_event_name\":\"SubagentStop\",\"session_id\":\"sid-test\",\"transcript_path\":\"$(wp "$D/t/incident.jsonl")\",\"cwd\":\"$PW\"}" | CLAUDE_PROJECT_DIR="$PW" py "$GATE" 2>&1; echo "rc=$?"); [ "$o" = "rc=0" ] && ok "an event that is not Stop is ignored" || ko "SubagentStop: $o"
 want_block "garbage lines, a binary line, a JSON array and a last line cut in the middle: the readable records still decide" junk_lines "send_message to session_TEST0001"
 want_block "a 4500-record session is read in one pass inside the budget" big "send_message to session_TEST0001"
-gate unicode_incident; rm -rf "$P"; OUT=$(printf '%s' "$IN" | PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" py "$GATE" 2>&1)
+# 0.7.5 F3: started directly, because the launcher's -I ignores PYTHONIOENCODING. The event itself now carries non-ASCII bytes too (a Stop input field the gate ignores, prompt_id): with ASCII-only stdin a gate that read it as text would still pass, so the case could not fail.
+XTRA=',"prompt_id":"Á中文"'; gate unicode_incident; XTRA=""; rm -rf "$P"; OUT=$(printf '%s' "$IN" | PYTHONUTF8=1 PYTHONIOENCODING=cp1252 CLAUDE_PROJECT_DIR="$PW" "$REAL" "$GATE" 2>&1)
 r=$(py "$D/chk.py" block "$OUT" "wait gate: you handed off" </dev/null); [ "$r" = ok ] && ok "block: non-ASCII text (Á 中文) in the transcript, stdin under PYTHONIOENCODING=cp1252 (a Windows pipe)" || ko "cp1252: $r"
 
 # ===== 3. wait_gate: off (the adapter's frontmatter; the body does not count)

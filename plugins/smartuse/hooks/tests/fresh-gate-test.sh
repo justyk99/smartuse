@@ -26,6 +26,7 @@ D=$(mktemp -d "${TMPDIR:-/tmp}/smartuse-fresh.XXXXXX") && [ -d "$D" ] || { echo 
 trap 'case "$D" in */smartuse-fresh.*) rm -rf "$D" 2>/dev/null;; esac' EXIT   # removes this run's own dir and nothing else
 export HOME="$D/home"; mkdir -p "$HOME/.claude/smartuse" "$D/c" "$D/r"   # ~/.claude/smartuse exists, so py.sh remembers the interpreter: one start per call
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
+REAL=$(py -c "import sys; sys.stdout.write(sys.executable)" </dev/null)   # the interpreter the launcher found: the cp1252 case starts it directly, because the launcher's -I ignores PYTHONIOENCODING (0.7.5)
 wp() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }   # a path as the interpreter must see it (C:/Users/... in Git Bash)
 fail=0
 ok() { echo "PASS $1"; }
@@ -1383,10 +1384,11 @@ for n in $(cat "$D/c/order.txt"); do
   c="$D/c/$n"; gd="$G"; [ -f "$c/guard" ] && gd=$(cat "$c/guard")
   E=(env -u CLAUDE_PROJECT_DIR)
   [ -f "$c/env" ] && E=(env "CLAUDE_PROJECT_DIR=$(cat "$c/env")")
-  [ -f "$c/pyenc" ] && E+=("PYTHONIOENCODING=$(cat "$c/pyenc")")
+  R=(bash "$H/py.sh")
+  [ -f "$c/pyenc" ] && { E+=("PYTHONUTF8=1" "PYTHONIOENCODING=$(cat "$c/pyenc")"); R=("$REAL"); }   # 0.7.5 F3: a case with a code page starts the interpreter itself, the way hooks started before 0.7.5 (the launcher's -I ignores PYTHONIOENCODING)
   for try in 1 2; do   # a case with a time limit gets a second go: the laptop's interpreter start alone can take seconds under load, a gate stalled on the network takes tens of seconds every time
     t0=$(date +%s)
-    "${E[@]}" bash "$H/py.sh" "$gd" < "$c/event.json" > "$D/r/$n.out" 2> "$D/r/$n.err"; echo $? > "$D/r/$n.rc"
+    "${E[@]}" "${R[@]}" "$gd" < "$c/event.json" > "$D/r/$n.out" 2> "$D/r/$n.err"; echo $? > "$D/r/$n.rc"
     echo $(( $(date +%s) - t0 )) > "$D/r/$n.secs"
     [ "$(grep -o '"max": [0-9]*' "$c/meta.json" | grep -o '[0-9]*$')" -gt "$(cat "$D/r/$n.secs")" ] 2>/dev/null && break
     grep -q '"max": [1-9]' "$c/meta.json" || break
