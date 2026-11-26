@@ -154,6 +154,113 @@ elif mode == "twolock":  # twolock GUARD HOME: 0.7.2 D14, paid_count called dire
     r2 = ns["paid_count"]({"tool_use_id": "toolu_y"}, sdir, items, "python render.py", None, proj)
     ok = r1 == (True, ns["PAID_TWO"], 0) and left == [] and r2 is None and (sdir / "paid-runs.json").is_file()
     print("ok" if ok else "r1=%r left=%r r2=%r" % (r1, left, r2))
+elif mode == "longform":   # longform GUARD: 0.7.4 F1 (39h), long_form is pure text and answers the same on every OS. The table is written with | for a backslash.
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "longform"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    lf = ns.get("long_form")
+    if lf is None:
+        print("long_form is not defined"); sys.exit(0)
+    B = lambda s: s.replace("|", chr(92))
+    deep = "C:|" + ("d" * 99 + "|") * 2 + "d" * 99          # a 302-character path, every name 99 characters
+    assert len(deep) >= 300, len(deep)
+    rows = [   # (path, nt, wanted)
+        ("C:|a|b", True, "||?|C:|a|b"),                      # a drive path
+        ("c:|a|b", True, "||?|c:|a|b"),                      # a lower-case drive
+        ("C:/a/b", True, "||?|C:|a|b"),                      # forward slashes count as backslashes
+        ("C:|a/b|c", True, "||?|C:|a|b|c"),                  # mixed
+        ("||srv|sh|a", True, "||?|UNC|srv|sh|a"),            # a share path
+        ("//srv/sh/a", True, "||?|UNC|srv|sh|a"),            # a share path, forward slashes
+        ("||?|C:|a|b", True, "||?|C:|a|b"),                  # already long: as it is
+        ("||?|UNC|srv|sh|a", True, "||?|UNC|srv|sh|a"),      # already long, a share: as it is
+        (deep, True, "||?|" + deep),                         # 302 characters
+        ("C:|a|b", False, ""),                               # not Windows: never
+        ("||.|C:|a", True, ""),                              # a device path
+        ("||srv|sh", True, ""),                              # a share with no name after it
+        ("||srv", True, ""),                                 # a server only
+        ("a|b|c", True, ""),                                 # relative
+        ("C:a|b", True, ""),                                 # drive-relative
+        ("C:|a|..|b", True, ""),                             # a .. part
+        ("C:|a|.|b", True, ""),                              # a . part
+        ("C:|a||b", True, ""),                               # an empty part
+        ("C:|a|b|", True, ""),                               # a trailing separator
+        ("||srv|sh||a", True, ""),                           # a share path with an empty part
+        ("|a|b", True, ""),                                  # rooted, no drive
+        ("\u00e9:|a", True, ""),                             # a drive letter must be ASCII
+        ("C:", True, ""), ("C:|", True, ""), ("", True, ""),
+    ]
+    bad = []
+    for p, nt, want in rows:
+        try:
+            got = lf(B(p), nt)
+        except Exception as e:
+            got = "raised " + type(e).__name__
+        if got != B(want):
+            bad.append("%r nt=%s wanted %r got %r" % (B(p)[:40], nt, B(want)[:40], got[:40]))
+    for odd in (None, 5, b"C:|a"):                           # never raises, whatever it is given
+        try:
+            if lf(odd, True) != "":
+                bad.append("%r did not give an empty text" % (odd,))
+        except Exception as e:
+            bad.append("%r raised %s" % (odd, type(e).__name__))
+    print("ok" if not bad else "; ".join(bad))
+elif mode == "counterin":  # counterin GUARD: 0.7.4 F1 (39h), counter_in with os.path.isfile stood in (no long path can be made on every OS): the plain look first, then the long form
+    import os
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "counterin"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    ci = ns.get("counter_in")
+    if ci is None:
+        print("counter_in is not defined"); sys.exit(0)
+    BS = chr(92); EXT = BS * 2 + "?" + BS
+    base = "C:" + BS + "h" + BS + ".claude" + BS + "smartuse" + BS + "projects"   # a Windows spelling, on any OS
+    plain = base + os.sep + "k1" + os.sep + "paid-runs.json"
+    longp = EXT + "C:" + BS + "h" + BS + ".claude" + BS + "smartuse" + BS + "projects" + BS + "k1" + BS + "paid-runs.json"
+    def look(true_for, nt, b=base):
+        calls = []
+        def stub(p):
+            calls.append(p)
+            return p in true_for
+        real = os.path.isfile; os.path.isfile = stub
+        try:
+            r = ci(b, "k1", nt)
+        finally:
+            os.path.isfile = real
+        return r, calls
+    bad = []
+    cases = [
+        ("plain true (the long form is not tried)", look({plain}, True), (True, [plain])),
+        ("plain true, nt false", look({plain}, False), (True, [plain])),
+        ("plain false, long form true", look({longp}, True), (True, [plain, longp])),
+        ("both false", look(set(), True), (False, [plain, longp])),
+        ("nt false never tries the long form", look({longp}, False), (False, [plain])),
+        ("a relative base gets the plain look only", look({longp}, True, "rel" + os.sep + "dir"), (False, ["rel" + os.sep + "dir" + os.sep + "k1" + os.sep + "paid-runs.json"])),
+    ]
+    for name, got, want in cases:
+        if got != want or type(got[0]) is not bool:
+            bad.append("%s: got %r wanted %r" % (name, got, want))
+    print("ok" if not bad else "; ".join(bad))
+elif mode == "nocall":   # nocall GUARD HOME: 0.7.4 F1 (39i), a project whose key fits never reaches counter_in (counted calls), in the early check and under the lock; a long one does (the control)
+    import os
+    src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "nocall"}
+    exec(compile(src, "bash-guard", "exec"), ns)
+    home = sys.argv[3]; os.environ["HOME"] = home
+    calls = []
+    def stub(*a):
+        calls.append(a)
+        return False
+    ns["counter_in"] = stub
+    go = {"script": "render.py", "runs": 3, "cap": "RM1", "count": "none", "test_ok": True, "go_from": "adapter"}
+    items = [("go1", go, "render.py", 0)]
+    short_p = os.path.join(home, "fits")
+    s_early = ns["paid_two_counters"](short_p)
+    s_lock = ns["paid_count"]({"tool_use_id": "toolu_n1"}, ns["paid_state_dir"](short_p), items, "python render.py", None, short_p)
+    n_short = len(calls)
+    long_p = os.path.join(home, "a" * 80, "b" * 80, "c" * 80)
+    l_early = ns["paid_two_counters"](long_p)
+    n_early = len(calls) - n_short
+    l_lock = ns["paid_count"]({"tool_use_id": "toolu_n2"}, ns["paid_state_dir"](long_p), items, "python render.py", None, long_p)
+    n_lock = len(calls) - n_short - n_early
+    ok = s_early is False and s_lock is None and n_short == 0 and l_early is False and l_lock is None and n_early >= 1 and n_lock >= 1
+    print("ok" if ok else "fits: early=%r lock=%r calls=%d; long: early=%r (%d calls) lock=%r (%d calls)" % (s_early, s_lock, n_short, l_early, n_early, l_lock, n_lock))
 elif mode == "ptime":    # ptime GUARD PROJECT: the paid path inside the process, no process start in the times
     import os, time
     src = open(sys.argv[2], encoding="utf-8").read().replace("\nmain()\n", "\n"); ns = {"__name__": "ptime"}
@@ -2302,6 +2409,52 @@ except Exception:
     rm -rf "${D:?}/lp"
   fi
 fi
+# ===== 39g. 0.7.4 F1 (E1), a counter in the other state folder is seen at ANY length. 39f is the 240-character window, where plain file calls still reach the counter. From 245 characters
+# the counter's own path passes 259, os.path.isfile says "no" with Windows long paths off, and the paid call was allowed and counted again in the short folder (used 1). Now the check also
+# looks through the extended-length form. Real folders, made the way E1e proved (Git Bash mkdir -p and a redirect; rm -rf takes them away): g1 250 characters with a counter and an adapter
+# go -> refused with the 39d words, the counter's bytes unchanged, nothing in the short folder; g2 the same at 245 and 270; g3 a counter in BOTH folders at 250 -> the same refusal; g4 pin:
+# 240 keeps 39f's outcome. Windows only, and only with LongPathsEnabled = 0 (read only).
+if [ "$NT" != 1 ]; then skip "39g skipped here (not Windows: the 259-character path limit is Windows-only)"; else
+  LPON=$(py -c 'import sys
+try:
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+        sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
+except Exception:
+    sys.stdout.write("0")' </dev/null)   # the same read as 39c and 39f: this machine's long-path switch (read only)
+  ID1=toolu_01ABCDEFGHIJKLMNOPQRSTUV; GOUT='could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'
+  if [ "$LPON" = 1 ]; then skip "39g skipped: Windows long paths are on here (LongPathsEnabled = 1), a long full-key folder is kept and plain calls see it, so the layout cannot arise"
+  elif [ $(( 239 - BL )) -lt 60 ]; then skip "39g skipped: HOME is $BL characters, too long to build a state folder of 240"; else
+    for GL in 250 245 270 240; do   # the state folder's length: g1, g2, g2, g4 (the pin)
+      case "$GL" in 250) T=g1;; 240) T=g4;; *) T=g2;; esac
+      LK=$(( GL - 1 - BL )); rm -rf "${D:?}/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); PR="$HOME/.claude/smartuse/projects"; FP="$PR/$LKEY"; FR="$FP/paid-runs.json"
+      LNAME=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$LKEY" </dev/null)   # the short-key folder's name, worked out the suite's own way
+      fresh; mkdir -p "$LP/.claude" "$FP"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"; printf '{"yk":1}' > "$FR"
+      [ "${#LKEY}" = "$LK" ] && [ -f "$FR" ] && ok "39g $T the full-key folder is $GL characters (the counter's path $(( GL + 15 ))) and holds paid-runs.json" || ko "39g $T key ${#LKEY} (wanted $LK), counter: $(ls -A "$FP" 2>&1 | tr '\n' ' ')"
+      guard 'python render.py --images 1' "$ID1" "$LPW"
+      case "$OUT" in *"$GOUT"*) ok "39g $T the paid call is refused at $GL characters: two state folders hold a counter, the reason names /smartuse:doctor";; *) ko "39g $T paid call at $GL: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+      [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39g $T nothing was counted: the counter's bytes are unchanged, no marker, the short-key folder holds no counter and no marker" || ko "39g $T state: full $(ls -A "$FP" 2>&1 | tr '\n' ' ') counter '$(cat "$FR" 2>&1)' short '$(ls -A "$PR/$LNAME" 2>&1 | tr '\n' ' ')'"
+      if [ "$GL" = 250 ]; then   # g3: the miss already happened, a counter in both folders
+        mkdir -p "$PR/$LNAME"; printf '{"yk":2}' > "$PR/$LNAME/paid-runs.json"
+        guard 'python render.py --images 1' "$ID1" "$LPW"
+        case "$OUT" in *"$GOUT"*) ok "39g g3 a counter in both folders at 250 characters: the paid call is refused with the two-counters words";; *) ko "39g g3 paid call: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+        [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(cat "$PR/$LNAME/paid-runs.json" 2>/dev/null)" = '{"yk":2}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(ls -A "$PR/$LNAME" | tr '\n' ' ')" = "paid-runs.json " ] && ok "39g g3 both counters' bytes are unchanged and no marker was made" || ko "39g g3 state: full '$(cat "$FR" 2>&1)' short '$(cat "$PR/$LNAME/paid-runs.json" 2>&1)' folders: $(ls -A "$FP" "$PR/$LNAME" 2>&1 | tr '\n' ' ')"
+      fi
+    done
+    [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39g the real ~/.claude/smartuse gained no folder from these cases" || ko "39g a test folder reached the real ~/.claude/smartuse/projects"
+    rm -rf "${D:?}/lp" "$HOME/.claude/smartuse/projects"
+    [ ! -e "$D/lp" ] && [ -z "$(ls -A "$HOME/.claude/smartuse/projects" 2>/dev/null)" ] && ok "39g the long folders were removed the way they were made (rm -rf)" || ko "39g left behind: $(ls -A "$D/lp" "$HOME/.claude/smartuse/projects" 2>&1 | head -c 300 | tr '\n' ' ')"
+  fi
+fi
+# ===== 39h. 0.7.4 F1, any OS, in process. long_form is pure text (a table of 25 rows: a drive path, forward slashes, a share, already long, a 302-character path, not Windows, a device path,
+# relative, drive-relative, .. . and empty parts, a non-ASCII drive letter, odd inputs). counter_in with os.path.isfile stood in, the 39e way: the plain look first and alone when it says yes,
+# then the long form; both false; not Windows never tries the long form; a base the long form cannot spell gets the plain look only.
+r=$(py "$CW" longform "$(wp "$G")" </dev/null 2>&1); [ "$r" = ok ] && ok "39h long_form: the 25-row table (drive, slashes, share, already long, 302 characters, nt false, device, relative, C:x, .. . and empty parts) answers as wanted and never raises" || ko "39h long_form: $r"
+r=$(py "$CW" counterin "$(wp "$G")" </dev/null 2>&1); [ "$r" = ok ] && ok "39h counter_in: plain true; plain false and long form true; both false; nt false never tries the long form; an unspellable base gets the plain look only" || ko "39h counter_in: $r"
+# ===== 39i. 0.7.4 F1, any OS (pin). A project whose key fits makes no call to counter_in, in the early check and under the counter lock (counted calls: 0), so a short path costs nothing more;
+# a project whose key does not fit does call it (the control, so the count cannot be zero by accident).
+mkdir -p "$D/tl"; r=$(py "$CW" nocall "$(wp "$G")" "$(wp "$D/tl")" </dev/null 2>&1); [ "$r" = ok ] && ok "39i a project whose key fits makes no call to counter_in (early check and under the lock); one that does not fit does" || ko "39i nocall: $r"
+rm -rf "${D:?}/tl"
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

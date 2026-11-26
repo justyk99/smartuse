@@ -2950,14 +2950,48 @@ def paid_keys(project):
     return base, full, fit_key(full, "?" * len(base), os.name == "nt")
 
 
+def long_form(p, nt):
+    """The extended-length spelling of an absolute Windows path, by text alone (no file call, never raises). Empty when nt is false or the path has
+    no such spelling: relative, drive-relative, a device path, a share with no name after it, or an empty, "." or ".." part. "/" counts as a
+    backslash; a path already in the long form is returned as it is."""
+    BS = "\\"
+    EXT = BS * 2 + "?" + BS
+    if not nt or not isinstance(p, str):
+        return ""
+    s = p.replace("/", BS)
+    if s.startswith(EXT):
+        return s
+    if s.startswith(BS * 2):
+        rest = s[2:]
+        parts = rest.split(BS)
+        if s.startswith(BS * 2 + "." + BS) or len(parts) < 3 or any(x in ("", ".", "..") for x in parts):
+            return ""
+        return EXT + "UNC" + BS + rest
+    if len(s) >= 3 and s[0].isascii() and s[0].isalpha() and s[1] == ":" and s[2] == BS:
+        if any(x in ("", ".", "..") for x in s[3:].split(BS)):
+            return ""
+        return EXT + s
+    return ""
+
+
+def counter_in(base, name, nt):
+    """True when base/name/paid-runs.json is a file, looked for by its plain path first, then by its long form when it has one (a path past 259
+    characters is not reached by a plain call on Windows with long paths off). Names only."""
+    p = base + os.sep + name + os.sep + "paid-runs.json"
+    if os.path.isfile(p):
+        return True
+    x = long_form(p, nt)
+    return bool(x) and os.path.isfile(x)
+
+
 def paid_two_counters(project):
     """True when the project's full-key state folder and its short-key one each hold paid-runs.json (0.7.2 D9). `owner-file` reads names in the command
     text, so a folder copy or link can plant a counter in either folder; fit_key keeps the full key then, and a copy into the other folder is refused,
     so the paid call is denied. This is the early check; paid_count repeats it under the counter lock (D14). Reads names only; a detection error
     propagates (the caller denies)."""
     base, full, short = paid_keys(project)
-    return (short != full and os.path.isfile(base + os.sep + full + os.sep + "paid-runs.json")
-            and os.path.isfile(base + os.sep + short + os.sep + "paid-runs.json"))
+    nt = os.name == "nt"
+    return short != full and counter_in(base, full, nt) and counter_in(base, short, nt)
 
 
 def paid_stored(project):
@@ -3149,7 +3183,7 @@ def paid_count(data, sdir, items, text, deadline=None, project=None):
         if project is not None:
             base, full, short = paid_keys(project)
             other = short if sdir.name == full else full if sdir.name == short else ""
-            if other and other != sdir.name and os.path.isfile(base + os.sep + other + os.sep + "paid-runs.json"):
+            if other and other != sdir.name and counter_in(base, other, os.name == "nt"):
                 return True, PAID_TWO, 0                      # D14: the other folder holds a counter; nothing is read or written here
         f = sdir / "paid-runs.json"
         try:
