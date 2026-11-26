@@ -619,6 +619,24 @@ def two_counters(project, base):
     return None
 
 
+def counter_left(project, sdir):
+    """(the folder holding the counter, the folder in use) when the folder in use is one of the project's two (full key, short key), the other one holds
+    paid-runs.json and the one in use does not (0.7.3 F2: fit_key sends a project with a too-long full-key folder to the short key whatever the short folder
+    holds, so a counter in the full-key folder is left behind and the paid check refuses every paid run, "two state folders hold a counter", while the
+    folder in use is writable). The paid check's own test (bash-guard.py paid_count, `other`), copied, so doctor and the refusal name the same layouts;
+    a counter in both folders is two_counters', not this. Names only, else None."""
+    try:
+        base, used = str(pathlib.Path(sdir).parent), pathlib.Path(sdir).name
+        full = full_key(project)
+        short = fit_key(full, "?" * len(base), os.name == "nt")
+        other = short if used == full else full if used == short else ""
+        if other and other != used and os.path.isfile(os.path.join(base, other, "paid-runs.json")) and not os.path.isfile(os.path.join(base, used, "paid-runs.json")):
+            return other, used
+    except Exception:
+        pass
+    return None
+
+
 def can_write(d):
     """(ok, why): can a file be created in the state folder d, or, while d does not exist yet, in the nearest folder above it that does (what the
     hooks' mkdir -p needs)? A throwaway file is made there and removed at once; a folder that is really a file reads as "not a folder"."""
@@ -687,6 +705,9 @@ def doctor_lines(sdir, now=None):
     two = two_counters(project_dir(), str(pathlib.Path(sdir).parent))   # 0.7.2 D9
     if two:
         out.append(f"state folder: FAIL · two state folders hold a paid counter: {two[0]} and {two[1]}: the paid check refuses every paid run until you delete the one that is wrong (its count and receipts go with it)")
+    left = counter_left(project_dir(), sdir)   # 0.7.3 F2: one counter, in the folder no longer used (never together with the two-counters line)
+    if left:
+        out.append(f"state folder: FAIL · the paid counter is in {left[0]} ({len(str(pathlib.Path(sdir).parent / left[0]))} characters), but smartuse now uses {left[1]}, which holds none: the paid check refuses every paid run: turn Windows long paths back on (the count carries on), or delete {left[0]} (the count starts again; its receipts go with it)")
     return out
 
 

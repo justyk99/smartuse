@@ -2273,6 +2273,35 @@ except Exception:
     rm -rf "$D/lp"
   fi
 fi
+# ===== 39f. 0.7.3 F2 (D-YK25, E1), a real counter left in a folder fit_key no longer uses. A project whose full-key state folder is 240 characters (E1: 233 to 244 characters is where plain file
+# calls still reach a counter, its own path is at most 259; from 245 the paid check cannot see it) holds paid-runs.json. With Windows long paths off fit_key sends the project to the short key. This
+# is a pin, green on 54f4b75 by trace: the paid call is refused with the 39d words ("two state folders hold a counter"), nothing is counted, the counter's bytes stay (39e fakes the file check, so
+# no test had run it on a real folder). Then heartbeat.py --doctor for the same project names the same two folders (it said "writable" only). Windows only, and only with LongPathsEnabled = 0.
+if [ "$NT" != 1 ]; then skip "39f skipped here (not Windows: the 259-character path limit is Windows-only)"; else
+  LPON=$(py -c 'import sys
+try:
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+        sys.stdout.write("1" if winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1 else "0")
+except Exception:
+    sys.stdout.write("0")' </dev/null)   # the same read as 39c: this machine's long-path switch (read only)
+  LK=$(( 239 - BL )); ID1=toolu_01ABCDEFGHIJKLMNOPQRSTUV
+  if [ "$LPON" = 1 ]; then skip "39f skipped: Windows long paths are on here (LongPathsEnabled = 1), a 240-character full-key folder is kept and the layout cannot arise"
+  elif [ "$LK" -lt 60 ]; then skip "39f skipped: HOME is $BL characters, too long to build a state folder of 240"; else
+    rm -rf "${D:?}/lp"; LP=$(mklong "$LK"); LPW=$(wp "$LP"); LKEY=$(key "$LPW"); PR="$HOME/.claude/smartuse/projects"; FP="$PR/$LKEY"; FR="$FP/paid-runs.json"
+    LNAME=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$LKEY" </dev/null)   # the short-key folder's name, worked out the suite's own way
+    fresh; mkdir -p "$LP/.claude" "$FP"; printf '%s\nprint("would call")\n' "$IMP" > "$LP/render.py"; printf 'paid: render.py x 10, cap RM5, test ok\n' > "$LP/.claude/smartuse.local.md"; printf '{}' > "$FR"
+    [ "${#LKEY}" = "$LK" ] && [ -f "$FR" ] && ok "39f the full-key folder is $(( BL + 1 + LK )) characters and holds paid-runs.json" || ko "39f key ${#LKEY} (wanted $LK), counter: $(ls -A "$FP" 2>&1 | tr '\n' ' ')"
+    guard 'python render.py --images 1' "$ID1" "$LPW"
+    case "$OUT" in *'could not verify the go (two state folders hold a counter); run /smartuse:doctor. Nothing was spent.'*) ok "39f the paid call is refused: two state folders hold a counter, the reason names /smartuse:doctor";; *) ko "39f paid call: stdout '${OUT:0:400}' stderr '$ERR'";; esac
+    [ "$(cat "$FR" 2>/dev/null)" = '{}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39f nothing was counted: the counter's bytes are unchanged, no marker, the short-key folder holds nothing" || ko "39f state: full $(ls -A "$FP" 2>&1 | tr '\n' ' ') counter '$(cat "$FR" 2>&1)' short '$(ls -A "$PR/$LNAME" 2>&1 | tr '\n' ' ')'"
+    DOUT=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/heartbeat.py" --doctor </dev/null); DN=$(printf '%s\n' "$DOUT" | wc -l)
+    case "$DOUT" in *"state folder: FAIL"*"$LKEY"*"(240 characters)"*"$LNAME"*) [ "$DN" -le 8 ] && ok "39f doctor for the same project names the same two folders and 240 characters ($DN lines)" || ko "39f doctor has $DN lines (limit 8)";; *) ko "39f doctor: $(printf '%s' "$DOUT" | grep 'state folder')";; esac
+    [ "$(cat "$FR" 2>/dev/null)" = '{}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39f doctor left both folders as they were" || ko "39f doctor touched the folders: full $(ls -A "$FP" 2>&1 | tr '\n' ' ') short '$(ls -A "$PR/$LNAME" 2>&1 | tr '\n' ' ')'"
+    [ "$(ls "$REAL_HOME/.claude/smartuse/projects" 2>/dev/null | grep -c 'aaaaaaaa')" = 0 ] && ok "39f the real ~/.claude/smartuse gained no folder from these cases" || ko "39f a test folder reached the real ~/.claude/smartuse/projects"
+    rm -rf "${D:?}/lp"
+  fi
+fi
 TPATH=
 PGTOOL=Bash
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
