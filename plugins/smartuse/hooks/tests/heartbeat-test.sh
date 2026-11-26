@@ -913,7 +913,7 @@ if [ "$NT" = 1 ]; then
     pw=$(lpath $(( 249 - BL2 ))); fk=$(key "$pw")   # h5: the full-key folder is 250 characters, its counter's path 265
     mkdir -p "$pr/$fk"; printf '{}' > "$pr/$fk/paid-runs.json"
     OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
-    case "$OUT" in *"state folder: FAIL · the paid counter is in $fk (250 characters)"*"turn Windows long paths back on"*"delete $fk with rm -rf in Git Bash"*"PowerShell and rd cannot remove a folder that long"*)
+    case "$OUT" in *"state folder: FAIL · the paid counter is in $fk (250 characters)"*"turn Windows long paths back on"*"delete ~/.claude/smartuse/projects/$fk with rm -rf in Git Bash (Windows PowerShell 5.1 and rd left a folder that long in place)"*)
         [ "$N" -le 8 ] && echo "PASS F2 h5 doctor, a real 250-character full-key folder holding a counter (long paths off): the left-behind line names (250 characters), both ways out and rm -rf in Git Bash ($N lines)" || { echo "FAIL F2 h5 doctor has $N lines (limit 8): $OUT"; fail=1; };;
       *) echo "FAIL F2 h5 doctor, a counter left in a 250-character folder: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
     [ "$(ls -A "$pr" | tr '\n' ' ')" = "$fk " ] && [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(cat "$pr/$fk/paid-runs.json")" = "{}" ] && echo "PASS F2 h5 doctor left the folders as they were (no short-key folder made, the counter untouched)" || { echo "FAIL F2 h5 doctor touched the folders: $(ls -A "$pr" "$pr/$fk" | tr '\n' ' ')"; fail=1; }
@@ -929,7 +929,7 @@ if [ "$NT" = 1 ]; then
     pw=$(lpath 255); fk=$(key "$pw"); FL=$(( BL2 + 1 + 255 ))   # h7: a 255-character key, the longest name a folder can have
     mkdir -p "$pr/$fk"; printf '{}' > "$pr/$fk/paid-runs.json"
     OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
-    case "$OUT" in *"state folder: FAIL · the paid counter is in $fk ($FL characters)"*"delete $fk with rm -rf in Git Bash"*)
+    case "$OUT" in *"state folder: FAIL · the paid counter is in $fk ($FL characters)"*"delete ~/.claude/smartuse/projects/$fk with rm -rf in Git Bash"*)
         [ "${#fk}" = 255 ] && [ "$N" -le 8 ] && echo "PASS F2 h7 doctor, the longest folder that can exist (a 255-character key, $FL characters) holding a counter: the left-behind line ($N lines)" || { echo "FAIL F2 h7 key ${#fk} (wanted 255), $N lines (limit 8): $OUT"; fail=1; };;
       *) echo "FAIL F2 h7 doctor, a counter left in a 255-character-key folder: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
     [ "$(ls -A "$pr" | tr '\n' ' ')" = "$fk " ] && [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && echo "PASS F2 h7 doctor left the folder as it was" || { echo "FAIL F2 h7 doctor touched the folders: $(ls -A "$pr" "$pr/$fk" | tr '\n' ' ')"; fail=1; }

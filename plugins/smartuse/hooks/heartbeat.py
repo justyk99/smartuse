@@ -603,7 +603,7 @@ def cli_sdir():
 LONG_FOLDER = "path too long"   # can_write's `why` when the short throwaway works but the 49-character one (the longest claim marker of a paid run) does not (0.7.2 F3)
 LONG_NAME = 49                  # the longest fixed file name a paid run keeps in the state folder: paid.<30-character id>.<8>.done (bash-guard.py, the second script's marker)
 WIN_PATH_MAX = 259              # the longest whole file path on Windows without long-path support (the same as fit_key's)
-LEFT_RM_OVER = 244              # 0.7.4 F2c: a folder longer than this is removed by rm -rf in Git Bash only (E1e: rd and PowerShell leave it)
+LEFT_RM_OVER = 244              # 0.7.4 F2c: a folder longer than this is removed by rm -rf in Git Bash only (E1e: rd and Windows PowerShell 5.1 left it)
 
 
 def long_form(p, nt):
@@ -743,7 +743,8 @@ def doctor_lines(sdir, now=None):
     left = counter_left(project_dir(), sdir)   # 0.7.3 F2: one counter, in the folder no longer used (never together with the two-counters line)
     if left:
         n_left = len(str(pathlib.Path(sdir).parent / left[0]))
-        gone = f"delete {left[0]}" + (" with rm -rf in Git Bash, as PowerShell and rd cannot remove a folder that long" if n_left > LEFT_RM_OVER else "")   # 0.7.4 F2c (E1e): past 244 characters only rm -rf in Git Bash took such a folder away
+        gone = (f"delete ~/.claude/smartuse/projects/{left[0]} with rm -rf in Git Bash (Windows PowerShell 5.1 and rd left a folder that long in place)"
+                if n_left > LEFT_RM_OVER else f"delete {left[0]}")   # 0.7.4 F2c (E1e): past 244 characters only rm -rf in Git Bash took such a folder away
         out.append(f"state folder: FAIL · the paid counter is in {left[0]} ({n_left} characters), but smartuse now uses {left[1]}, which holds none: the paid check refuses every paid run: turn Windows long paths back on (the count carries on), or {gone} (the count starts again; its receipts go with it)")
     return out
 
