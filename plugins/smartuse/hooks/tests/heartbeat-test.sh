@@ -322,7 +322,7 @@ OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" --say-missing
 [ "$OUT" = ran ] && echo "PASS F3 --say-missing is dropped before the interpreter's own arguments" || { echo "FAIL F3 word not dropped: '$OUT'"; fail=1; }
 OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home6" bash "$H/py.sh" -c "import sys; print(' '.join(sys.argv[1:]))" --say-missing x --say-missing 2>&1) || true
 [ "$OUT" = "--say-missing x --say-missing" ] && echo "PASS F3 the word in any later position reaches Python untouched" || { echo "FAIL F3 later --say-missing: '$OUT'"; fail=1; }
-mkdir -p "$D/home7/.claude/smartuse" "$D/stub3"; printf 'python\n' > "$D/home7/.claude/smartuse/interpreter"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub3" > "$D/stub3/python3"; chmod +x "$D/stub3/python3"
+mkdir -p "$D/home7/.claude/smartuse" "$D/stub3"; printf 'python -I\n' > "$D/home7/.claude/smartuse/interpreter"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub3" > "$D/stub3/python3"; chmod +x "$D/stub3/python3"
 OUT=$(PATH="$D/stub3:$D/real" HOME="$D/home7" "$BASH" "$H/py.sh" --say-missing -c "print('ran')" 2>&1) || true
 [ "$OUT" = ran ] && [ ! -e "$D/stub3/called" ] && echo "PASS F3 the remembered-name path takes the word too: the cached python runs, the stub ahead of it is never started" || { echo "FAIL F3 remembered name with the word: '$OUT', stub called: $([ -e "$D/stub3/called" ] && echo yes || echo no)"; fail=1; }
 RC=0; OUT=$(PATH="$D/stub" HOME="$D/home7" "$BASH" "$H/py.sh" --say-missing -c "print('ran')" 2>"$D/missing.err") || RC=$?
@@ -356,29 +356,29 @@ PY
 CF="$D/home5/.claude/smartuse/interpreter"; mkdir -p "${CF%/*}"
 OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" bash "$H/py.sh" -c "print('ran')" 2>&1)
 P5=""; [ -f "$CF" ] && read -r P5 < "$CF"
-[ "$OUT" = ran ] && case "$P5" in python3|python|"py -3") true;; *) false;; esac && echo "PASS launcher remembers the name the probe proved (a word, never a path): $P5" || { echo "FAIL launcher cache: out '$OUT', cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && case "$P5" in "python3 -I"|"python -I"|"py -3 -I") true;; *) false;; esac && echo "PASS launcher remembers the name the probe proved (a word, never a path): $P5" || { echo "FAIL launcher cache: out '$OUT', cached '$P5'"; fail=1; }
 mkdir -p "$D/stub2"; printf '#!/bin/sh\n: > "%s/called"\nexit 9009\n' "$D/stub2" > "$D/stub2/python3"; chmod +x "$D/stub2/python3"
-printf 'python\n' > "$CF"
+printf 'python -I\n' > "$CF"
 OUT=$(PATH="$D/stub2:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1)
 [ "$OUT" = ran ] && [ ! -e "$D/stub2/called" ] && echo "PASS the remembered name runs straight away, and the stub ahead of it on PATH is never started" || { echo "FAIL remembered name: out '$OUT', stub called: $([ -e "$D/stub2/called" ] && echo yes || echo no)"; fail=1; }
-printf 'python3\n' > "$CF"
+printf 'python3 -I\n' > "$CF"
 OUT=$(PATH="$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
-[ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a remembered name that PATH no longer has is probed again and replaced: $P5" || { echo "FAIL stale cache: out '$OUT', cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && [ "$P5" = "python -I" ] && echo "PASS a remembered name that PATH no longer has is probed again and replaced: $P5" || { echo "FAIL stale cache: out '$OUT', cached '$P5'"; fail=1; }
 mkdir -p "$D/tmp"; printf '#!/bin/sh\necho EVIL\n' > "$D/tmp/python3"; chmod +x "$D/tmp/python3"; printf '%s\n' "$D/tmp/python3" > "$CF"
 OUT=$(printf '{}' | PATH="$D/stub:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?")
 [ "$OUT" = "rc=0" ] && echo "PASS a remembered path is never run, whatever its name: the probe runs the hook, nothing else" || { echo "FAIL launcher ran a remembered path: $OUT"; fail=1; }
 printf '%s\n' "$REAL" > "$CF"   # a 0.5.0 cache: the absolute path of the real interpreter
 OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
-[ "$OUT" = ran ] && case "$P5" in python3|python|"py -3") true;; *) false;; esac && echo "PASS a 0.5.0 cache (a path) is probed again and rewritten as a name: $P5" || { echo "FAIL upgrade from a path cache: out '$OUT', cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && case "$P5" in "python3 -I"|"python -I"|"py -3 -I") true;; *) false;; esac && echo "PASS a 0.5.0 cache (a path) is probed again and rewritten as a name: $P5" || { echo "FAIL upgrade from a path cache: out '$OUT', cached '$P5'"; fail=1; }
 printf 'python3; echo pwned\n' > "$CF"
 OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1)
 [ "$OUT" = ran ] && echo "PASS the remembered word is one of three exact names, not a pattern: nothing after it runs" || { echo "FAIL a remembered word with a tail: $OUT"; fail=1; }
 : > "$CF"; RC=0
 OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
 [ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an empty remembered file is probed, rc 0" || { echo "FAIL empty cache: out '$OUT', rc $RC"; fail=1; }
-mkdir -p "$D/WindowsApps"; cp "$D/stub/python3" "$D/WindowsApps/python3"; chmod +x "$D/WindowsApps/python3"; printf 'python3\n' > "$CF"
+mkdir -p "$D/WindowsApps"; cp "$D/stub/python3" "$D/WindowsApps/python3"; chmod +x "$D/WindowsApps/python3"; printf 'python3 -I\n' > "$CF"
 OUT=$(PATH="$D/WindowsApps:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
-[ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias (WindowsApps) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WindowsApps alias: out '$OUT', cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && [ "$P5" = "python -I" ] && echo "PASS a Store alias (WindowsApps) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WindowsApps alias: out '$OUT', cached '$P5'"; fail=1; }
 case "$OSTYPE" in
   msys*|cygwin*) echo "SKIP the launcher never writes through a symlinked cache file: Windows, no symlinks";;
   *) printf 'junk\n' > "$D/target"; rm -f "$CF"; ln -s "$D/target" "$CF"
@@ -387,12 +387,12 @@ case "$OSTYPE" in
 esac
 # N6: the remembered name is on PATH but that file cannot be run (no exec bit): the old launcher exec'd it and bash exited 2 (126 on Linux), and an exit 2 blocks a PreToolUse hook. Now it is probed instead.
 #     No executable python may follow on PATH (bash would pick that one and hide the bug): only a python3 does.
-rm -f "$CF"; mkdir -p "$D/nx" "$D/real3"; printf 'fi\n' > "$D/nx/python"; chmod -x "$D/nx/python"; printf 'python\n' > "$CF"; RC=0
+rm -f "$CF"; mkdir -p "$D/nx" "$D/real3"; printf 'fi\n' > "$D/nx/python"; chmod -x "$D/nx/python"; printf 'python -I\n' > "$CF"; RC=0
 printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL" > "$D/real3/python3"; chmod +x "$D/real3/python3"
 OUT=$(PATH="$D/nx:$D/real3" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?; P5=""; read -r P5 < "$CF"
-[ "$OUT" = ran ] && [ $RC = 0 ] && [ "$P5" = python3 ] && echo "PASS a remembered name whose file on PATH is not executable is probed again, rc 0 (was exit 2 / 126), python3 remembered" || { echo "FAIL non-executable hit: out '$OUT', rc $RC, cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && [ $RC = 0 ] && [ "$P5" = "python3 -I" ] && echo "PASS a remembered name whose file on PATH is not executable is probed again, rc 0 (was exit 2 / 126), python3 remembered" || { echo "FAIL non-executable hit: out '$OUT', rc $RC, cached '$P5'"; fail=1; }
 # N7: an environment variable named like the remembered word (python=...). On bash >= 4 this passes with or without the fix; on macOS /bin/bash 3.2 (CI) it is the regression check: there BASH_CMDS does not exist and $W was read as arithmetic.
-printf 'python\n' > "$CF"; RC=0
+printf 'python -I\n' > "$CF"; RC=0
 OUT=$(python=/usr/bin/python3.11 PATH="$D/stub:$D/real:$PATH" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1) || RC=$?
 [ "$OUT" = ran ] && [ $RC = 0 ] && echo "PASS an env var named python does not abort the launcher (bash $BASH_VERSION; on bash >= 4 it passes either way, the bash 3.2 check runs on macOS /bin/bash in CI)" || { echo "FAIL env var named python: out '$OUT', rc $RC"; fail=1; }
 # N8: the cache path is a FIFO: reading it is skipped ([ -f ] is false) and the write must not open it (a write to a FIFO with no reader blocks for ever). A watchdog turns a hang into a FAIL.
@@ -406,9 +406,75 @@ case "$OSTYPE" in
      rm -f "$CF";;
 esac
 # N9: a Store alias in another spelling of the folder name (WINDOWSAPPS): matched in any case, so it is never exec'd from the cache. (On a case-insensitive disk this is the same folder as WindowsApps; the PATH spelling is what is matched.)
-mkdir -p "$D/WINDOWSAPPS"; cp "$D/stub/python3" "$D/WINDOWSAPPS/python3"; chmod +x "$D/WINDOWSAPPS/python3"; rm -f "$CF"; printf 'python3\n' > "$CF"
+mkdir -p "$D/WINDOWSAPPS"; cp "$D/stub/python3" "$D/WINDOWSAPPS/python3"; chmod +x "$D/WINDOWSAPPS/python3"; rm -f "$CF"; printf 'python3 -I\n' > "$CF"
 OUT=$(PATH="$D/WINDOWSAPPS:$D/real" HOME="$D/home5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); P5=""; read -r P5 < "$CF"
-[ "$OUT" = ran ] && [ "$P5" = python ] && echo "PASS a Store alias under WINDOWSAPPS (upper case) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WINDOWSAPPS alias: out '$OUT', cached '$P5'"; fail=1; }
+[ "$OUT" = ran ] && [ "$P5" = "python -I" ] && echo "PASS a Store alias under WINDOWSAPPS (upper case) is never exec'd from the cache: probed again, python remembered" || { echo "FAIL WINDOWSAPPS alias: out '$OUT', cached '$P5'"; fail=1; }
+# --- 0.7.5 F2: the remembered name is proven isolated, and a Python that cannot start isolated still runs the hooks. The file now holds one of three exact words, a name plus the mark -I
+# (python3 -I, python -I, py -3 -I): only those take the remembered path, anything else (a bare 0.7.4 name, a path, a word with a tail) is probed again and rewritten, so a bare name is never run
+# with flags it was not proven with. When all three candidates fail the isolated probe a second try starts them the 0.7.4 way (no flags, a WindowsApps hit skipped, nothing written to the file).
+# Stand-ins (all in the temp folder): refuse/python3 logs its first word and exits 2 with Python's "Unknown option: -I" text when that word is -I, else runs the real interpreter;
+# pyonly/py is the same for `py -3` (it refuses -I only when PYREFUSE is set); wrap/python only counts its starts.
+F2="$D/f2"; mkdir -p "$F2/refuse" "$F2/pyonly" "$F2/wrap" "$F2/p3only" "$F2/WindowsApps"
+printf '#!/bin/sh\necho "$1" >> "%s/calls"\ncase "$1" in -I) echo "Unknown option: -I" >&2; echo "usage: python3 [option] ... [-c cmd | -m mod | file | -] [arg] ..." >&2; exit 2;; esac\nexec "%s" "$@"\n' "$F2/refuse" "$REAL" > "$F2/refuse/python3"
+printf '#!/bin/sh\necho "$*" >> "%s/calls"\n[ "$1" = -3 ] || exit 3\nshift\ncase "$1" in -I) [ -n "$PYREFUSE" ] && { echo "Unknown option: -I" >&2; exit 2; };; esac\nexec "%s" "$@"\n' "$F2/pyonly" "$REAL" > "$F2/pyonly/py"
+printf '#!/bin/sh\necho "$*" >> "%s/calls"\nexec "%s" "$@"\n' "$F2/wrap" "$REAL" > "$F2/wrap/python"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL" > "$F2/p3only/python3"
+printf '#!/bin/sh\necho x >> "%s/count"\nexit 9009\n' "$F2/WindowsApps" > "$F2/WindowsApps/python3"
+chmod +x "$F2/refuse/python3" "$F2/pyonly/py" "$F2/wrap/python" "$F2/p3only/python3" "$F2/WindowsApps/python3"
+fh() { rm -rf "$D/f2h/$1"; mkdir -p "$D/f2h/$1/.claude/smartuse"; }   # a fresh HOME that already has ~/.claude/smartuse (the launcher writes only there)
+fcf() { printf '%s' "$D/f2h/$1/.claude/smartuse/interpreter"; }
+frd() { local x=""; [ -f "$(fcf "$1")" ] && read -r x < "$(fcf "$1")"; printf '%s' "$x"; }   # the file's first line, "" when it is not there
+fcount() { local n=0; [ -f "$1" ] && n=$(wc -l < "$1" | tr -d ' '); printf '%s' "$n"; }
+F2DENY='{"tool_name":"Bash","tool_input":{"command":"sudo ls"}}'; F2OK='{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+# c1: after a probe the file holds the marked word (python3 -I, python -I or py -3 -I), exactly
+fh c1a; OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/f2h/c1a" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); X=$(frd c1a)
+[ "$OUT" = ran ] && [ "$X" = "python -I" ] && echo "PASS 0.7.5 F2 c1 a probe that finds python writes the marked word: '$X'" || { echo "FAIL 0.7.5 F2 c1 probe, python: out '$OUT', file '$X'"; fail=1; }
+fh c1b; OUT=$(PATH="$F2/p3only" HOME="$D/f2h/c1b" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); X=$(frd c1b)
+[ "$OUT" = ran ] && [ "$X" = "python3 -I" ] && echo "PASS 0.7.5 F2 c1 a probe that finds python3 writes the marked word: '$X'" || { echo "FAIL 0.7.5 F2 c1 probe, python3: out '$OUT', file '$X'"; fail=1; }
+fh c1c; rm -f "$F2/pyonly/calls"; OUT=$(PATH="$F2/pyonly" HOME="$D/f2h/c1c" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); X=$(frd c1c); N1=$(fcount "$F2/pyonly/calls")
+OUT2=$(PATH="$F2/pyonly" HOME="$D/f2h/c1c" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); N2=$(fcount "$F2/pyonly/calls")
+[ "$OUT" = ran ] && [ "$X" = "py -3 -I" ] && [ "$OUT2" = ran ] && [ "$N1" = 1 ] && [ "$N2" = 2 ] && echo "PASS 0.7.5 F2 c1 a probe that finds py -3 writes the marked word '$X'; the next event takes it straight (one start, no probe)" || { echo "FAIL 0.7.5 F2 c1 probe, py -3: out '$OUT'/'$OUT2', file '$X', py starts after run 1: $N1, after run 2: $N2 (want 1 and 2)"; fail=1; }
+# c2: a 0.7.4 file (a bare name) is probed again and rewritten with the mark (before: the bare name was run unproven and stayed)
+fh c2; printf 'python\n' > "$(fcf c2)"; OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/f2h/c2" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); X=$(frd c2)
+[ "$OUT" = ran ] && [ "$X" = "python -I" ] && echo "PASS 0.7.5 F2 c2 a 0.7.4 file (python) is probed again and rewritten: '$X'" || { echo "FAIL 0.7.5 F2 c2 0.7.4 file: out '$OUT', file '$X'"; fail=1; }
+# c4: a marked word with a tail, a different flag, the unmarked py -3: each is probed again, nothing after the word runs, the file is rewritten as the probe's word
+for W4 in 'python -I; echo pwned' 'python -I -c x' 'python -i' 'py -3' 'python3 -I x' 'python -I -I'; do
+  fh c4; printf '%s\n' "$W4" > "$(fcf c4)"; OUT=$(PATH="$D/stub:$D/real:$PATH" HOME="$D/f2h/c4" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); X=$(frd c4)
+  [ "$OUT" = ran ] && [ "$X" = "python -I" ] && echo "PASS 0.7.5 F2 c4 '$W4' in the file is probed again, nothing after the word runs, rewritten: '$X'" || { echo "FAIL 0.7.5 F2 c4 '$W4': out '$OUT', file '$X'"; fail=1; }
+done
+# p1: a python3 that refuses -I, a real python behind it: the real one runs the hook isolated, exit 0, the file says python -I
+fh p1; rm -f "$F2/refuse/calls"; OUT=$(PATH="$F2/refuse:$D/real" HOME="$D/f2h/p1" "$BASH" "$H/py.sh" -c "import sys; print(sys.flags.isolated)" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}; X=$(frd p1)
+[ "$OUT" = "$(printf '1\nrc=0')" ] && [ "$X" = "python -I" ] && echo "PASS 0.7.5 F2 p1 a python3 that refuses -I is skipped: python runs isolated, exit 0, the file says '$X'" || { echo "FAIL 0.7.5 F2 p1 refusing python3: out '$OUT', file '$X'"; fail=1; }
+# p2: only that python3 on PATH: the second try runs the hook, exit 0, the file is not written, the start is not isolated, and the flag reached the stand-in once (the probe) and never again
+fh p2; rm -f "$F2/refuse/calls"; OUT=$(PATH="$F2/refuse" HOME="$D/f2h/p2" "$BASH" "$H/py.sh" -c "import sys; print(sys.flags.isolated)" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}; NI=0; [ -f "$F2/refuse/calls" ] && NI=$(grep -c '^-I$' "$F2/refuse/calls" || true); NA=$(fcount "$F2/refuse/calls")
+[ "$OUT" = "$(printf '0\nrc=0')" ] && [ ! -e "$(fcf p2)" ] && [ "$NI" = 1 ] && [ "$NA" = 2 ] && echo "PASS 0.7.5 F2 p2 only a python that refuses -I: the second try runs, isolated 0, exit 0, nothing written, -I reached it once (the probe), one plain probe" || { echo "FAIL 0.7.5 F2 p2 second try: out '$OUT', file '$(frd p2)', -I calls $NI, all calls $NA (want 1 and 2)"; fail=1; }
+OUT=$(printf '%s' "$F2DENY" | CLAUDE_PLUGIN_OPTION_STRICT=true CLAUDE_PROJECT_DIR="$PW" PATH="$F2/refuse" HOME="$D/f2h/p2" "$BASH" "$H/py.sh" --guard "$H/bash-guard.py" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}
+case "$OUT" in *deny*"rc=0") echo "PASS 0.7.5 F2 p2 through the second try bash-guard still denies sudo ls, exit 0 (as in 0.7.4)";; *) echo "FAIL 0.7.5 F2 p2 second try, deny: $OUT"; fail=1;; esac
+OUT=$(printf '%s' "$F2OK" | CLAUDE_PLUGIN_OPTION_STRICT=true CLAUDE_PROJECT_DIR="$PW" PATH="$F2/refuse" HOME="$D/f2h/p2" "$BASH" "$H/py.sh" --guard "$H/bash-guard.py" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}
+[ "$OUT" = "rc=0" ] && echo "PASS 0.7.5 F2 p2 through the second try bash-guard allows echo hello: silent, exit 0" || { echo "FAIL 0.7.5 F2 p2 second try, allow: $OUT"; fail=1; }
+OUT=$(printf '%s' "{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_use_id\":\"t\",\"session_id\":\"s\",$C}" | PATH="$F2/refuse" HOME="$D/f2h/p2" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}
+[ "$OUT" = "rc=0" ] && [ -f "$D/f2h/p2/.claude/smartuse/projects/$K/status.json" ] && echo "PASS 0.7.5 F2 p2 through the second try the heartbeat runs (loader included) and writes status.json" || { echo "FAIL 0.7.5 F2 p2 second try, heartbeat: $OUT"; fail=1; }
+# p3: p2's layout with a 0.7.4 file naming the stand-in: probed, second try, exit 0, the file is left as it was (before: the bare name was run with -I and exited 2)
+fh p3; printf 'python3\n' > "$(fcf p3)"; OUT=$(PATH="$F2/refuse" HOME="$D/f2h/p3" "$BASH" "$H/py.sh" -c "import sys; print(sys.flags.isolated)" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}; X=$(frd p3)
+[ "$OUT" = "$(printf '0\nrc=0')" ] && [ "$X" = python3 ] && echo "PASS 0.7.5 F2 p3 a 0.7.4 file naming a python that refuses -I: probed, second try, exit 0, the file stays '$X'" || { echo "FAIL 0.7.5 F2 p3 0.7.4 file, refusing python: out '$OUT', file '$X'"; fail=1; }
+# p4: a stub under a folder named WindowsApps and nothing else: started once (the isolated probe), never again (no second try for a Store alias), silent exit 0
+fh p4; rm -f "$F2/WindowsApps/count"; OUT=$(printf '{}' | PATH="$F2/WindowsApps" HOME="$D/f2h/p4" "$BASH" "$H/py.sh" "$H/heartbeat.py" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}; N4=$(fcount "$F2/WindowsApps/count")
+[ "$OUT" = "rc=0" ] && [ "$N4" = 1 ] && echo "PASS 0.7.5 F2 p4 a Store alias under WindowsApps is started once, not twice; no interpreter: silent, exit 0" || { echo "FAIL 0.7.5 F2 p4 WindowsApps stub: out '$OUT', starts $N4 (want 1)"; fail=1; }
+# p5: --say-missing and --guard are dropped in the second try too (no sentence, no exit 2, the word never reaches the interpreter)
+for W5 in --say-missing --guard; do
+  fh p5; OUT=$(PATH="$F2/refuse" HOME="$D/f2h/p5" "$BASH" "$H/py.sh" $W5 -c "import sys; print(' '.join(sys.argv[1:]))" x 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}
+  [ "$OUT" = "$(printf 'x\nrc=0')" ] && echo "PASS 0.7.5 F2 p5 $W5 is dropped in the second try: the interpreter runs, the word never reaches it" || { echo "FAIL 0.7.5 F2 p5 $W5 in the second try: $OUT"; fail=1; }
+done
+fh p5; OUT=$(CLAUDE_PLUGIN_OPTION_STRICT=true PATH="$F2/refuse" HOME="$D/f2h/p5" "$BASH" "$H/py.sh" --guard -c "print('ran')" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}
+[ "$OUT" = "$(printf 'ran\nrc=0')" ] && echo "PASS 0.7.5 F2 p5 Strict guards on, a Python that cannot start isolated: the second try runs it, no blocking sentence" || { echo "FAIL 0.7.5 F2 p5 Strict with the second try: $OUT"; fail=1; }
+# p6: the same for py -3 (PYREFUSE makes the stand-in refuse -I): the second try runs `py -3`, nothing written
+fh p6; rm -f "$F2/pyonly/calls"; OUT=$(PYREFUSE=1 PATH="$F2/pyonly" HOME="$D/f2h/p6" "$BASH" "$H/py.sh" -c "import sys; print(sys.flags.isolated)" 2>&1; echo "rc=$?"); OUT=${OUT//$'\r'/}
+[ "$OUT" = "$(printf '0\nrc=0')" ] && [ ! -e "$(fcf p6)" ] && [ "$(grep -c -- '-I' "$F2/pyonly/calls" || true)" = 1 ] && echo "PASS 0.7.5 F2 p6 py -3 that refuses -I: the second try runs it, isolated 0, nothing written, -I reached it once" || { echo "FAIL 0.7.5 F2 p6 py -3 second try: out '$OUT', file '$(frd p6)'"; fail=1; }
+# c5 (a pin): a machine that starts isolated never reaches the second loop and runs no extra process: the marked file gives one start (with the flags); a probe gives one probe and no plain start
+fh c5; printf 'python -I\n' > "$(fcf c5)"; rm -f "$F2/wrap/calls"; OUT=$(PATH="$D/stub:$F2/wrap:$PATH" HOME="$D/f2h/c5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); NP=$(fcount "$F2/wrap/calls"); NF=$(grep -c '^-I -S -X utf8 ' "$F2/wrap/calls" || true)
+[ "$OUT" = ran ] && [ "$NP" = 1 ] && [ "$NF" = 1 ] && echo "PASS 0.7.5 F2 c5 the marked file: one Python start, with the flags" || { echo "FAIL 0.7.5 F2 c5 marked file: out '$OUT', starts $NP, with flags $NF"; fail=1; }
+fh c5; rm -f "$F2/wrap/calls"; OUT=$(PATH="$D/stub:$F2/wrap:$PATH" HOME="$D/f2h/c5" "$BASH" "$H/py.sh" -c "print('ran')" 2>&1); NP=$(fcount "$F2/wrap/calls"); NF=$(grep -c '^-I -S -X utf8 ' "$F2/wrap/calls" || true)
+[ "$OUT" = ran ] && [ "$NP" = 1 ] && [ "$NF" = 1 ] && echo "PASS 0.7.5 F2 c5 a probe that passes: one probe with the flags, no second try, no plain start" || { echo "FAIL 0.7.5 F2 c5 probe: out '$OUT', starts $NP, with flags $NF"; fail=1; }
 # --- 0.6.1 F1: the heartbeat's three tool-event handlers run in the background ("async": true), so a "before" can land after its
 # "after", a failed call has its own event (PostToolUseFailure: tool_name, tool_use_id, error, is_interrupt; the field names are the
 # docs' sample, no recorded event holds one), and two hooks can write at once. status.json keeps `done`, the last 32 tool_use_ids a
@@ -826,7 +892,7 @@ if [ -n "$VS" ] && [ -d "$VS" ]; then
   printf 'import os; open(os.environ["PLANT_MARK"], "a").write("pth")\n' > "$VS/plant75.pth"
   rm -f "$IMARK"; PLANT_MARK="$IMW" "$VB/python" -c "pass" >/dev/null 2>&1 || true
   if [ -e "$IMARK" ]; then
-    mkdir -p "$D/homeV/.claude/smartuse"; printf 'python\n' > "$D/homeV/.claude/smartuse/interpreter"
+    mkdir -p "$D/homeV/.claude/smartuse"; printf 'python -I\n' > "$D/homeV/.claude/smartuse/interpreter"
     IHOME="$D/homeV" PATH="$VB:$PATH" iplant "0.7.5 F1 i6 a venv first on PATH with sitecustomize.py and a .pth line in its site folder: bash-guard still denies sudo ls, neither runs" bash-guard "$BGEV" --guard "$CLN_BG"
   else echo "SKIP 0.7.5 F1 i6 venv plant: the planted sitecustomize does not run on a plain venv python here, so the plant is not live"; fi
 else echo "SKIP 0.7.5 F1 i6 venv plant: a venv could not be made without a download ($(head -c 120 "$D/venv.log" 2>/dev/null | tr '\r\n' '  '))"; fi
