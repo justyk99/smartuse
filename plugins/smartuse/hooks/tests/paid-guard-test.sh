@@ -2434,6 +2434,15 @@ except Exception:
       guard 'python render.py --images 1' "$ID1" "$LPW"
       case "$OUT" in *"$GOUT"*) ok "39g $T the paid call is refused at $GL characters: two state folders hold a counter, the reason names /smartuse:doctor";; *) ko "39g $T paid call at $GL: stdout '${OUT:0:400}' stderr '$ERR'";; esac
       [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(ls -A "$FP" | tr '\n' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39g $T nothing was counted: the counter's bytes are unchanged, no marker, the short-key folder holds no counter and no marker" || ko "39g $T state: full $(ls -A "$FP" 2>&1 | tr '\n' ' ') counter '$(cat "$FR" 2>&1)' short '$(ls -A "$PR/$LNAME" 2>&1 | tr '\n' ' ')'"
+      if [ "$GL" = 250 ]; then   # 0.7.4 F2, the doctor half of g1: heartbeat.py --doctor for the same project names the same two folders the refusal is about, 250 characters, and the way out E1e proved (it said "writable" only)
+        DOUT=$(CLAUDE_PROJECT_DIR="$LPW" py "$H/heartbeat.py" --doctor </dev/null); DN=$(printf '%s
+' "$DOUT" | wc -l)
+        case "$DOUT" in *"state folder: FAIL"*"$LKEY (250 characters)"*"$LNAME"*"delete $LKEY with rm -rf in Git Bash"*) [ "$DN" -le 8 ] && ok "39g g1 doctor for the same project names the same two folders, 250 characters and rm -rf in Git Bash ($DN lines)" || ko "39g g1 doctor has $DN lines (limit 8)";; *) ko "39g g1 doctor: $(printf '%s' "$DOUT" | grep 'state folder')";; esac
+        [ "$(cat "$FR" 2>/dev/null)" = '{"yk":1}' ] && [ "$(ls -A "$FP" | tr '
+' ' ')" = "paid-runs.json " ] && [ -z "$(ls -A "$PR/$LNAME" 2>/dev/null)" ] && ok "39g g1 doctor left both folders as they were" || ko "39g g1 doctor touched the folders: full $(ls -A "$FP" 2>&1 | tr '
+' ' ') short '$(ls -A "$PR/$LNAME" 2>&1 | tr '
+' ' ')'"
+      fi
       if [ "$GL" = 250 ]; then   # g3: the miss already happened, a counter in both folders
         mkdir -p "$PR/$LNAME"; printf '{"yk":2}' > "$PR/$LNAME/paid-runs.json"
         guard 'python render.py --images 1' "$ID1" "$LPW"

@@ -898,4 +898,74 @@ if [ "$NT" = 1 ]; then
   fi
 else echo "SKIP F2 h4 doctor, a counter left in a 240-character folder: Windows only"; fi
 
+# ===== 0.7.4 F2: doctor sees the same counter the paid check sees. From 245 characters the counter's own path passes 259 and a plain os.path.isfile says "no" with Windows long paths off; doctor said "writable"
+# (also after the miss, with a counter in both folders) while the paid check, since F1, refuses. heartbeat.py now has the same two functions as bash-guard.py (long_form, counter_in), looked at as text.
+# h5 to h7 are the real Windows layouts (Git Bash mkdir -p and a redirect make the folders, rm -rf takes them away: E1e; `rd` and PowerShell leave a folder that long), Windows with LongPathsEnabled = 0 only
+# (LPON, read above): h5 a 250-character full-key folder holding a counter -> the left-behind line, "(250 characters)", the rm -rf words (E1e), at most 8 lines, both folders as they were; h6 a counter in both
+# folders at 250 -> the two-counters line; h7 the longest folder that can exist (a 255-character key) holding a counter -> the left-behind line. h8, any OS: the two functions are equal text in heartbeat.py and
+# bash-guard.py (so doctor and the refusal cannot drift); m2, a mutation: one character of counter_in changed in a temp copy must make the same comparison BAD.
+if [ "$NT" = 1 ]; then
+  if [ "$LPON" = 1 ]; then echo "SKIP F2 h5 h6 h7 doctor, a counter in a folder past 244 characters: Windows long paths are on here (LongPathsEnabled = 1), such a folder is kept and plain calls see it"
+  elif [ $(( 249 - BL2 )) -lt 20 ]; then echo "SKIP F2 h5 h6 h7 doctor, a counter in a 250-character folder: HOME is $BL2 characters, too long to build it"
+  else
+    pr="$H2/.claude/smartuse/projects"
+    rm -rf "$pr"
+    pw=$(lpath $(( 249 - BL2 ))); fk=$(key "$pw")   # h5: the full-key folder is 250 characters, its counter's path 265
+    mkdir -p "$pr/$fk"; printf '{}' > "$pr/$fk/paid-runs.json"
+    OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+    case "$OUT" in *"state folder: FAIL · the paid counter is in $fk (250 characters)"*"turn Windows long paths back on"*"delete $fk with rm -rf in Git Bash"*"PowerShell and rd cannot remove a folder that long"*)
+        [ "$N" -le 8 ] && echo "PASS F2 h5 doctor, a real 250-character full-key folder holding a counter (long paths off): the left-behind line names (250 characters), both ways out and rm -rf in Git Bash ($N lines)" || { echo "FAIL F2 h5 doctor has $N lines (limit 8): $OUT"; fail=1; };;
+      *) echo "FAIL F2 h5 doctor, a counter left in a 250-character folder: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+    [ "$(ls -A "$pr" | tr '\n' ' ')" = "$fk " ] && [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(cat "$pr/$fk/paid-runs.json")" = "{}" ] && echo "PASS F2 h5 doctor left the folders as they were (no short-key folder made, the counter untouched)" || { echo "FAIL F2 h5 doctor touched the folders: $(ls -A "$pr" "$pr/$fk" | tr '\n' ' ')"; fail=1; }
+    sk=$(py -c "import hashlib, sys; k = sys.argv[1]; sys.stdout.write((k[-40:] + '-' + hashlib.sha1(k.encode()).hexdigest()[:12]).lstrip('-'))" "$fk" </dev/null)   # h6: the same project with a counter in the short-key folder too
+    mkdir -p "$pr/$sk"; printf '{}' > "$pr/$sk/paid-runs.json"
+    OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+    case "$OUT" in *"state folder: FAIL · two state folders hold a paid counter: $fk and $sk: the paid check refuses every paid run until you delete the one that is wrong (its count and receipts go with it)"*)
+        case "$OUT" in *"the paid counter is in"*) echo "FAIL F2 h6 doctor printed the left-behind line beside the two-counters line: $OUT"; fail=1;;
+          *) [ "$N" -le 8 ] && echo "PASS F2 h6 doctor, a counter in both folders at 250 characters (long paths off): the two-counters line names both folders, not the left-behind one ($N lines)" || { echo "FAIL F2 h6 doctor has $N lines (limit 8): $OUT"; fail=1; };; esac;;
+      *) echo "FAIL F2 h6 doctor, a counter in both folders at 250 characters: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+    [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && [ "$(ls -A "$pr/$sk" | tr '\n' ' ')" = "paid-runs.json " ] && echo "PASS F2 h6 doctor left both folders as they were" || { echo "FAIL F2 h6 doctor touched the folders: $(ls -A "$pr/$fk" "$pr/$sk" | tr '\n' ' ')"; fail=1; }
+    rm -rf "$pr"
+    pw=$(lpath 255); fk=$(key "$pw"); FL=$(( BL2 + 1 + 255 ))   # h7: a 255-character key, the longest name a folder can have
+    mkdir -p "$pr/$fk"; printf '{}' > "$pr/$fk/paid-runs.json"
+    OUT=$(HOME="$H2" CLAUDE_PROJECT_DIR="$pw" py "$H/heartbeat.py" --doctor </dev/null); N=$(printf '%s\n' "$OUT" | wc -l)
+    case "$OUT" in *"state folder: FAIL · the paid counter is in $fk ($FL characters)"*"delete $fk with rm -rf in Git Bash"*)
+        [ "${#fk}" = 255 ] && [ "$N" -le 8 ] && echo "PASS F2 h7 doctor, the longest folder that can exist (a 255-character key, $FL characters) holding a counter: the left-behind line ($N lines)" || { echo "FAIL F2 h7 key ${#fk} (wanted 255), $N lines (limit 8): $OUT"; fail=1; };;
+      *) echo "FAIL F2 h7 doctor, a counter left in a 255-character-key folder: $(printf '%s' "$OUT" | grep 'state folder')"; fail=1;; esac
+    [ "$(ls -A "$pr" | tr '\n' ' ')" = "$fk " ] && [ "$(ls -A "$pr/$fk" | tr '\n' ' ')" = "paid-runs.json " ] && echo "PASS F2 h7 doctor left the folder as it was" || { echo "FAIL F2 h7 doctor touched the folders: $(ls -A "$pr" "$pr/$fk" | tr '\n' ' ')"; fail=1; }
+    rm -rf "$pr"
+    [ -z "$(ls -A "$pr" 2>/dev/null)" ] && echo "PASS F2 h5 h6 h7 the long folders were removed the way they were made (rm -rf)" || { echo "FAIL F2 h5 h6 h7 left behind: $(ls -A "$pr" 2>&1 | head -c 300 | tr '\n' ' ')"; fail=1; }
+  fi
+else echo "SKIP F2 h5 h6 h7 doctor, a counter in a folder past 244 characters: Windows only"; fi
+# h8, any OS: long_form and counter_in are the same text in the two files (ast: each FunctionDef's source segment, docstring included). A missing function or a difference is BAD and names the file(s).
+fncmp() { py - "$1" "$2" <<'PY'
+import ast, sys
+def segs(path):
+    src = open(path, encoding="utf-8").read()
+    return {n.name: ast.get_source_segment(src, n) for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in ("long_form", "counter_in")}
+a, b = sys.argv[1], sys.argv[2]
+sa, sb = segs(a), segs(b)
+na, nb = a.replace("\\", "/").rsplit("/", 1)[-1], b.replace("\\", "/").rsplit("/", 1)[-1]
+for f in ("long_form", "counter_in"):
+    if f not in sa:
+        print("BAD %s has no %s" % (na, f)); sys.exit()
+    if f not in sb:
+        print("BAD %s has no %s" % (nb, f)); sys.exit()
+    if sa[f] != sb[f]:
+        d = [(x, y) for x, y in zip(sa[f].splitlines(), sb[f].splitlines()) if x != y]
+        x, y = d[0] if d else ("(the line count differs)", "")
+        print("BAD %s differs between %s and %s: %s has [%s], %s has [%s]" % (f, na, nb, na, x.strip()[:80], nb, y.strip()[:80])); sys.exit()
+print("OK long_form and counter_in are equal text in %s and %s" % (na, nb))
+PY
+}
+CMP=$(fncmp "$H/heartbeat.py" "$H/bash-guard.py")
+case "$CMP" in OK*) echo "PASS F2 h8 long_form and counter_in in heartbeat.py are the same text as in bash-guard.py: $CMP";; *) echo "FAIL F2 h8 long_form / counter_in drifted: $CMP"; fail=1;; esac
+# m2 (mutation): one character of counter_in changed in a temp copy of heartbeat.py (the file name's last letter) goes through the same comparison and must be BAD, naming counter_in and both files
+sed 's/^    p = base + os.sep + name + os.sep + "paid-runs.json"$/    p = base + os.sep + name + os.sep + "paid-runs.jsoN"/' "$H/heartbeat.py" > "$D/hb-mut.py"
+if cmp -s "$H/heartbeat.py" "$D/hb-mut.py"; then echo "FAIL F2 m2 the mutation changed nothing (the line it edits moved)"; fail=1
+else
+  CMPM=$(fncmp "$D/hb-mut.py" "$H/bash-guard.py")
+  case "$CMPM" in "BAD counter_in differs between hb-mut.py and bash-guard.py"*) echo "PASS F2 m2 one character of counter_in changed in a copy is BAD: $CMPM";; *) echo "FAIL F2 m2 a one-character change to counter_in: $CMPM"; fail=1;; esac
+fi
+
 [ $fail = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

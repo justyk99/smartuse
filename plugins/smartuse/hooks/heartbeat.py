@@ -603,6 +603,41 @@ def cli_sdir():
 LONG_FOLDER = "path too long"   # can_write's `why` when the short throwaway works but the 49-character one (the longest claim marker of a paid run) does not (0.7.2 F3)
 LONG_NAME = 49                  # the longest fixed file name a paid run keeps in the state folder: paid.<30-character id>.<8>.done (bash-guard.py, the second script's marker)
 WIN_PATH_MAX = 259              # the longest whole file path on Windows without long-path support (the same as fit_key's)
+LEFT_RM_OVER = 244              # 0.7.4 F2c: a folder longer than this is removed by rm -rf in Git Bash only (E1e: rd and PowerShell leave it)
+
+
+def long_form(p, nt):
+    """The extended-length spelling of an absolute Windows path, by text alone (no file call, never raises). Empty when nt is false or the path has
+    no such spelling: relative, drive-relative, a device path, a share with no name after it, or an empty, "." or ".." part. "/" counts as a
+    backslash; a path already in the long form is returned as it is."""
+    BS = "\\"
+    EXT = BS * 2 + "?" + BS
+    if not nt or not isinstance(p, str):
+        return ""
+    s = p.replace("/", BS)
+    if s.startswith(EXT):
+        return s
+    if s.startswith(BS * 2):
+        rest = s[2:]
+        parts = rest.split(BS)
+        if s.startswith(BS * 2 + "." + BS) or len(parts) < 3 or any(x in ("", ".", "..") for x in parts):
+            return ""
+        return EXT + "UNC" + BS + rest
+    if len(s) >= 3 and s[0].isascii() and s[0].isalpha() and s[1] == ":" and s[2] == BS:
+        if any(x in ("", ".", "..") for x in s[3:].split(BS)):
+            return ""
+        return EXT + s
+    return ""
+
+
+def counter_in(base, name, nt):
+    """True when base/name/paid-runs.json is a file, looked for by its plain path first, then by its long form when it has one (a path past 259
+    characters is not reached by a plain call on Windows with long paths off). Names only."""
+    p = base + os.sep + name + os.sep + "paid-runs.json"
+    if os.path.isfile(p):
+        return True
+    x = long_form(p, nt)
+    return bool(x) and os.path.isfile(x)
 
 
 def two_counters(project, base):
@@ -612,7 +647,7 @@ def two_counters(project, base):
     try:
         full = full_key(project)
         short = fit_key(full, "?" * len(base), os.name == "nt")
-        if short != full and os.path.isfile(os.path.join(base, full, "paid-runs.json")) and os.path.isfile(os.path.join(base, short, "paid-runs.json")):
+        if short != full and counter_in(base, full, os.name == "nt") and counter_in(base, short, os.name == "nt"):
             return full, short
     except Exception:
         pass
@@ -630,7 +665,7 @@ def counter_left(project, sdir):
         full = full_key(project)
         short = fit_key(full, "?" * len(base), os.name == "nt")
         other = short if used == full else full if used == short else ""
-        if other and other != used and os.path.isfile(os.path.join(base, other, "paid-runs.json")) and not os.path.isfile(os.path.join(base, used, "paid-runs.json")):
+        if other and other != used and counter_in(base, other, os.name == "nt") and not counter_in(base, used, os.name == "nt"):
             return other, used
     except Exception:
         pass
@@ -707,7 +742,9 @@ def doctor_lines(sdir, now=None):
         out.append(f"state folder: FAIL · two state folders hold a paid counter: {two[0]} and {two[1]}: the paid check refuses every paid run until you delete the one that is wrong (its count and receipts go with it)")
     left = counter_left(project_dir(), sdir)   # 0.7.3 F2: one counter, in the folder no longer used (never together with the two-counters line)
     if left:
-        out.append(f"state folder: FAIL · the paid counter is in {left[0]} ({len(str(pathlib.Path(sdir).parent / left[0]))} characters), but smartuse now uses {left[1]}, which holds none: the paid check refuses every paid run: turn Windows long paths back on (the count carries on), or delete {left[0]} (the count starts again; its receipts go with it)")
+        n_left = len(str(pathlib.Path(sdir).parent / left[0]))
+        gone = f"delete {left[0]}" + (" with rm -rf in Git Bash, as PowerShell and rd cannot remove a folder that long" if n_left > LEFT_RM_OVER else "")   # 0.7.4 F2c (E1e): past 244 characters only rm -rf in Git Bash took such a folder away
+        out.append(f"state folder: FAIL · the paid counter is in {left[0]} ({n_left} characters), but smartuse now uses {left[1]}, which holds none: the paid check refuses every paid run: turn Windows long paths back on (the count carries on), or {gone} (the count starts again; its receipts go with it)")
     return out
 
 
