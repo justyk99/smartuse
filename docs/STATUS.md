@@ -10,9 +10,9 @@ NEEDS YOU (3): 1 the yes on the 0.7.4 plan (Card A, D-YK30) · 2 a tag only if y
 - 2026-11-25 0.7.2 released: CHANGELOG dated, stale-wording grep clean, bare scan 0 private hits, main fast-forwarded and pushed
 ## Unknowns
 - accepted (SECURITY.md): a delete of the state folder, a copy over the live counter, or a permission change on it resets the paid count: deliberate tampering with the owner's own state
-- low, measured (0.7.3 E1): after `LongPathsEnabled` is switched off, a paid counter in a full-key folder of 245 characters or more is not seen and the count starts again (233 to 244: refused, and doctor names it) → ROADMAP, the paid-reasons batch
-- low, pre-existing: `paid_why` says "path too long" even with long paths on (still a deny) → the paid-reasons batch (ROADMAP)
-- low, flaky under load: watch-test's "push without the file" case gives the watcher 10 s; at lowest priority beside a game it failed once (0.7.3 T2 re-run), alone it passed → widen its --max if it repeats
+- closed in 0.7.4 (F1, F2): a paid counter left in a full-key folder of any length after `LongPathsEnabled` is switched off is refused and named by doctor; a machine where it was already missed is refused until one folder is deleted (SECURITY.md)
+- closed in 0.7.4 (F3): "path too long" is picked by the error the system gave; the counter-side tails no longer name the adapter
+- low, flaky under load: watch-test's "push without the file" case now gives the watcher 30 s (0.7.4 F4, 63 PASS three times at low priority); run.sh's F7 timing case (1 s limit) took 2.16 s once beside a game, 0.13 to 0.16 s in 5 runs alone → widen only if it repeats in a quiet run
 - method M's Stop wait is two-valued (about 0.33 or 0.57 s): not gated → look before 1.0
 - open, documented: some ways of handing a command to another shell are not recognised; an adversarial PowerShell tokenisation hunt not done → on a reported miss
 - later, asked of the maintainer: .smartuse-terms.local on this machine · day-45 check Thu 26 Nov · plugin icon before the 1.0 listing · release page + tag v0.4.0 · README's new lead line · Typefully for LinkedIn
