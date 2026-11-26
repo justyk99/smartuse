@@ -1047,6 +1047,224 @@ for KIND in hooks/hooks.json settings.json skills/status/SKILL.md; do
   T1M=$(t1check "$D/t1m")
   case "$T1M" in BAD*) echo "PASS 0.7.5 F1 t1 mutation: $KIND with python3 in place of the launcher is BAD";; *) echo "FAIL 0.7.5 F1 t1 mutation in $KIND was not caught: $T1M"; fail=1;; esac
 done
+# ===== 0.7.6 F1 (g0-g4): a skill's `allowed-tools` names the commands it runs, never a shell or an interpreter. One helper reads the line in both forms the skills page allows (one line with
+# commas, a YAML list) and prints five lines for a plugin folder: g0 the reader's own five-line self-test, and every real line is valid YAML; g1 no whole shell or interpreter; g2 every launcher
+# rule has the whole shape (the launcher, one script of hooks/, one option; -c would hand anything to Python); g3 every launcher command a skill's text starts is covered by a rule of that same
+# skill (matching as the permissions page says: the text before the first `*` as written, `*` is any text, a trailing ` *` also takes the bare command); g4 each skill's rules equal the table below.
+gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> five lines "OK|BAD g<n> ..."
+  py - "$1" "$2" <<'PY'
+import glob, os, re, sys
+root, hooks = sys.argv[1], sys.argv[2]
+LAUNCH = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh"'
+INTERP = set("bash sh zsh dash python python3 py node perl ruby pwsh powershell cmd env xargs eval exec".split())
+SHAPE = re.compile(r'^bash "\$\{CLAUDE_PLUGIN_ROOT\}/hooks/py\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}/hooks/([a-z][a-z-]*\.py)" (--[a-z][a-z-]*(?: (?:--[a-z][a-z-]*|[A-Za-z0-9][A-Za-z0-9._-]*))*)( \*)?$')
+L = '"${CLAUDE_PLUGIN_ROOT}/hooks/'
+# g4's table: the launcher rules each skill is granted, as "script option [literal words] [*]" (the fix's table; 0.7.6 plan F1)
+TABLE = {
+    "doctor": ["heartbeat.py --doctor"],
+    "ledger": ["ledger.py --report *"],
+    "receipts": ["ledger.py --receipts *"],
+    "status": ["heartbeat.py --line"],
+    "living-docs": ["ledger.py --state-dir --create", "ledger.py --put pending.json *"],
+    "make-prompt": ["ledger.py --state-dir --create", "ledger.py --put pending.json *", "watch.py --git origin *"],
+    "run-plan": ["ledger.py --state-dir --create", "ledger.py --put routing.json *", "ledger.py --put pending.json *", "ledger.py --unit *", "ledger.py --run *", "ledger.py --get routing.json", "ledger.py --receipts *"],
+    "reply-style": [],
+}
+def frontmatter(text):
+    m = re.match(r"---\r?\n(.*?)\r?\n---", text, re.S)
+    return m.group(1) if m else ""
+def split_commas(s):
+    out, depth, cur = [], 0, ""
+    for ch in s:
+        depth += (ch == "(") - (ch == ")")
+        if ch == "," and depth == 0:
+            out.append(cur.strip()); cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+def unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == "'" and v[-1] == "'":
+        return v[1:-1].replace("''", "'")
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        return v[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return v
+def raw_values(fm):  # the text after `allowed-tools:` (one line) or the list items under it; None when the key is absent
+    lines = fm.splitlines()
+    for i, l in enumerate(lines):
+        m = re.match(r"allowed-tools:[ \t]*(.*)$", l)
+        if not m:
+            continue
+        if m.group(1).strip():
+            return "line", [m.group(1).strip()]
+        items = []
+        for l2 in lines[i + 1:]:
+            m2 = re.match(r"[ \t]+-[ \t]+(.*)$", l2)
+            if m2:
+                items.append(m2.group(1).strip())
+            elif l2.strip():
+                break
+        return "list", items
+    return None, None
+def rules_of(fm):
+    kind, vals = raw_values(fm)
+    if kind is None:
+        return None
+    if kind == "line":
+        return [unquote(x) for x in split_commas(vals[0])]
+    return [unquote(x) for x in vals]
+def yaml_ok(fm):  # a scalar must be a plain one without ": " or " #", or quoted and closed (the one-line comma form is read by Claude Code, but only a quoted item is valid YAML around "Bash(: ...)")
+    kind, vals = raw_values(fm)
+    for v in vals or []:
+        if v[:1] == "'":
+            if len(v) < 2 or v[-1] != "'" or "'" in v[1:-1].replace("''", ""):
+                return False
+        elif v[:1] == '"':
+            if len(v) < 2 or v[-1] != '"':
+                return False
+        elif ": " in v or " #" in v or v.endswith(":"):
+            return False
+    return True
+def covers(inner, cmd):
+    star = inner.endswith(" *")
+    core = inner[:-2] if star else inner
+    rx = "^" + ".*".join(re.escape(p) for p in core.split("*")) + ("(?: .*)?" if star else "") + "$"
+    return re.match(rx, cmd, re.S) is not None
+def tool_inner(rule):
+    m = re.match(r"([A-Za-z]+)(?:\((.*)\))?$", rule, re.S)
+    return (m.group(1), m.group(2)) if m else (rule, None)
+def launcher_cmds(text):  # (line, command, is a ! line): every `!` line and every code span or code line that begins with the launcher; cut at " || "
+    out = []
+    for ln, line in enumerate(text.splitlines(), 1):
+        spans = [m.group(1) for m in re.finditer(r"!`([^`]*)`", line)]
+        rest = re.sub(r"!`[^`]*`", " ", line)
+        spans += [m.group(1) for m in re.finditer(r"`([^`]*)`", rest)]
+        if rest.strip().startswith(LAUNCH + " "):
+            spans.append(rest.strip())
+        for s in spans:
+            s = s.strip()
+            if s.startswith(LAUNCH + " "):
+                out.append((ln, s.split(" || ")[0].strip()))
+    return out
+skills = {}
+for f in sorted(glob.glob(os.path.join(root, "skills", "*", "SKILL.md"))):
+    name = f.replace("\\", "/").rsplit("/", 2)[-2]
+    t = open(f, encoding="utf-8").read()
+    skills[name] = (frontmatter(t), t)
+res = {}
+# g0
+SELF = [
+    ("allowed-tools: Bash(bash *), Bash(: smartuse-doctor-canary), Read", ["Bash(bash *)", "Bash(: smartuse-doctor-canary)", "Read"], False),
+    ("name: x\nallowed-tools:\n  - 'Bash(bash " + L + "py.sh\" " + L + "heartbeat.py\" --line)'\n  - 'Bash(: smartuse-doctor-canary)'\n  - 'it''s'", ["Bash(bash " + L + "py.sh\" " + L + "heartbeat.py\" --line)", "Bash(: smartuse-doctor-canary)", "it's"], True),
+    ("allowed-tools:\n  - \"Bash(echo *)\"\n  - Read\nargument-hint: x", ["Bash(echo *)", "Read"], True),
+    ("allowed-tools:\n  - Bash(: smartuse-doctor-canary)", ["Bash(: smartuse-doctor-canary)"], False),
+    ("name: x\ndescription: no grant", None, True),
+]
+bad = []
+for i, (fm, want, ok) in enumerate(SELF, 1):
+    if rules_of(fm) != want:
+        bad.append("self-test %d read %r" % (i, rules_of(fm)))
+    if yaml_ok(fm) != ok:
+        bad.append("self-test %d yaml_ok is %s" % (i, yaml_ok(fm)))
+for name, (fm, t) in skills.items():
+    if rules_of(fm) is None:
+        bad.append("%s has no allowed-tools" % name)
+    elif not yaml_ok(fm):
+        bad.append("%s: allowed-tools is not valid YAML" % name)
+if len(skills) < 8:
+    bad.append("only %d skills found" % len(skills))
+res["g0"] = ("BAD g0 " + "; ".join(bad)) if bad else "OK g0 the reader returns the right rules for its five self-test lines and every one of the %d skills' lines is valid YAML" % len(skills)
+# g1
+bad = []
+for name, (fm, t) in skills.items():
+    for r in rules_of(fm) or []:
+        tool, inner = tool_inner(r)
+        if tool not in ("Bash", "PowerShell"):
+            continue
+        if inner is None or inner.strip() in ("", "*"):
+            bad.append("%s: %s" % (name, r)); continue
+        wm = re.match(r"([A-Za-z0-9_.\\/-]+)(.*)$", inner, re.S)
+        w = re.sub(r"\.exe$", "", wm.group(1).lower().replace("\\", "/").rsplit("/", 1)[-1]) if wm else ""
+        tail = wm.group(2) if wm else ""
+        if w in INTERP and (tail.strip().startswith("*") or tail.strip() == ":*" or (w == "bash" and not (tool == "Bash" and inner.startswith(LAUNCH + " ")))):
+            bad.append("%s: %s" % (name, r))
+res["g1"] = ("BAD g1 a whole shell or interpreter is granted in %d place(s): %s" % (len(bad), "; ".join(bad))) if bad else "OK g1 no skill grants a whole shell or interpreter"
+# g2
+bad, n = [], 0
+for name, (fm, t) in skills.items():
+    for r in rules_of(fm) or []:
+        tool, inner = tool_inner(r)
+        if tool != "Bash" or inner is None or not inner.startswith("bash "):
+            continue
+        n += 1
+        m = SHAPE.match(inner)
+        if not m:
+            bad.append("%s: %s" % (name, r)); continue
+        if m.group(1) == "until-done.py" or not os.path.isfile(os.path.join(hooks, m.group(1))) or "--recompute" in inner:
+            bad.append("%s: %s" % (name, r))
+res["g2"] = ("BAD g2 a launcher rule lacks the whole shape (launcher, one script, one option) or names -c, until-done.py or --recompute: " + "; ".join(bad)) if bad or n == 0 else "OK g2 %d launcher rules, each with the launcher, one script of hooks/ and one option" % n
+# g3
+bad, n = [], 0
+for name, (fm, t) in skills.items():
+    inners = [tool_inner(r)[1] for r in rules_of(fm) or [] if tool_inner(r)[0] == "Bash" and tool_inner(r)[1] is not None]
+    for ln, c in launcher_cmds(t):
+        n += 1
+        forms = {c.replace("$ARGUMENTS", "5"), c.replace(" $ARGUMENTS", "")}
+        hit = all(any(covers(i, f) for i in inners) for f in forms)
+        if "until-done.py" in c:
+            if any(covers(i, f) for i in inners for f in forms):
+                bad.append("%s:%d until-done.py is covered by a rule: %s" % (name, ln, c[:100]))
+        elif not hit:
+            bad.append("%s:%d not covered: %s" % (name, ln, c[len(LAUNCH):][:90]))
+res["g3"] = ("BAD g3 " + "; ".join(bad)) if bad or n == 0 else "OK g3 %d launcher commands in the skills' text, each covered by a rule of its own skill (until-done.py --trust by none)" % n
+# g4
+bad = []
+for name, (fm, t) in skills.items():
+    got = sorted(SHAPE.match(tool_inner(r)[1]).group(1) + " " + SHAPE.match(tool_inner(r)[1]).group(2) + (SHAPE.match(tool_inner(r)[1]).group(3) or "")
+                 for r in rules_of(fm) or [] if tool_inner(r)[0] == "Bash" and (tool_inner(r)[1] or "").startswith("bash ") and SHAPE.match(tool_inner(r)[1]))
+    if name not in TABLE:
+        bad.append("%s is not in the table" % name)
+    elif got != sorted(TABLE[name]):
+        bad.append("%s: granted %s, table %s" % (name, got, sorted(TABLE[name])))
+res["g4"] = ("BAD g4 " + "; ".join(bad)) if bad else "OK g4 each skill's launcher rules equal the table (%d rules in %d skills)" % (sum(len(v) for v in TABLE.values()), len(TABLE))
+for k in ("g0", "g1", "g2", "g3", "g4"):
+    print(res[k])
+PY
+}
+gmut() { # $1 = m4|m5|m6|m7, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
+  py - "$1" "$2" <<'PY'
+import re, sys
+name, p = sys.argv[1], sys.argv[2]
+t = o = open(p, encoding="utf-8", newline="").read()
+LA = "'Bash(bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" "
+def swap(t, new):
+    return re.sub(r"^allowed-tools:[^\n]*\n(?:[ \t]+-[^\n]*\n)*", lambda m: new, t, count=1, flags=re.M)
+if name == "m4":    # ledger: the rule turned back to the whole shell
+    t = swap(t, "allowed-tools: Bash(bash *)\n")
+elif name == "m5":  # receipts: the ! line runs --recompute
+    t = t.replace('ledger.py" --receipts $ARGUMENTS', 'ledger.py" --recompute $ARGUMENTS', 1)
+elif name == "m6":  # run-plan: a launcher-only rule added
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - " + LA + "*)'\n", t, count=1, flags=re.M)
+elif name == "m7":  # status: --json granted
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - " + LA + "\"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\" --json)'\n", t, count=1, flags=re.M)
+open(p, "w", encoding="utf-8", newline="").write(t)
+print("CHANGED" if t != o else "UNCHANGED")
+PY
+}
+GR=$(gcheck "$H/.." "$H")
+for G in g0 g1 g2 g3 g4; do
+  GL=$(printf '%s\n' "$GR" | grep "^[A-Z]* $G " || true)
+  case "$GL" in "OK $G "*) echo "PASS 0.7.6 F1 $G ${GL#OK $G }";; *) echo "FAIL 0.7.6 F1 $G ${GL:-no output from the helper: $GR}"; fail=1;; esac
+done
+for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4"; do
+  read -r MN MS MG <<< "$MUT"
+  rm -rf "$D/g1m"; mkdir -p "$D/g1m"; cp -r "$H/../skills" "$D/g1m/"
+  if [ "$(gmut "$MN" "$D/g1m/skills/$MS/SKILL.md")" != "CHANGED" ]; then echo "FAIL 0.7.6 F1 $MN the mutation changed nothing (the text it edits moved)"; fail=1; continue; fi
+  GM=$(gcheck "$D/g1m" "$H" | grep -E "^BAD $MG (.* )?$MS:" || true)
+  case "$GM" in "BAD $MG "*) echo "PASS 0.7.6 F1 $MN a copy of $MS mutated is BAD in $MG: ${GM:0:150}";; *) echo "FAIL 0.7.6 F1 $MN the mutation of $MS was not caught by $MG"; fail=1;; esac
+done
 # t0 (an INFO line, not a check): the median of five Python starts as today and five isolated, interleaved, on this machine. It gives each CI job's number.
 T0=$(py - "$REAL" <<'PY' 2>/dev/null
 import os, statistics, subprocess, sys, time

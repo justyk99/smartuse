@@ -3,7 +3,29 @@ name: make-prompt
 description: Turn a rough one-line ask into a top-tier kickoff prompt with the LEAST effort from the user — Claude greps the ground first (repo, memory, past tasks, owners, constraints), asks a few BASIC questions with clickable options (option 1 = Claude's best guess, "I don't know" always allowed), writes the prompt + task folder + a 5-line human summary, then WAITS for "go". Modes — `/make-prompt <ask>` (interview, ~3 min of the user's time) · `/make-prompt quick <ask>` (no questions, every slot assumed and marked) · add `dry` (scratch folder only). Not for one-file fixes, questions, or chat.
 when_to_use: the user types /make-prompt, says "make me a prompt", "write the prompt", "kickoff", "brief me", pastes a thin one-line ask for work that takes more than a day, or starts a feature / bug hunt / design question from one line — OFFER it in one line ("want /make-prompt?"), never force it.
 argument-hint: "[quick] [dry] <one-line ask>"
-allowed-tools: Bash(bash *), Bash(date *), Bash(pwd), Bash(git *), Bash(svn info *), Bash(svn status *), Bash(ls *), Bash(command -v *), Bash(node -v*), Bash(grep *), Bash(cut *), Bash(tr *), Bash(wc *), Bash(head *), Read, Grep, Glob, Agent, AskUserQuestion, Write
+allowed-tools:
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --put pending.json *)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/watch.py" --git origin *)'
+  - 'Bash(date *)'
+  - 'Bash(pwd)'
+  - 'Bash(git *)'
+  - 'Bash(svn info *)'
+  - 'Bash(svn status *)'
+  - 'Bash(ls *)'
+  - 'Bash(command -v *)'
+  - 'Bash(node -v*)'
+  - 'Bash(grep *)'
+  - 'Bash(cut *)'
+  - 'Bash(tr *)'
+  - 'Bash(wc *)'
+  - 'Bash(head *)'
+  - Read
+  - Grep
+  - Glob
+  - Agent
+  - AskUserQuestion
+  - Write
 ---
 
 

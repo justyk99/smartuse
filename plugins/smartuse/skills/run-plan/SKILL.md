@@ -2,7 +2,30 @@
 name: run-plan
 description: Execute a saved kickoff (the task.md that make-prompt wrote) with a tier plan and receipts. First checks that this machine has each unit's tools and input files (a unit that does not is `needs-machine`, and a plan whose work is elsewhere stops with "run this plan on <machine>"). The session model tags each deliverable judgment / build / mechanical / command / verify, shows a routing table as a DRY RUN (unit → tier → model → why → turn budget) and waits for "go"; then runs units in the FOREGROUND through the Agent tool with the model per tier (never above the session's model; a `command` unit is one shell command run as a background task, no model), writes a receipt per unit, verifies every delegated result with a fresh agent, and closes with a receipts summary. Dial: --routing off | safe (default) | aggressive. `--until-done` = the lazy-CEO loop: no "go" between batches, the Stop gate refuses to end the turn while units or the repo check are unfinished, stops only for a real human question, a double failure, a rule gate or the cap. Use when the user says "run the plan", "execute the kickoff", "start deliverable 1", or types the run-plan line that make-prompt's hand-off printed.
 argument-hint: "<task folder or task.md> [--routing off|safe|aggressive] [--units N] [--yes] [--until-done]"
-allowed-tools: Read, Grep, Glob, Agent, Write, Edit, Bash(bash *), Bash(ls *), Bash(cat *), Bash(date *), Bash(mkdir *), Bash(command -v *), Bash(test *), Bash(git diff *), Bash(git status *), Bash(svn diff *), Bash(svn status *)
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Agent
+  - Write
+  - Edit
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --put routing.json *)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --put pending.json *)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --unit *)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --run *)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --get routing.json)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --receipts *)'
+  - 'Bash(ls *)'
+  - 'Bash(cat *)'
+  - 'Bash(date *)'
+  - 'Bash(mkdir *)'
+  - 'Bash(command -v *)'
+  - 'Bash(test *)'
+  - 'Bash(git diff *)'
+  - 'Bash(git status *)'
+  - 'Bash(svn diff *)'
+  - 'Bash(svn status *)'
 disable-model-invocation: true
 ---
 

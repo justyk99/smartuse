@@ -3,7 +3,20 @@ name: living-docs
 description: Update a feature's DEV.md (developers) + USER.md (operators) after a commit landed — called after a commit lands (wire it into your commit procedure), or by the user as `/living-docs <task-folder>`, `/living-docs fix "<correction>"`, `/living-docs publish <feature>`. Reads task.md + the commit diff only, rewrites AUTO-MANAGED sections only, never records behaviour that is not in the committed diff. Opt-in per repo (needs a docs root). Invoke it (Skill tool, args `<task-folder> <commit id>`) right after a commit lands and the task folder is closed — it forks to a cheap model, so do not wait on it.
 context: fork
 model: sonnet
-allowed-tools: Read, Grep, Glob, Edit, Write, Bash(bash *), Bash(date *), Bash(git show *), Bash(git log *), Bash(git diff *), Bash(svn diff *), Bash(svn log *)
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Edit
+  - Write
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create)'
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --put pending.json *)'
+  - 'Bash(date *)'
+  - 'Bash(git show *)'
+  - 'Bash(git log *)'
+  - 'Bash(git diff *)'
+  - 'Bash(svn diff *)'
+  - 'Bash(svn log *)'
 ---
 
 # living-docs — keep the DEV + USER doc of a feature current (v1.0, 2026-10-15)
