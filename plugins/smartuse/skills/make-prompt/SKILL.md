@@ -17,6 +17,7 @@ allowed-tools:
   - 'Bash(svn status *)'
   - 'Bash(ls *)'
   - 'Bash(command -v *)'
+  - 'Bash(echo *)'
   - 'Bash(node -v*)'
   - 'Bash(grep *)'
   - 'Bash(cut *)'
@@ -57,10 +58,10 @@ Without the file: git → `.task/ACTIVE` / `.task/COMPLETED` / `docs/features` (
 
 ## Live context (injected when the skill is invoked — do not re-run these)
 - Today: !`date +%F || true` · Invoked at: !`date -u +%FT%TZ || true` · cwd: !`pwd || true`
-- VCS: !`git branch --show-current 2>/dev/null || svn info --show-item revision 2>/dev/null || echo none` · dirty files: !`{ git status --short 2>/dev/null || svn status 2>/dev/null || true; } | wc -l`
-- Open task folders: !`{ ls -d _SESSIONS/*/ .task/ACTIVE/*/ .task/PARKED/*/ 2>/dev/null || true; } | grep -v -i "archive\|template" | head -12 | tr '\n' ' ' || true`
-- Docs root: !`{ ls -d _KNOWLEDGE_BASE/features docs/features 2>/dev/null || echo none; } | tr '\n' ' ' || true`
-- Recent commits: !`{ git log --oneline -6 2>/dev/null || echo "(svn: run svn log -q -l 6 with the trust flags if needed)"; } | cut -c1-70 | tr '\n' ';' || true`
+- VCS: !`git branch --show-current 2>/dev/null || svn info --show-item revision 2>/dev/null || echo none` · dirty files, git: !`git status --short 2>/dev/null | wc -l` · svn: !`svn status 2>/dev/null | wc -l` (the VCS in use shows its count; the other shows 0)
+- Open task folders (empty = none): !`ls -d _SESSIONS/*/ .task/ACTIVE/*/ .task/PARKED/*/ 2>/dev/null | grep -v -i "archive\|template" | head -12 | tr '\n' ' ' || true`
+- Docs root (empty = none): !`ls -d _KNOWLEDGE_BASE/features docs/features 2>/dev/null | tr '\n' ' ' || true`
+- Recent commits (git only; empty = none, or an svn checkout: run svn log -q -l 6 with the trust flags if needed): !`git log --oneline -6 2>/dev/null | cut -c1-70 | tr '\n' ';' || true`
 - On this PC: cloudflared=!`command -v cloudflared >/dev/null 2>&1 && echo yes || echo no` pnpm=!`command -v pnpm >/dev/null 2>&1 && echo yes || echo no` node=!`node -v 2>/dev/null || echo no`
 - Arguments: `$ARGUMENTS` — leading words `quick` and/or `dry` are modes; the rest is the ask.
 - State dir (where pending.json / routing.json / receipts.jsonl go): !`bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create || true`

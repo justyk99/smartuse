@@ -1053,8 +1053,9 @@ done
 # launcher shape or a version query; g2 every rule that starts `bash ` or names py.sh or a hooks/*.py has the whole shape (the launcher, one script of hooks/, one option; -c would hand anything
 # to Python); g3 every launcher command a skill's text starts is covered by a rule of that same skill (matching as the permissions page says: the text before the first `*` as written, `*` is any
 # text, a trailing ` *` also takes the bare command); g4 each skill's launcher rules equal the table below; g5 no git rule is wider than one read subcommand (never `git *`, `git -c`, `git config`,
-# `git alias`; `git branch` only as --show-current) and every git command on a `!` line is covered by a rule of its skill (R1 fix round).
-gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> six lines "OK|BAD g<n> ..."
+# `git alias`; `git branch` only as --show-current) and every git command on a `!` line is covered by a rule of its skill (R1 fix round); g6 no `!` command holds a brace group, (( )), $( ) or a
+# ( ) subshell (Claude Code cannot check those before they run and aborts the skill at load; make-prompt did, 0.7.5 and 0.7.6).
+gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> seven lines "OK|BAD g<n> ..."
   py - "$1" "$2" <<'PY'
 import glob, os, re, sys
 root, hooks = sys.argv[1], sys.argv[2]
@@ -1323,11 +1324,48 @@ for name, (fm, t) in skills.items():
                 if not any(covers(i, seg.strip()) for i in inners):
                     bad.append("%s:%d `!` line runs `%s`, no rule covers it" % (name, ln, seg.strip()[:60]))
 res["g5"] = ("BAD g5 " + "; ".join(bad)) if bad or n == 0 or nbang == 0 else "OK g5 %d git rules, none wider than one read subcommand (branch only as --show-current; never git *, -c, config, alias), and all %d git commands on `!` lines are covered by a rule of their skill" % (n, nbang)
-for k in ("g0", "g1", "g2", "g3", "g4", "g5"):
+# g6: Claude Code checks every `!` command before it runs and aborts the whole skill at load on a group it cannot check (0.7.6 live run, default mode: "A group in braces or double parentheses in this
+# command can't be checked before it runs"). So no `!` command (a one-line `!` span or a ```! fenced block) holds a brace group `{ ...; }`, `((`, `$(` or a `( ... )` subshell. Quoted text is literal
+# (`echo "(x)"` is fine), `${VAR}` is a variable, not a group. Plain pipes and `||` need none of these.
+def g6_bad(span):  # why a `!` command cannot be checked before it runs, or None
+    if "$(" in re.sub(r"'[^']*'", "''", span):  # $( runs even inside double quotes; only single quotes make it literal
+        return "$( )"
+    u = re.sub(r"'[^']*'|\"(?:\\.|[^\"\\])*\"", "''", span)  # quoted text is literal for the group and paren checks: drop it
+    if re.search(r"(?:^|[\s;&|(])\{(?:\s|$)", u) or re.search(r"(?:^|[\s;&|)])\}(?:\s|$)", u):
+        return "a brace group { ...; }"
+    if "((" in u:
+        return "(( ))"
+    if "(" in u or ")" in u:
+        return "a ( ) subshell"
+    return None
+G6_MUST_BE_BAD = ["{ git status --short 2>/dev/null || svn status 2>/dev/null || true; } | wc -l", "echo $(date)", "echo \"$(date)\"", "(cd x && ls)", "echo $((1+2))", "{ ls; }", "ls | { head -1; }",
+                  "cat <(ls)", "ls; { head -1; }", "x || (y)"]
+G6_MUST_BE_OK = ["git status --short 2>/dev/null | wc -l", "svn status 2>/dev/null | wc -l", "ls -d _SESSIONS/*/ .task/ACTIVE/*/ 2>/dev/null | grep -v -i \"archive\\|template\" | head -12 | tr '\\n' ' ' || true",
+                 "git log --oneline -6 2>/dev/null | cut -c1-70 | tr '\\n' ';' || true", "echo \"${CLAUDE_PLUGIN_ROOT}\"", "echo \"(x) {y} ((z))\"", "echo '$(x) { }'",
+                 "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\" --state-dir --create || true",
+                 "grep -ho '\"outputStyle\": *\"[^\"]*\"' a.json 2>/dev/null | head -1 || echo '\"outputStyle\": \"Default\"'", "command -v pnpm >/dev/null 2>&1 && echo yes || echo no"]
+bad = ["self-test: %r is not flagged" % x for x in G6_MUST_BE_BAD if g6_bad(x) is None] + ["self-test: %r is flagged (%s)" % (x, g6_bad(x)) for x in G6_MUST_BE_OK if g6_bad(x) is not None]
+n = 0
+for name, (fm, t) in skills.items():
+    spans, fence = [], False
+    for ln, line in enumerate(t.splitlines(), 1):
+        if line.strip().startswith("```"):
+            fence = (not fence) and line.strip().startswith("```!")
+            continue
+        if fence:
+            spans.append((ln, line))
+        spans += [(ln, m.group(1)) for m in re.finditer(r"!`([^`]*)`", line)]
+    for ln, s in spans:
+        n += 1
+        why = g6_bad(s)
+        if why:
+            bad.append("%s:%d `!` line holds %s: %s" % (name, ln, why, s.strip()[:70]))
+res["g6"] = ("BAD g6 " + "; ".join(bad)) if bad or n == 0 else "OK g6 %d `!` commands in the skills, none with a brace group, (( )), $( ) or a ( ) subshell (Claude Code cannot check those before they run and aborts the skill at load); %d forms self-tested" % (n, len(G6_MUST_BE_BAD) + len(G6_MUST_BE_OK))
+for k in ("g0", "g1", "g2", "g3", "g4", "g5", "g6"):
     print(res[k])
 PY
 }
-gmut() { # $1 = m4..m12, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
+gmut() { # $1 = m4..m13, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
   py - "$1" "$2" <<'PY'
 import re, sys
 name, p = sys.argv[1], sys.argv[2]
@@ -1354,16 +1392,19 @@ elif name == "m11":  # status: Bash(sh -c *) added (R1 finding 3)
     t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - 'Bash(sh -c *)'\n", t, count=1, flags=re.M)
 elif name == "m12":  # receipts: the launcher run through sh (R1 finding 3)
     t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - 'Bash(sh \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *)'\n", t, count=1, flags=re.M)
+elif name == "m13":  # make-prompt: the VCS line put back as it was in 0.7.5 and 0.7.6, with the `{ ...; } | wc -l` group that aborted the skill at load
+    OLD = "- VCS: !`git branch --show-current 2>/dev/null || svn info --show-item revision 2>/dev/null || echo none` · dirty files: !`{ git status --short 2>/dev/null || svn status 2>/dev/null || true; } | wc -l`"
+    t = re.sub(r"^- VCS:[^\n]*$", lambda m: OLD, t, count=1, flags=re.M)
 open(p, "w", encoding="utf-8", newline="").write(t)
 print("CHANGED" if t != o else "UNCHANGED")
 PY
 }
 GR=$(gcheck "$H/.." "$H")
-for G in g0 g1 g2 g3 g4 g5; do
+for G in g0 g1 g2 g3 g4 g5 g6; do
   GL=$(printf '%s\n' "$GR" | grep "^[A-Z]* $G " || true)
   case "$GL" in "OK $G "*) echo "PASS 0.7.6 F1 $G ${GL#OK $G }";; *) echo "FAIL 0.7.6 F1 $G ${GL:-no output from the helper: $GR}"; fail=1;; esac
 done
-for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4" "m8 reply-style g1" "m9 status g1" "m10 make-prompt g5" "m11 status g1" "m12 receipts g1"; do
+for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4" "m8 reply-style g1" "m9 status g1" "m10 make-prompt g5" "m11 status g1" "m12 receipts g1" "m13 make-prompt g6"; do
   read -r MN MS MG <<< "$MUT"
   rm -rf "$D/g1m"; mkdir -p "$D/g1m"; cp -r "$H/../skills" "$D/g1m/"
   if [ "$(gmut "$MN" "$D/g1m/skills/$MS/SKILL.md")" != "CHANGED" ]; then echo "FAIL 0.7.6 F1 $MN the mutation changed nothing (the text it edits moved)"; fail=1; continue; fi
