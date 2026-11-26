@@ -695,6 +695,16 @@ doc() { CLAUDE_PROJECT_DIR="$1" py "$H/heartbeat.py" --doctor; }   # $1 = the pr
 ev "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"d1\",\"source\":\"startup\",$C}"; ev "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"d1\",$C}"
 OUT=$(doc "$PW"); N=$(printf '%s\n' "$OUT" | wc -l)
 case "$OUT" in *"python: "*"plugin: smartuse "*"hooks registered: "*"SessionStart"*"heartbeat: live · last event "*"s ago"*"level: light · rules off: none"*"state folder: writable"*) [ "$N" -le 8 ] && echo "PASS F7 --doctor, a fresh event: python, plugin, hooks, heartbeat live, level light, state folder writable ($N lines)" || { echo "FAIL F7 --doctor has $N lines (limit 8): $OUT"; fail=1; };; *) echo "FAIL F7 --doctor, a fresh event: $OUT"; fail=1;; esac
+# --- 0.7.5 F4 (D-YK41): the python: line says how Python started, a tail read from sys.flags. d1: through the launcher (-I -S) the line ends `· isolated`. d2: the same file started
+# by the real interpreter with no flag ends with the not-isolated tail, and is still no FAIL (the hooks run). d3 (pins): at most eight lines, the F7 order check above passes unedited on both, no FAIL on the line.
+PL1=$(printf '%s\n' "$OUT" | head -1); PL1=${PL1%$'\r'}
+case "$PL1" in "python: FAIL"*) echo "FAIL F4 d1 doctor's python line is a FAIL through the launcher: $PL1"; fail=1;; *" · isolated") echo "PASS F4 d1 doctor through the launcher: the python line ends '· isolated' ($PL1)";; *) echo "FAIL F4 d1 doctor through the launcher: the python line has no '· isolated' tail: $PL1"; fail=1;; esac
+OUT2=$(CLAUDE_PROJECT_DIR="$PW" PYTHONUTF8=1 "$REAL" "$H/heartbeat.py" --doctor </dev/null); N2=$(printf '%s\n' "$OUT2" | wc -l)
+PL2=$(printf '%s\n' "$OUT2" | head -1); PL2=${PL2%$'\r'}
+case "$PL2" in *" · not isolated (this Python did not start with -I -S: its PYTHON* variables and site folders are read; the hooks still run)") echo "PASS F4 d2 doctor, started with no flag: the python line ends with the not-isolated tail";; *) echo "FAIL F4 d2 doctor, started with no flag: the python line has no not-isolated tail: $PL2"; fail=1;; esac
+case "$OUT2" in *"python: "*"plugin: smartuse "*"hooks registered: "*"SessionStart"*"heartbeat: live · last event "*"s ago"*"level: light · rules off: none"*"state folder: writable"*) ok3=1;; *) ok3=0;; esac
+case "$PL1$PL2" in *"FAIL"*) ok3=0;; esac
+[ "$ok3" = 1 ] && [ "$N" -le 8 ] && [ "$N2" -le 8 ] && echo "PASS F4 d3 doctor, both starts: at most eight lines ($N, $N2), the F7 order check passes unedited, no FAIL on the python line" || { echo "FAIL F4 d3 doctor pins (lines $N and $N2, order ok=$ok3): $OUT2"; fail=1; }
 py -c "import json,sys,datetime; p=sys.argv[1]; s=json.load(open(p)); s['updated']=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'); json.dump(s,open(p,'w'))" "$S"
 OUT=$(doc "$PW")
 case "$OUT" in *"heartbeat: live"*) echo "FAIL F7 --doctor, an event an hour old must not read live: $OUT"; fail=1;; *"heartbeat: FAIL · last event 1h0"*"ago"*"restart Claude Code"*) echo "PASS F7 --doctor, a stale event (1h): FAIL with its age and the fix";; *) echo "FAIL F7 --doctor, a stale event: $OUT"; fail=1;; esac

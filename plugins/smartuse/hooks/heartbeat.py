@@ -705,7 +705,8 @@ def doctor_lines(sdir, now=None):
     now = now or utcnow()
     out = []
     v = sys.version_info
-    out.append(f"python: {v[0]}.{v[1]}.{v[2]} · {sys.executable}" if v >= (3, 9)
+    iso = sys.flags.isolated and sys.flags.no_site   # 0.7.5 F4 (D-YK41): how py.sh started this Python; a tail, never a FAIL (the hooks run either way)
+    out.append(f"python: {v[0]}.{v[1]}.{v[2]} · {sys.executable} · " + ("isolated" if iso else "not isolated (this Python did not start with -I -S: its PYTHON* variables and site folders are read; the hooks still run)") if v >= (3, 9)
                else f"python: FAIL · {v[0]}.{v[1]}.{v[2]} is older than 3.9: install Python 3.9 or newer and restart Claude Code")
     here = pathlib.Path(__file__).resolve().parent
     meta = read_dict(here.parent / ".claude-plugin" / "plugin.json")
