@@ -190,12 +190,12 @@ The hooks are small Python files that import no network library; this is their w
 
 | Hook | Reads |
 |---|---|
-| `heartbeat` | its own state folder: `status.json`, `routing.json`, `wait.json`. Of an event it keeps the tool name, ids, agent type and times, never a tool's arguments, file contents or prompts. `--doctor` also reads the plugin's `plugin.json` and `hooks.json` |
+| `heartbeat` | its own state folder: `status.json`, `routing.json`, `wait.json`. Of an event it keeps the tool name, ids, agent type and times, never a tool's arguments, file contents or prompts. `--doctor` also reads the plugin's `plugin.json` and `hooks.json`, and looks for the name `paid-runs.json` in the project's two possible state folders (never its content) |
 | `ledger` | the session transcript and the session's agent transcripts (to sum token usage since the skill's `started_at`), `pending.json`, `routing.json` |
 | `until-done` | `routing.json`; the `check:` line of the adapter; on Linux and macOS `/etc/smartuse/trusted-checks.json` and the pinned script |
 | `wait-gate` | the session transcript (one pass); `wait_gate:` in the adapter; `.git/HEAD` for the branch name |
 | `recall` | the session transcript (your last prompts, the compaction records); `sources:`, `publish:`, `publish_tools:` and `handoff:` in the adapter; the first 15 lines of the `handoff:` file; `.git/logs/HEAD` for the time of the last commit |
-| `bash-guard` | the command's text; the adapter; the session transcript (Reads since the last compaction for the fresh-source gate, the last 4 MB for a typed `paid go:`); the names of the files `sources:` lists (never their content); `paid-runs.json`; and, for the paid check (on with a paid line in the adapter, or in Strict), the first 256 KB of a script a command runs and the folders the command names |
+| `bash-guard` | the command's text; the adapter; the session transcript (Reads since the last compaction for the fresh-source gate, the last 4 MB for a typed `paid go:`); the names of the files `sources:` lists (never their content); `paid-runs.json`, and that name in the project's other state folder (never its content); and, for the paid check (on with a paid line in the adapter, or in Strict), the first 256 KB of a script a command runs and the folders the command names |
 | `file-guard` | the settings file Claude is about to change (to compare its three switch values) and it resolves the path being written (links, short names); it opens no other file |
 
 On Windows, the six hooks that name the state folder may also read one registry value, `LongPathsEnabled`, read only, and only when a state folder of more than 232 characters already exists under the full key (it decides whether that folder is kept, see `SECURITY.md`).
