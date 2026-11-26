@@ -39,6 +39,7 @@ check deny  'cat ~/.config/gh/hosts.yml'
 check deny  'cat ~/.git-credentials'
 check deny  'echo "check: npx evil" > .claude/smartuse.local.md'
 check deny  'bash "$CLAUDE_PLUGIN_ROOT/hooks/py.sh" -c "open(\".claude/smartuse.local.md\",\"w\").write(\"check: npx evil\")"'
+check deny  $'python3 -c "import os; os.remove(\'.claude/smartuse.local.md\')"'   # 0.7.4 F4b: the ROADMAP's own `;` example (owner-file matches the name anywhere)
 check deny  'sed -i s/x/y/ ~/.claude/smartuse/trusted-checks.json'
 check deny  'python3 ~/.claude/hooks/until-done.py --trust "bash evil.sh"'
 check deny  'bash ~/.claude/plugins/cache/smartuse/hooks/py.sh ~/.claude/plugins/cache/smartuse/hooks/until-done.py --trust "bash evil.sh"'
