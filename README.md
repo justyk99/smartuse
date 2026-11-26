@@ -4,7 +4,7 @@
 <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 <img alt="Claude Code 2.1.300+" src="https://img.shields.io/badge/Claude%20Code-2.1.300%2B-black">
 <img alt="plugin evals 10/10 (0.5.0)" src="https://img.shields.io/badge/plugin%20evals-10%2F10%20%280.5.0%29-brightgreen">
-<img alt="tests 4438 hook + 36 bench cases" src="https://img.shields.io/badge/tests-4438%20hook%20%2B%2036%20bench-brightgreen">
+<img alt="tests 4509 hook + 36 bench cases" src="https://img.shields.io/badge/tests-4509%20hook%20%2B%2036%20bench-brightgreen">
 <a href=".github/workflows/ci.yml"><img alt="CI" src="https://github.com/justyk99/smartuse/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
@@ -121,7 +121,7 @@ Re-run them yourself: `claude plugin eval plugins/smartuse --runs 1 --scaffold -
 - Routing is measured on **four** bench asks so far (median cost −24 % on both routed dials, agent output not lower, one aggressive run left failing tests); real-repo runs decide whether that holds. The cost column is the session's own `total_cost_usd`, not an estimate. The per-step receipts exist so that every published number has a line of evidence per step.
 
 ## Windows
-The PowerShell tool is on by default on Windows for claude.ai accounts, and the guard and the fresh-source gate cover it (coarse match: a publish word anywhere in a statement counts). `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` turns the tool off, so every command runs through Bash. The hooks run through `plugins/smartuse/hooks/py.sh`, which picks `python3`, `python` or `py -3` (on a stock Windows install `python3` is the Microsoft Store stub). Git Bash is required: Claude Code runs hook commands through it on Windows. `HOME` from Git Bash is honoured; state lives under `~/.claude/smartuse/`. Each hook event costs one Python start, and on Windows a start can take seconds (0.4–3.6 s on the author's laptop): the launcher probes for an interpreter once and then remembers which name worked (`python3`, `python` or `py -3`, never a path, in `~/.claude/smartuse/interpreter`; both guards keep that file human-only), so the Store stub is not started on every event. Measured there: about 2 s per hook event before, 0.5–1.8 s after (the rest is that machine's own Python start, under memory pressure).
+The PowerShell tool is on by default on Windows for claude.ai accounts, and the guard and the fresh-source gate cover it (coarse match: a publish word anywhere in a statement counts). `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` turns the tool off, so every command runs through Bash. The hooks run through `plugins/smartuse/hooks/py.sh`, which picks `python3`, `python` or `py -3` (on a stock Windows install `python3` is the Microsoft Store stub). Git Bash is required: Claude Code runs hook commands through it on Windows. `HOME` from Git Bash is honoured; state lives under `~/.claude/smartuse/`. Each hook event costs one Python start, and on Windows a start can take seconds (0.4–3.6 s on the author's laptop): the launcher probes for an interpreter once and then remembers which name worked (`python3 -I`, `python -I` or `py -3 -I`: the name plus a mark that it started in Python's isolated mode, never a path, in `~/.claude/smartuse/interpreter`; both guards keep that file human-only; a file from 0.7.4 or earlier holds the bare name and is proven again once and rewritten), so the Store stub is not started on every event. Measured there: about 2 s per hook event before, 0.5–1.8 s after (the rest is that machine's own Python start, under memory pressure).
 
 Since 0.6.1 Claude waits on one hook per Bash call (the guard) and none per Read. The heartbeat's tool events run in the background, and on Windows the heartbeat now locks its state file too.
 
@@ -186,6 +186,8 @@ The kickoffs, `DEV.md` and `USER.md` that the skills wrote into your repo on req
 ## What it reads and writes
 The hooks are small Python files that import no network library; this is their whole list, checked against the code for 0.7.1. The limits of what the guards see are in `SECURITY.md`.
 
+Since 0.7.5 the hooks start in Python's isolated mode wherever that Python accepts the flags: no `PYTHON*` variable, user site folder or site folder of the interpreter is read, and the working folder is not an import folder (what that does not cover is in `SECURITY.md`, "How the hooks start Python").
+
 **Reads.** Every hook reads the event Claude Code sends it (tool name and input, session id, project folder, transcript path). Beyond that:
 
 | Hook | Reads |
@@ -219,7 +221,7 @@ On Windows, the six hooks that name the state folder may also read one registry 
 | `projects/<key>/paid-runs.lock` | its lock while it is written | `bash-guard` |
 | `projects/<key>/paid.<id>.done` | one empty marker per counted call, so a run is counted once | `bash-guard` |
 | `*.tmp` beside a file above | the temporary name of an atomic write, renamed at once; a crash can leave one | the same hook |
-| `interpreter` | the name of the Python the launcher proved (`python3`, `python` or `py -3`), so later events skip the probe | `py.sh` |
+| `interpreter` | the name of the Python the launcher proved, with a mark that it started isolated (`python3 -I`, `python -I` or `py -3 -I`), so later events skip the probe | `py.sh` |
 
 The shell may read the paid counter, its lock and the markers, and nothing else, and the file tools refuse them. Delete the whole `projects/<key>/` folder and the paid count starts again, so the way to stop paid runs for good is to remove the go line. Outside `~/.claude/smartuse/`, two things are written, neither by a hook's own logic: Python's compiled bytecode of the hooks, in `hooks/__pycache__/` inside the plugin's folder (a speed-up; with `PYTHONDONTWRITEBYTECODE` or a folder that cannot be written, none), and, when a session runs `watch.py`, what `git fetch` writes in your clone (`FETCH_HEAD` and `refs/remotes/<remote>/<branch>`).
 

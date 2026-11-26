@@ -24,7 +24,7 @@ The plugin registers it itself (`plugins/smartuse/hooks/hooks.json`), so there i
 "hooks": { "PreToolUse": [ { "matcher": "Bash|PowerShell", "hooks": [
   { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" --guard \"${CLAUDE_PLUGIN_ROOT}/hooks/bash-guard.py\"", "timeout": 10 } ] } ] }
 ```
-`py.sh` is the launcher: it runs the hook with `python3`, else `python`, else `py -3` (a stock Windows install has only the Store stub as `python3`).
+`py.sh` is the launcher: it runs the hook with `python3`, else `python`, else `py -3` (a stock Windows install has only the Store stub as `python3`), and since 0.7.5 starts Python in its isolated mode (`-I -S`: no `PYTHON*` variable, user site or site folder is read; see `SECURITY.md`, "How the hooks start Python"). The layer that can protect the plugin's own files from edits is Claude Code's own permission rules and sandbox, which do not depend on the hooks; the hooks themselves cannot.
 
 Script: `plugins/smartuse/hooks/bash-guard.py` (pipe-to-shell · sudo · rm -rf of / ~ . * · chmod 777 · credential-file reads · destructive SQL via shell · force push · svn revert · the human-only files · the switches; heredoc bodies are data).
 
