@@ -1,7 +1,11 @@
 ---
 name: doctor
 description: "Prove that smartuse's hooks are live: one deterministic report (0 model tokens to compute) of the Python it runs on, the hooks registered, the heartbeat, and a live try of the bash-guard and file-guard, each PASS or FAIL with the fix, plus the guard level and the rules switched off. Use when the user asks 'is smartuse working', 'are the hooks on', 'doctor', 'check my setup', 'is the guard live', 'why is nothing happening'."
-allowed-tools: Bash(bash *), Bash(echo *), Bash(: smartuse-doctor-canary), Write(~/.claude/smartuse/doctor-canary)
+allowed-tools:
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --doctor)'
+  - 'Bash(echo *)'
+  - 'Bash(: smartuse-doctor-canary)'
+  - 'Write(~/.claude/smartuse/doctor-canary)'
 ---
 
 # doctor — are the hooks live? (the renderer is deterministic; two tries prove the guards)

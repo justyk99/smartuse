@@ -2,7 +2,8 @@
 name: ledger
 description: Show the ledger — per-run totals (make-prompt · run-plan · living-docs): every run with its minutes, tokens and self-check score, plus medians by skill and mode. Use when the user asks "how much did that cost", "show the ledger", "token usage of the kit", or wants numbers for a write-up. The per-step table of one run-plan run is /smartuse:receipts, not this.
 argument-hint: "[N last rows]"
-allowed-tools: Bash(bash *)
+allowed-tools:
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --report *)'
 ---
 
 # ledger — per-run totals (make-prompt · run-plan · living-docs) (deterministic, 0 model tokens to compute)

@@ -2,7 +2,11 @@
 name: status
 description: "Show whether Claude is working, waiting on an agent, waiting on you, stopped after a hand-off, or stalled — one deterministic line from the heartbeat hook (0 model tokens), plus how to put it in your status line. Use when the user asks 'are you still working', 'is it stuck', 'what is it doing', 'status', 'heartbeat'."
 argument-hint: "[install]"
-allowed-tools: Bash(bash *), Bash(echo *), Read, Edit
+allowed-tools:
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py" --line)'
+  - 'Bash(echo *)'
+  - Read
+  - Edit
 ---
 
 # status — the heartbeat (deterministic, 0 model tokens to compute)

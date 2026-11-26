@@ -2,7 +2,8 @@
 name: receipts
 description: Show the receipt per plan step of the latest run-plan run (or a named task) — step · tier · model · user override · outcome · escalation · verification · agent calls and tokens · check — and the agent-output share by model. Use when the user asks "what ran where", "show the receipts", "which model did step 3", "did the review find gaps", "how much did the plan cost per step", or wants the table for a write-up.
 argument-hint: "[task name | all]"
-allowed-tools: Bash(bash *)
+allowed-tools:
+  - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --receipts *)'
 ---
 
 # receipts — one receipt per plan step (deterministic, 0 model tokens to compute)

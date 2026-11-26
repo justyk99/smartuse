@@ -3,7 +3,7 @@ name: reply-style
 description: Pick how Claude writes its replies from a catalogue of 7 researched styles — lcd (common base, relay-to-a-senior) · bluf (decision first) · engineer (diff first) · teacher (why shown) · minimal (one line + code) · plain (non-technical) · memo (narrative decisions) — each shown with pros and cons, then installed as a Claude Code output style and switched on (applies from the next message). Use when a user asks which reply styles exist or who each is for (this skill holds the catalogue — invoke it rather than searching for files), asks how Claude should write, wants replies shorter / longer / simpler / more technical, says "reply style", "output style", "too long", "too technical", "explain simpler", or during a new setup. Changeable any time.
 when_to_use: /reply-style (catalogue + pick) · /reply-style <name> (switch) · /reply-style show · /reply-style off (back to Default) · /reply-style try <name> (this conversation only, no files) · add --project (this repo only) · add --claude-md (write the block into CLAUDE.md instead, for setups where output styles are disabled)
 argument-hint: "[show|off|try] [<style>] [--project] [--claude-md]"
-allowed-tools: Read, Write, Edit, AskUserQuestion, Bash(ls *), Bash(mkdir *), Bash(cp *), Bash(cat *), Bash(grep *), Bash(python3 *)
+allowed-tools: Read, Write, Edit, AskUserQuestion, Bash(ls *), Bash(mkdir *), Bash(cp *), Bash(cat *), Bash(grep *)
 ---
 
 # reply-style — a switchable response system (v1.0, 2026-10-15)
