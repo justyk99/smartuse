@@ -623,7 +623,7 @@ endrule() { # $1 = label, $2 = "noadapter" (a counter-side reason): the deny in 
   [ "$(py "$CW" shape "$OUT" </dev/null 2>&1)" = ok ] && ok "$1" || ko "$1 -- the deny JSON shape: $OUT"
 }
 T_RO="could not verify the go (the counter is not writable); run this call again. If it repeats, run /smartuse:doctor, then check that paid-runs.json in the state folder is not read-only. Nothing was spent."   # 0.7.4 F3 (D-YK31): the three counter-side tails
-T_BUSY="could not verify the go (the counter is busy); another paid call holds the counter; run this call again. Nothing was spent."
+T_BUSY="could not verify the go (the counter is busy); the counter lock could not be taken (another paid call may hold it); run this call again. If it repeats, run /smartuse:doctor. Nothing was spent."
 T_UNR="could not verify the go (paid-runs.json is unreadable); ask the owner to repair paid-runs.json in this project's state folder. Nothing was spent."
 field() { py "$CW" entry "$(wp "$R")" "$1" </dev/null; }
 IMP=$(printf 'import %s' openai)                                  # the SDK line, never spelled whole in this file
