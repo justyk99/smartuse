@@ -34,7 +34,7 @@ Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger
              (py.sh = the plugin's launcher: python3, else python, else py -3 — on stock Windows python3 is only the Store stub.)
 State:       the skills write pending.json / routing.json ONLY through these commands, never with the Write / Edit tools: the state
              dir is under ~/.claude/, which Claude Code treats as a sensitive path (Write / Edit there prompt every time in default
-             and acceptEdits mode and are denied headless), while the skills' `Bash(bash *)` already runs this script. Each one
+             and acceptEdits mode and are denied headless), while each skill's launcher rule (py.sh, this script, one option) runs it. Each one
              resolves the project like --state-dir (CLAUDE_PROJECT_DIR, else the cwd) and touches the keyed dir only.
              bash py.sh ledger.py --put pending.json|routing.json '<one JSON object>'      (the skills' form)
              bash py.sh ledger.py --put pending.json|routing.json < file / <<'JSON' … JSON   (scripts, a human)

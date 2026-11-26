@@ -1047,16 +1047,22 @@ for KIND in hooks/hooks.json settings.json skills/status/SKILL.md; do
   T1M=$(t1check "$D/t1m")
   case "$T1M" in BAD*) echo "PASS 0.7.5 F1 t1 mutation: $KIND with python3 in place of the launcher is BAD";; *) echo "FAIL 0.7.5 F1 t1 mutation in $KIND was not caught: $T1M"; fail=1;; esac
 done
-# ===== 0.7.6 F1 (g0-g4): a skill's `allowed-tools` names the commands it runs, never a shell or an interpreter. One helper reads the line in both forms the skills page allows (one line with
-# commas, a YAML list) and prints five lines for a plugin folder: g0 the reader's own five-line self-test, and every real line is valid YAML; g1 no whole shell or interpreter; g2 every launcher
-# rule has the whole shape (the launcher, one script of hooks/, one option; -c would hand anything to Python); g3 every launcher command a skill's text starts is covered by a rule of that same
-# skill (matching as the permissions page says: the text before the first `*` as written, `*` is any text, a trailing ` *` also takes the bare command); g4 each skill's rules equal the table below.
-gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> five lines "OK|BAD g<n> ..."
+# ===== 0.7.6 F1 (g0-g5): a skill's `allowed-tools` names the commands it runs, never a shell or an interpreter. One helper reads the line in every form the skills page allows (a string split on
+# spaces and commas outside parentheses, a YAML list) and prints six lines for a plugin folder: g0 the reader's own self-test, every real line is valid YAML and every item is `Name` or `Name(...)`
+# (anything else is BAD: fail closed); g1 no whole shell or interpreter as the first word of a rule (bash sh zsh env python python3.N py node perl ... , .exe stripped), unless the rule is the whole
+# launcher shape or a version query; g2 every rule that starts `bash ` or names py.sh or a hooks/*.py has the whole shape (the launcher, one script of hooks/, one option; -c would hand anything
+# to Python); g3 every launcher command a skill's text starts is covered by a rule of that same skill (matching as the permissions page says: the text before the first `*` as written, `*` is any
+# text, a trailing ` *` also takes the bare command); g4 each skill's launcher rules equal the table below; g5 no git rule is wider than one read subcommand (never `git *`, `git -c`, `git config`,
+# `git alias`; `git branch` only as --show-current) and every git command on a `!` line is covered by a rule of its skill (R1 fix round).
+gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> six lines "OK|BAD g<n> ..."
   py - "$1" "$2" <<'PY'
 import glob, os, re, sys
 root, hooks = sys.argv[1], sys.argv[2]
 LAUNCH = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh"'
-INTERP = set("bash sh zsh dash python python3 py node perl ruby pwsh powershell cmd env xargs eval exec".split())
+INTERP = set("bash sh zsh dash ksh csh fish python pythonw py node nodejs perl ruby php pwsh powershell cmd busybox env xargs eval exec".split())
+WRAP = set("timeout time nice nohup stdbuf command builtin noglob sudo doas".split())  # words Claude Code strips before it matches: a rule behind one still names the program after it
+GITOK = set("status log diff show".split())  # the git subcommands any skill is granted (read only); `branch` only as BRANCH_OK
+BRANCH_OK = ("git branch --show-current", "git branch --show-current 2>/dev/null")
 SHAPE = re.compile(r'^bash "\$\{CLAUDE_PLUGIN_ROOT\}/hooks/py\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}/hooks/([a-z][a-z-]*\.py)" (--[a-z][a-z-]*(?: (?:--[a-z][a-z-]*|[A-Za-z0-9][A-Za-z0-9._-]*))*)( \*)?$')
 L = '"${CLAUDE_PLUGIN_ROOT}/hooks/'
 # g4's table: the launcher rules each skill is granted, as "script option [literal words] [*]" (the fix's table; 0.7.6 plan F1)
@@ -1073,17 +1079,34 @@ TABLE = {
 def frontmatter(text):
     m = re.match(r"---\r?\n(.*?)\r?\n---", text, re.S)
     return m.group(1) if m else ""
-def split_commas(s):
+def split_top(s):  # split on spaces AND commas outside parentheses (the skills page: "a space- or comma-separated string")
     out, depth, cur = [], 0, ""
     for ch in s:
         depth += (ch == "(") - (ch == ")")
-        if ch == "," and depth == 0:
-            out.append(cur.strip()); cur = ""
+        if (ch == "," or ch.isspace()) and depth <= 0:
+            if cur:
+                out.append(cur)
+            cur = ""
         else:
             cur += ch
-    if cur.strip():
-        out.append(cur.strip())
+    if cur:
+        out.append(cur)
     return out
+def well_formed(tok):  # an item is `Name` or `Name(...)`, parentheses balanced: anything else is BAD (fail closed)
+    m = re.match(r"[A-Za-z][A-Za-z0-9_]*", tok)
+    if not m:
+        return False
+    rest = tok[m.end():]
+    if rest == "":
+        return True
+    if rest[0] != "(":
+        return False
+    d = 0
+    for i, ch in enumerate(rest):  # the parenthesis opened first must close at the very end, and nowhere earlier
+        d += (ch == "(") - (ch == ")")
+        if d == 0:
+            return i == len(rest) - 1
+    return False
 def unquote(v):
     v = v.strip()
     if len(v) >= 2 and v[0] == "'" and v[-1] == "'":
@@ -1108,13 +1131,18 @@ def raw_values(fm):  # the text after `allowed-tools:` (one line) or the list it
                 break
         return "list", items
     return None, None
+def items_of(v):  # one YAML value -> its items: a value quoted as a whole is unquoted, then split; else split, then each item unquoted
+    v = v.strip()
+    if len(v) >= 2 and v[0] in "'\"" and v[-1] == v[0]:
+        body = v[1:-1]
+        if (v[0] == "'" and "'" not in body.replace("''", "")) or (v[0] == '"' and '"' not in re.sub(r"\\.", "", body)):
+            return split_top(unquote(v))
+    return [unquote(x) for x in split_top(v)]
 def rules_of(fm):
     kind, vals = raw_values(fm)
     if kind is None:
         return None
-    if kind == "line":
-        return [unquote(x) for x in split_commas(vals[0])]
-    return [unquote(x) for x in vals]
+    return [r for v in vals for r in items_of(v)]
 def yaml_ok(fm):  # a scalar must be a plain one without ": " or " #", or quoted and closed (the one-line comma form is read by Claude Code, but only a quoted item is valid YAML around "Bash(: ...)")
     kind, vals = raw_values(fm)
     for v in vals or []:
@@ -1132,6 +1160,14 @@ def covers(inner, cmd):
     core = inner[:-2] if star else inner
     rx = "^" + ".*".join(re.escape(p) for p in core.split("*")) + ("(?: .*)?" if star else "") + "$"
     return re.match(rx, cmd, re.S) is not None
+def first_word(inner):  # the program a rule names: path and .exe dropped, lower case, python3.12 / py3 -> python / py; (word, the rest)
+    s = inner.strip().lstrip("'\"")
+    wm = re.match(r"([A-Za-z0-9_.:\\/-]+)(.*)$", s, re.S)  # a drive letter and the old `git:*` suffix are part of the word
+    if not wm:
+        return "", s
+    w = re.sub(r"\.exe$", "", wm.group(1).lower().replace("\\", "/").rsplit("/", 1)[-1].rstrip(":"))
+    w = re.sub(r"^(python|pythonw|py)[0-9.]*$", lambda m: m.group(1), w)
+    return w, wm.group(2)
 def tool_inner(rule):
     m = re.match(r"([A-Za-z]+)(?:\((.*)\))?$", rule, re.S)
     return (m.group(1), m.group(2)) if m else (rule, None)
@@ -1161,45 +1197,68 @@ SELF = [
     ("allowed-tools:\n  - \"Bash(echo *)\"\n  - Read\nargument-hint: x", ["Bash(echo *)", "Read"], True),
     ("allowed-tools:\n  - Bash(: smartuse-doctor-canary)", ["Bash(: smartuse-doctor-canary)"], False),
     ("name: x\ndescription: no grant", None, True),
+    ("allowed-tools: Bash(grep *) Bash(python3 *)", ["Bash(grep *)", "Bash(python3 *)"], True),  # space-separated (R1 finding 1)
+    ("allowed-tools: Bash(bash *) Read, Write", ["Bash(bash *)", "Read", "Write"], True),
+    ("allowed-tools:\n  - 'Bash(ls *) Bash(cp *)'\n  - Read Edit", ["Bash(ls *)", "Bash(cp *)", "Read", "Edit"], True),
+    ("allowed-tools: 'Bash(a b *)' \"Bash(c)\",Read", ["Bash(a b *)", "Bash(c)", "Read"], False),  # read right, but not valid YAML (a closed quote, then more text)
 ]
+GOODTOK = ["Read", "Bash(x *)", "Write(~/a b)", "mcp__srv__tool", "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *)"]
+BADTOK = ["Bash(grep *", "Bash (x)", "(x)", "Bash(a)b", "Read)", "Bash(a) Bash(b)", "-c", "*", "Bash(a(b)"]
 bad = []
 for i, (fm, want, ok) in enumerate(SELF, 1):
     if rules_of(fm) != want:
         bad.append("self-test %d read %r" % (i, rules_of(fm)))
     if yaml_ok(fm) != ok:
         bad.append("self-test %d yaml_ok is %s" % (i, yaml_ok(fm)))
+for tk in GOODTOK:
+    if not well_formed(tk):
+        bad.append("self-test: %r should be an item" % tk)
+for tk in BADTOK:
+    if well_formed(tk):
+        bad.append("self-test: %r should not be an item" % tk)
 for name, (fm, t) in skills.items():
     if rules_of(fm) is None:
         bad.append("%s has no allowed-tools" % name)
     elif not yaml_ok(fm):
         bad.append("%s: allowed-tools is not valid YAML" % name)
+    else:
+        for r in rules_of(fm):
+            if not well_formed(r):
+                bad.append("%s: item %r is not Name or Name(...)" % (name, r[:60]))
 if len(skills) < 8:
     bad.append("only %d skills found" % len(skills))
-res["g0"] = ("BAD g0 " + "; ".join(bad)) if bad else "OK g0 the reader returns the right rules for its five self-test lines and every one of the %d skills' lines is valid YAML" % len(skills)
+res["g0"] = ("BAD g0 " + "; ".join(bad)) if bad else "OK g0 the reader returns the right rules for its %d self-test lines (comma, space, YAML list), every one of the %d skills' lines is valid YAML and every item is Name or Name(...)" % (len(SELF), len(skills))
 # g1
-bad = []
+def g1_bad(tool, inner):  # True when a Bash or PowerShell rule grants a bare tool, a shell or an interpreter (the whole launcher shape and a version query are the only ways in)
+    if inner is None or inner.strip() in ("", "*"):
+        return True
+    w, tail = first_word(inner)
+    if w in WRAP and any(first_word(x)[0] in INTERP for x in tail.split()[:6]):
+        return True
+    return w in INTERP and not (tool == "Bash" and SHAPE.match(inner)) and not re.fullmatch(r"(?:-v|-V|--version)(?: ?\*)?", tail.strip())
+LP = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/'
+G1_MUST_BE_BAD = ["python3 -c *", "sh -c *", "py -3 *", "node -e *", "env bash *", "python3.12 *", "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\" --recompute",
+                  "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *", "bash *", "python *", "/usr/bin/env python3 *", r"C:\Python313\python.exe *", "PWSH.EXE -c *", "timeout 5 bash *", "bash -c *",
+                  LP + "ledger.py\" *", LP + "ledger.py\" -c *", "*", ""]
+G1_MUST_BE_OK = [LP + "ledger.py\" --report *", LP + "heartbeat.py\" --line", "node -v*", "ls *", "command -v *", "git status *", ": smartuse-doctor-canary", "echo *"]
+bad = ["self-test: %r is not flagged" % x for x in G1_MUST_BE_BAD if not g1_bad("Bash", x)] + ["self-test: %r is flagged" % x for x in G1_MUST_BE_OK if g1_bad("Bash", x)]
 for name, (fm, t) in skills.items():
     for r in rules_of(fm) or []:
         tool, inner = tool_inner(r)
-        if tool not in ("Bash", "PowerShell"):
-            continue
-        if inner is None or inner.strip() in ("", "*"):
-            bad.append("%s: %s" % (name, r)); continue
-        wm = re.match(r"([A-Za-z0-9_.\\/-]+)(.*)$", inner, re.S)
-        w = re.sub(r"\.exe$", "", wm.group(1).lower().replace("\\", "/").rsplit("/", 1)[-1]) if wm else ""
-        tail = wm.group(2) if wm else ""
-        if w in INTERP and (tail.strip().startswith("*") or tail.strip() == ":*" or (w == "bash" and not (tool == "Bash" and inner.startswith(LAUNCH + " ")))):
+        if tool in ("Bash", "PowerShell") and g1_bad(tool, inner):
             bad.append("%s: %s" % (name, r))
-res["g1"] = ("BAD g1 a whole shell or interpreter is granted in %d place(s): %s" % (len(bad), "; ".join(bad))) if bad else "OK g1 no skill grants a whole shell or interpreter"
+res["g1"] = ("BAD g1 a bare tool, a shell or an interpreter is granted in %d place(s): %s" % (len(bad), "; ".join(bad))) if bad else "OK g1 no skill grants a shell or an interpreter (a first word of bash sh env python python3.N py node ... , .exe and paths dropped) except the whole launcher shape or a version query; %d rule forms self-tested" % (len(G1_MUST_BE_BAD) + len(G1_MUST_BE_OK))
 # g2
 bad, n = [], 0
 for name, (fm, t) in skills.items():
     for r in rules_of(fm) or []:
         tool, inner = tool_inner(r)
-        if tool != "Bash" or inner is None or not inner.startswith("bash "):
+        if tool not in ("Bash", "PowerShell") or inner is None:
             continue
+        if not (inner.startswith("bash ") or re.search(r"py\.sh|hooks[/\\][^\s\"']*\.py", inner)):
+            continue  # a rule that starts `bash ` or names the launcher or a hook script must be the whole shape; any other rule is g1's and g5's
         n += 1
-        m = SHAPE.match(inner)
+        m = SHAPE.match(inner) if tool == "Bash" else None
         if not m:
             bad.append("%s: %s" % (name, r)); continue
         if m.group(1) == "until-done.py" or not os.path.isfile(os.path.join(hooks, m.group(1))) or "--recompute" in inner:
@@ -1229,11 +1288,46 @@ for name, (fm, t) in skills.items():
     elif got != sorted(TABLE[name]):
         bad.append("%s: granted %s, table %s" % (name, got, sorted(TABLE[name])))
 res["g4"] = ("BAD g4 " + "; ".join(bad)) if bad else "OK g4 each skill's launcher rules equal the table (%d rules in %d skills)" % (sum(len(v) for v in TABLE.values()), len(TABLE))
-for k in ("g0", "g1", "g2", "g3", "g4"):
+# g5: git. `Bash(git *)` lets `git -c alias.x='!<cmd>' x` run any program, so no rule names git without one read subcommand; `git branch` only as --show-current (-D, -m would write);
+# and every git command on a `!` line (an uncovered one aborts the skill at load) is covered by a rule of the same skill, redirect text kept as written.
+def g5_bad(tool, inner):  # True when a rule names git without one read subcommand: git *, git -c, git*, git config, git alias, git branch (but --show-current), a path to git, a write command
+    w, tail = first_word(inner)
+    if w != "git":
+        return False
+    sub = tail.split()[0] if tail.split() else ""
+    if tool != "Bash" or not re.fullmatch(r"[a-z][a-z-]*", sub) or tail[:1] != " ":
+        return True
+    return inner not in BRANCH_OK if sub == "branch" else sub not in GITOK
+G5_MUST_BE_BAD = ["git *", "git -c *", "git -c alias.x=!id x", "git config *", "git config user.name", "git alias *", "git*", "git", "git:*", "git branch *", "git branch -D *", "git branch --show-current *",
+                  "/usr/bin/git *", "git.exe *", "git push *", "git add *", "git -C . log *"]
+G5_MUST_BE_OK = ["git status --short *", "git status *", "git log *", "git diff *", "git show *", "git branch --show-current", "git branch --show-current 2>/dev/null", "svn status *", "grep *"]
+bad = ["self-test: %r is not flagged" % x for x in G5_MUST_BE_BAD if not g5_bad("Bash", x)] + ["self-test: %r is flagged" % x for x in G5_MUST_BE_OK if g5_bad("Bash", x)]
+bad += ["self-test: PowerShell(git status *) is not flagged"] if not g5_bad("PowerShell", "git status *") else []
+n, nbang = 0, 0
+for name, (fm, t) in skills.items():
+    inners = []
+    for r in rules_of(fm) or []:
+        tool, inner = tool_inner(r)
+        if tool not in ("Bash", "PowerShell") or inner is None:
+            continue
+        if tool == "Bash":
+            inners.append(inner)
+        if first_word(inner)[0] == "git":
+            n += 1
+            if g5_bad(tool, inner):
+                bad.append("%s: %s" % (name, r))
+    for ln, line in enumerate(t.splitlines(), 1):
+        for span in re.findall(r"!`([^`]*)`", line):
+            for seg in re.findall(r"\bgit [a-z-]+[^|;&{}`]*", span):
+                nbang += 1
+                if not any(covers(i, seg.strip()) for i in inners):
+                    bad.append("%s:%d `!` line runs `%s`, no rule covers it" % (name, ln, seg.strip()[:60]))
+res["g5"] = ("BAD g5 " + "; ".join(bad)) if bad or n == 0 or nbang == 0 else "OK g5 %d git rules, none wider than one read subcommand (branch only as --show-current; never git *, -c, config, alias), and all %d git commands on `!` lines are covered by a rule of their skill" % (n, nbang)
+for k in ("g0", "g1", "g2", "g3", "g4", "g5"):
     print(res[k])
 PY
 }
-gmut() { # $1 = m4|m5|m6|m7, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
+gmut() { # $1 = m4..m12, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
   py - "$1" "$2" <<'PY'
 import re, sys
 name, p = sys.argv[1], sys.argv[2]
@@ -1249,16 +1343,27 @@ elif name == "m6":  # run-plan: a launcher-only rule added
     t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - " + LA + "*)'\n", t, count=1, flags=re.M)
 elif name == "m7":  # status: --json granted
     t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - " + LA + "\"${CLAUDE_PLUGIN_ROOT}/hooks/heartbeat.py\" --json)'\n", t, count=1, flags=re.M)
+elif name == "m8":  # reply-style: a space-separated Bash(python3 *) after the comma list (R1 finding 1)
+    t = re.sub(r"^(allowed-tools:[^\n]*Bash\(grep \*\))", lambda m: m.group(1) + " Bash(python3 *)", t, count=1, flags=re.M)
+elif name == "m9":  # status: the whole line replaced by one that mixes a space and a comma (R1 finding 1)
+    t = swap(t, "allowed-tools: Bash(bash *) Read, Write\n")
+elif name == "m10":  # make-prompt: the narrowed git rules turned back to Bash(git *) (R1 finding 2)
+    t = re.sub(r"^  - 'Bash\(git [^\n]*\n", "", t, flags=re.M)
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - 'Bash(git *)'\n", t, count=1, flags=re.M)
+elif name == "m11":  # status: Bash(sh -c *) added (R1 finding 3)
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - 'Bash(sh -c *)'\n", t, count=1, flags=re.M)
+elif name == "m12":  # receipts: the launcher run through sh (R1 finding 3)
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - 'Bash(sh \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *)'\n", t, count=1, flags=re.M)
 open(p, "w", encoding="utf-8", newline="").write(t)
 print("CHANGED" if t != o else "UNCHANGED")
 PY
 }
 GR=$(gcheck "$H/.." "$H")
-for G in g0 g1 g2 g3 g4; do
+for G in g0 g1 g2 g3 g4 g5; do
   GL=$(printf '%s\n' "$GR" | grep "^[A-Z]* $G " || true)
   case "$GL" in "OK $G "*) echo "PASS 0.7.6 F1 $G ${GL#OK $G }";; *) echo "FAIL 0.7.6 F1 $G ${GL:-no output from the helper: $GR}"; fail=1;; esac
 done
-for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4"; do
+for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4" "m8 reply-style g1" "m9 status g1" "m10 make-prompt g5" "m11 status g1" "m12 receipts g1"; do
   read -r MN MS MG <<< "$MUT"
   rm -rf "$D/g1m"; mkdir -p "$D/g1m"; cp -r "$H/../skills" "$D/g1m/"
   if [ "$(gmut "$MN" "$D/g1m/skills/$MS/SKILL.md")" != "CHANGED" ]; then echo "FAIL 0.7.6 F1 $MN the mutation changed nothing (the text it edits moved)"; fail=1; continue; fi
