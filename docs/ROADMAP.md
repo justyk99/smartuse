@@ -143,18 +143,25 @@ Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, 
 - [x] T3 fix: git and svn rules can no longer take an option that writes a file or runs a program; three living-docs free-id rules stated
 - [x] T3 (2026-11-27) · [x] released 2026-11-27 · [ ] tag (the maintainer's)
 
+## 0.7.7 — one view of a run (plan `docs/notes/0.7.6-plan.md` Part B; look B chosen by the maintainer 2026-11-27; code and a skill line, test honesty and docs, no new rule, gate, adapter key or option)
+- [x] V1 `ledger.py --view [N] [task word] [all]`: the `--report` table, then each run-plan run's receipts from its own archive; `steps: not kept` when the archive is gone; a bad ledger line is counted, never a traceback; reads only; `--report` and `--receipts` byte for byte as in 0.7.6 (pinned)
+- [x] V2 `/smartuse:ledger` shows the view: its `!` line runs `--view $ARGUMENTS` and its grant names `--view *` (`heartbeat-test.sh` g3 and g4 went red with the line moved and the rule not; `ledger-test.sh` v2 runs the skill's own line)
+- [x] V3 docs, counts and version: README, SECURITY, CHANGELOG, both manifests at 0.7.7
+- [x] T3 fix: keys cleaned, one bad record no longer empties the view, share and device paths refused
+- [x] T3 (2026-11-27) · [x] released 2026-11-27 · [ ] tag (the maintainer's)
+
 ## To 1.0, in order (0.7.4 plan §2b)
 1. Done in 0.7.5: Python starts isolated (the open rows are stated by class in `SECURITY.md`; a guard for the plugin's files is a candidate for item 3)
-2. Split in two. (a) The skills' `Bash(bash *)` grants narrowed: done in 0.7.6. (b) The ledger and receipts in one view: 0.7.7. Claude builds it; its look: the maintainer chose look B on 2026-11-27 (the report table, then each run-plan run's receipts).
-3. The guard batch (state folders under `owner-file`, the staged settings copy, folder targets of the owner's files): 0.7.8. Claude, with its own review round
+2. Split in two. (a) The skills' `Bash(bash *)` grants narrowed: done in 0.7.6. (b) The ledger and receipts in one view: done in 0.7.7, look B (the maintainer's choice, 2026-11-27: the report table, then each run-plan run's receipts).
+3. The guard batch (state folders under `owner-file`, the staged settings copy, folder targets of the owner's files): 0.7.8, next. Claude, with its own review round
 4. The owner's rules out of the make-prompt template: Claude writes the diff; which rules are personal is the maintainer's
 5. The evals CI fix: each try is a push and a CI run with the repo secret (maintainer and Claude)
 6. Method M's two-valued Stop wait: Claude, on a quiet laptop only
 7. Maintainer only: the receipts post, the README lead, the listing, the demo gif, the live status-line check, the tag and release page, five real A/B tasks, the icon
 
-## Next release (after 0.7.6) — open items
+## Next release (after 0.7.7) — open items
 - [ ] `ledger.py --put` accepts fields the hooks own (0.7.6 R1 finding 5; older than 0.7.6, not changed by it). A 0.7.8 candidate, with its own review round
-- [ ] `ledger.py --report` ends with a traceback on a bad ledger line (it reads every line with `json.loads` and no guard); `--receipts` does not. Fix with the 0.7.7 view, which skips and counts a bad line, or alone
+- [ ] `ledger.py --report` still ends with a traceback on a bad ledger line (it reads every line with `json.loads` and no guard); `--receipts` does not. 0.7.7's `--view`, which `/smartuse:ledger` runs now, skips and counts a bad line; `--report` is kept for scripts and was left as it was. A fix of its own, or its removal, when nothing calls it
 - [ ] A `PreSkillShellCommand` hook could let bash-guard see a skill's `!` lines, which Claude Code runs before any `PreToolUse` hook. Experiment first: does such an event exist on the Claude Code versions the README names, and what does it carry
 - [ ] The launcher's shell is not isolated (0.7.5 R1): bash reads its own start-up settings (`BASH_ENV`, `SHELLOPTS`, exported functions) and `PATH` from the session's environment before `py.sh` runs. `bash -p` in the command string covers only the inner bash; a command without `args` is read by a shell first. Candidate: the `args` form, `bash -p` as the program. Experiment first: which `bash` that form finds on Windows, the oldest Claude Code that knows `args`, one event's cost. Then all 19 commands at once, own review round. With the guard batch: `file-guard` compares only the plugin's option names in a settings `env` block
 - [ ] `file-guard-test.sh` and `run.sh` start the launcher without a temp `HOME`, so a full run rewrites the real `~/.claude/smartuse/interpreter` (found in 0.7.5: the file now carries a mark and is rewritten once). Fix: those suites use a temp `HOME`
@@ -186,7 +193,7 @@ Rule 1's open-before-done gate ships in 0.6.0 as the fresh-source gate (opened =
 - [ ] README rewrite for a first-time reader
 - [ ] The owner's personal rules out of the make-prompt template
 - [x] Uninstall and privacy sections in the README: what the hooks read, what they write, how to remove the state under `~/.claude/smartuse/` (0.7.1, F5)
-- [ ] Merge the ledger and the receipts into one view
+- [x] Merge the ledger and the receipts into one view (0.7.7: `/smartuse:ledger` prints the table and each run-plan run's steps; `/smartuse:receipts` stays for one run alone)
 - [x] The skills' broad `Bash(bash *)` grants narrowed to the commands each skill runs (0.7.6; make-prompt's `git *` narrowed to three read forms in the R1 fix)
 - [ ] The evals CI fix: slash-command cases score 0 in CI on Claude Code 2.1.322, so the evals workflow (`.github/workflows/evals.yml`) is run by hand until this is fixed
 - [ ] Marketplace listing (community marketplace form), awesome-lists PRs (YK's clicks)
