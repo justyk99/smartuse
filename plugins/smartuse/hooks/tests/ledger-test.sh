@@ -604,6 +604,107 @@ vled --view > /dev/null; S0=$(snap "$VH"); S1=$(snap "$D/vp")   # the first call
 vlines --view > "$D/vo2.txt"; vlines --view all > /dev/null; vlines --view path-gone > /dev/null; vlines --view 2 > /dev/null; rc=0; vled --view > /dev/null 2>&1 || rc=$?
 grep -q '^ledger: 6 tasks' "$D/vo2.txt" && [ "$(snap "$VH")" = "$S0" ] && [ "$(snap "$D/vp")" = "$S1" ] && [ ! -e "$NOSTATE" ] && echo "PASS w10 five --view calls: every file under the HOME and the projects has the same hash, and no state folder was made for a project_path that had none" || { echo "FAIL w10 something was written or made"; exit 1; }
 [ "$rc" = 0 ] && [ "$(grep -c '^steps: not kept' "$D/vo2.txt")" = 6 ] && ! grep -q '^receipts:' "$D/vo2.txt" && ! grep -q Traceback "$D/vo2.txt" && echo "PASS w11 a project_path that is empty, missing, '.', holds '..', is gone, or has no state folder -> 'steps: not kept' (6 of 6), never another project's run; no exception, exit 0" || { echo "FAIL w11 (rc $rc):"; cat "$D/vo2.txt"; exit 1; }
+# w12: a dict KEY in a run (the model names under agent_by_model) is as much the model's words as a value: escape codes and a newline in a key print as
+# spaces, a key is cut at 200 characters like the strings inside a run; the finished run's steps and the `running now` block alike (T3 finding 1, 0.7.7)
+vuse vh11; vmk example
+py - "$VH/.claude/smartuse/projects/$VKEY" <<'PY'
+import json, sys, pathlib
+d = pathlib.Path(sys.argv[1])
+p = next((d / "runs").glob("*.json")); r = json.loads(p.read_text(encoding="utf-8"))
+r["units"][1]["agent_by_model"] = {"claude-x\x1b]0;PWNED\x07\x1b[2J": {"calls": 1, "input": 10, "output": 5000}, "claude-y\nFORGED-LINE": {"calls": 1, "input": 10, "output": 4000},
+                                    "k" * 500: {"calls": 1, "input": 10, "output": 3000}}
+p.write_text(json.dumps(r), encoding="utf-8")
+(d / "routing.json").write_text(json.dumps({"active": True, "task": "live", "dial": "safe", "started_at": "2026-10-28T10:00:00Z", "units": [
+    {"id": 1, "title": "t", "status": "running", "agent_output": 5, "agent_by_model": {"m\x1b[5m\nLIVE-FORGED": {"calls": 1, "input": 1, "output": 5}}}]}), encoding="utf-8")
+PY
+rc=0; vled --view > "$D/vo.txt" 2> "$D/ve.txt" || rc=$?; tr -d '\r' < "$D/vo.txt" > "$D/vo2.txt"
+[ "$rc" = 0 ] && ! grep -q "$(printf '\033')" "$D/vo2.txt" && ! grep -q "$(printf '\007')" "$D/vo2.txt" && grep -qF 'x ]0;PWNED  [2J 50%' "$D/vo2.txt" && grep -qF 'y FORGED-LINE 40%' "$D/vo2.txt" && ! grep -q '^FORGED-LINE' "$D/vo2.txt" \
+  && grep -qE 'k{200} 30%' "$D/vo2.txt" && ! grep -qE 'k{201}' "$D/vo2.txt" && grep -qx 'running now' "$D/vo2.txt" && grep -qF 'm [5m LIVE-FORGED' "$D/vo2.txt" && ! grep -q '^LIVE-FORGED' "$D/vo2.txt" && [ ! -s "$D/ve.txt" ] \
+  && echo "PASS w12 an escape code, a BEL and a newline in a model key print as spaces (no forged line), a 500-character key is cut at 200; the finished run's steps and the 'running now' block alike; exit 0" || { echo "FAIL w12 (rc $rc):"; cat -A "$D/vo2.txt" | grep -i 'agent out by model' | cut -c1-300; cat "$D/ve.txt"; exit 1; }
+# w13: one bad record does not blank the view: a count too large to add (10**400, 10**16: past 1e15) is an unreadable line, and the other runs print with exit 0; a lone
+# surrogate in a run (as a key) cannot make the final print raise (T3 finding 2, 0.7.7)
+vuse vh12; vmk example
+py - "$VH/.claude/smartuse/ledger.jsonl" 400 <<'PY'
+import json, sys
+f = sys.argv[1]; rows = [json.loads(l) for l in open(f, encoding="utf-8").read().splitlines()]
+rows[0]["total_input"] = 10 ** int(sys.argv[2])         # two lines: the median of two adds them and halves the sum
+open(f, "w", encoding="utf-8").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+rc=0; vled --view > "$D/vo.txt" 2> "$D/ve.txt" || rc=$?; tr -d '\r' < "$D/vo.txt" > "$D/vo2.txt"
+[ "$rc" = 0 ] && [ ! -s "$D/ve.txt" ] && grep -qx '1 line unreadable' "$D/vo2.txt" && grep -q '^ledger: 1 tasks' "$D/vo2.txt" && [ "$(grep -c '^| 2026' "$D/vo2.txt")" = 1 ] && grep -q '^| 2026-10-21T15:22 .* run-plan ' "$D/vo2.txt" && grep -q '^receipts: csv-export-orders' "$D/vo2.txt"   && echo "PASS w13a a line whose total_input is 10**400 is counted unreadable; the other run and its steps print, exit 0 (the median of two did not overflow)" || { echo "FAIL w13a (rc $rc):"; head -5 "$D/vo2.txt"; cat "$D/ve.txt"; exit 1; }
+vuse vh12b; vmk example
+py - "$VH/.claude/smartuse/ledger.jsonl" 16 <<'PY'
+import json, sys
+f = sys.argv[1]; rows = [json.loads(l) for l in open(f, encoding="utf-8").read().splitlines()]
+rows[0]["total_input"] = 10 ** int(sys.argv[2])
+open(f, "w", encoding="utf-8").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+vlines --view > "$D/vo2.txt"
+grep -qx '1 line unreadable' "$D/vo2.txt" && grep -q '^ledger: 1 tasks' "$D/vo2.txt" && echo "PASS w13a2 a count of 10**16 (past the 1e15 bound) is an unreadable line as well" || { echo "FAIL w13a2:"; head -5 "$D/vo2.txt"; exit 1; }
+vuse vh13; vmk example
+py - "$VH/.claude/smartuse/projects/$VKEY" <<'PY'
+import json, sys, pathlib
+p = next((pathlib.Path(sys.argv[1]) / "runs").glob("*.json")); r = json.loads(p.read_text(encoding="utf-8"))
+r["units"][1]["agent_by_model"] = {"\ud800": {"calls": 1, "input": 10, "output": 5}}   # JSON "\ud800": a lone surrogate, which a UTF-8 print cannot encode
+p.write_text(json.dumps(r), encoding="utf-8")
+PY
+rc=0; vled --view > "$D/vo.txt" 2> "$D/ve.txt" || rc=$?; tr -d '\r' < "$D/vo.txt" > "$D/vo2.txt"
+[ "$rc" = 0 ] && [ ! -s "$D/ve.txt" ] && grep -q '^ledger: 2 tasks' "$D/vo2.txt" && grep -q '^receipts: csv-export-orders' "$D/vo2.txt" && grep -q '^steps 5 pass' "$D/vo2.txt" \
+  && echo "PASS w13b a run whose model key is a lone surrogate: the table and the run's block print, exit 0" || { echo "FAIL w13b (rc $rc):"; head -5 "$D/vo2.txt"; cat "$D/ve.txt"; exit 1; }
+cat > "$D/w13c.py" <<'PY'
+import os, sys, io, pathlib, tempfile, json
+ns = {}; exec(compile(open(sys.argv[1], encoding="utf-8").read().replace("\nmain()\n", "\n"), "ledger", "exec"), ns)
+tmp = pathlib.Path(tempfile.mkdtemp(dir=os.environ["HOME"])); ns["PROJECTS"] = tmp / "projects"; ns["LEDGER"] = tmp / "ledger.jsonl"; os.environ["CLAUDE_PROJECT_DIR"] = str(tmp)
+ns["LEDGER"].write_text(json.dumps({"ts": "2026-10-21T15:16:00Z", "project": "p", "skill": "make-prompt", "task": "t", "duration_s": 60, "tokens": {}, "total_input": 10, "total_output": 5}) + "\n", encoding="utf-8")
+ns["report_lines"] = lambda rows, shown: iter(["table line", "bad\ud800line"])   # whatever slips past the cleaning: the print itself must not raise
+buf = io.BytesIO(); sys.stdout = io.TextIOWrapper(buf, encoding="utf-8", newline="\n")
+rc = ns["view"]([]); sys.stdout.flush(); out = buf.getvalue()
+sys.stdout = sys.__stdout__
+assert rc == 0, rc
+assert b"table line" in out and b"bad\\ud800line" in out, out
+print("ok")
+PY
+[ "$(py "$D/w13c.py" "$H/ledger.py" 2>&1 | tail -1)" = ok ] && echo "PASS w13c a lone surrogate that reaches the final print is written as \\ud800 (backslashreplace), not an exception: rc 0 and the lines around it print" || { echo "FAIL w13c:"; py "$D/w13c.py" "$H/ledger.py" 2>&1 | tail -4; exit 1; }
+# w14: a project_path that is a share or a device path (\\host\share, //host/share, \\?\..., \\.\...) is refused by its text: `steps: not kept`, and no file system call is made on it
+# (a spy on os.stat / os.path.realpath / Path.resolve / Path.stat / listdir ... raises and records any call whose path holds the marker; the spy is proved on a direct call first) (T3 finding 3, 0.7.7)
+cat > "$D/w14.py" <<'PY'
+import os, sys, io, pathlib, tempfile, json, contextlib
+B, MARK = chr(92), "spyhost"
+ns = {}; exec(compile(open(sys.argv[1], encoding="utf-8").read().replace("\nmain()\n", "\n"), "ledger", "exec"), ns)
+tmp = pathlib.Path(tempfile.mkdtemp(dir=os.environ["HOME"])); ns["PROJECTS"] = tmp / "projects"; ns["LEDGER"] = tmp / "ledger.jsonl"; os.environ["CLAUDE_PROJECT_DIR"] = str(tmp)
+seen = []
+def spy(orig, name):
+    def f(*a, **k):
+        if any(MARK in str(x).lower() for x in a):
+            seen.append(name); raise OSError(53, "spy: the share was touched")
+        return orig(*a, **k)
+    return f
+for mod, names in ((os, ("stat", "lstat", "listdir", "scandir")), (os.path, ("realpath", "exists", "isdir", "isfile", "samefile")),
+                   (pathlib.Path, ("resolve", "stat", "exists", "is_dir", "is_file", "read_text", "glob", "iterdir")), (sys.modules.get("ntpath"), ("_getfinalpathname",))):
+    for n in names:
+        if mod is not None and hasattr(mod, n):
+            setattr(mod, n, spy(getattr(mod, n), f"{mod.__name__}.{n}"))
+unc = B + B + MARK + ".invalid" + B + "share" + B + "proj"
+try:
+    pathlib.Path(unc).resolve()
+except OSError:
+    pass
+assert seen, "the spy did not see a direct resolve() of a share path: the harness proves nothing"
+seen.clear()
+paths = [unc, "//" + MARK + ".invalid/share/proj", B + B + "?" + B + "UNC" + B + MARK + ".invalid" + B + "share", B + B + "." + B + "pipe" + B + MARK]
+rows = [{"ts": f"2026-10-21T15:1{i}:00Z", "project": "p", "project_path": pp, "skill": "run-plan", "task": f"t{i}", "mode": "safe", "started_at": f"2026-10-21T15:1{i}:00Z",
+         "duration_s": 60, "tokens": {}, "total_input": 10, "total_output": 5, "self_check": "1/1"} for i, pp in enumerate(paths)]
+ns["LEDGER"].write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    rc = ns["view"]([])
+text = out.getvalue()
+assert rc == 0, rc
+assert not seen, ("the view touched a share or device path through", seen)
+assert text.count("steps: not kept (") == 4 and "receipts:" not in text, text
+print("ok")
+PY
+[ "$(py "$D/w14.py" "$H/ledger.py" 2>&1 | tail -1)" = ok ] && echo "PASS w14 a UNC (\\\\host\\share and //host/share), a \\\\?\\ and a \\\\.\\ project_path: four 'steps: not kept', rc 0, and not one file system call carried the path (spy on stat, realpath, resolve, listdir ...)" || { echo "FAIL w14:"; py "$D/w14.py" "$H/ledger.py" 2>&1 | tail -4; exit 1; }
 # v2: the ledger skill's own `!` line (read from its SKILL.md, $ARGUMENTS filled in as the shell would) through the launcher on the example fixture: no words and `2` both start with look B's first line, exit 0
 vuse vh10; vmk example; SK="$H/../skills/ledger/SKILL.md"
 BANG=$(sed -n 's/^!`\(.*\)`$/\1/p' "$SK" | tr -d '\r')

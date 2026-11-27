@@ -670,26 +670,39 @@ def clean_text(s, n=60):
 
 
 def clean_deep(v, n=200):
-    """A run read from a file with every string in it passed through clean_text; numbers and the shape stay as they are."""
+    """A run read from a file with every string in it passed through clean_text, a dict's keys included (a model name under
+    agent_by_model is printed); numbers and the shape stay as they are. Two keys that clean to the same text stay two keys
+    (the later one gets " (2)", " (3)" ...), so no count is lost."""
     if isinstance(v, str):
         return clean_text(v, n)
     if isinstance(v, list):
         return [clean_deep(x, n) for x in v]
     if isinstance(v, dict):
-        return {k: clean_deep(x, n) for k, x in v.items()}
+        out = {}
+        for k, x in v.items():
+            ck = clean_text(k, n) if isinstance(k, str) else k
+            base, i = ck, 1
+            while ck in out:
+                i += 1
+                ck = f"{base} ({i})"
+            out[ck] = clean_deep(x, n)
+        return out
     return v
+
+
+VIEW_MAX = 1e15   # --view's bound on duration_s / total_input / total_output: past it (10**400 would overflow the median) the line is unreadable
 
 
 def view_row(r):
     """A ledger line as --view prints it, or None when it cannot be printed: not a JSON object, a number field that is not a
-    finite number, or tokens that flat() cannot add. A printed text field is cleaned and cut (task and project are the model's
+    number below VIEW_MAX, or tokens that flat() cannot add. A printed text field is cleaned and cut (task and project are the model's
     words). Works on a copy; the ledger is never changed."""
     if not isinstance(r, dict):
         return None
     c = dict(r)
     for k in ("duration_s", "total_input", "total_output"):
         v = c.get(k, 0)
-        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) < float("inf")):   # NaN fails too
+        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) < VIEW_MAX):   # NaN, inf and a count too big to add or halve fail too
             return None
     for k in ("ts", "project", "skill", "mode", "task", "self_check"):
         if c.get(k) is not None:
@@ -718,13 +731,22 @@ def view_args(args):
     return n, word, every
 
 
+def net_or_device(pp):
+    """True for a path that can reach a share or a device: two leading separators (\\\\host\\share, //host/share) or a \\\\?\\, \\\\.\\, \\??\\
+    or GLOBALROOT form anywhere in it. Decided on the text alone, before any file system call (recall.py's rule): on Windows merely
+    resolving such a path makes an SMB attempt to the host."""
+    t = pp.replace("\\", "/")
+    return t.startswith("//") or "/??/" in t or "//?/" in t or "//./" in t or "GLOBALROOT" in t.upper()
+
+
 def view_steps(r):
     """A run-plan ledger line -> (the archived run, its path), else (None, None): the run's own archive only, runs/<started_at>_<task>.json
-    in the state folder the key rule gives for the line's project_path. A project_path that is not an absolute path or holds `..`
+    in the state folder the key rule gives for the line's project_path. A project_path that is not an absolute path, holds `..`, or is a
+    share or device path (net_or_device: refused by its text, no file system call)
     is never used; nothing is created; a file that is missing or unreadable is None. Never raises."""
     try:
         pp = r.get("project_path")
-        if not isinstance(pp, str) or not os.path.isabs(pp) or ".." in pathlib.PurePath(pp).parts:
+        if not isinstance(pp, str) or net_or_device(pp) or not os.path.isabs(pp) or ".." in pathlib.PurePath(pp).parts:
             return None, None
         path = state_dir(pathlib.Path(pp)) / "runs" / archive_name(r)
         return read_run(path), path
@@ -792,7 +814,7 @@ def view(args):
     cur = read_run(cur_path)
     if cur is not None and cur.get("active") and (not word or word in archive_name(cur).lower()):
         out += ["", "running now"] + view_block(cur_path, cur)
-    print("\n".join(out))
+    print("\n".join(out).encode("utf-8", "backslashreplace").decode("utf-8"))   # a lone surrogate that got past the cleaning prints as \udXXX; the print never raises
     return 0
 
 
