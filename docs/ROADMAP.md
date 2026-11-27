@@ -34,7 +34,7 @@
 - [x] file-guard matches the resolved path too (links, junctions, short 8.3 names of what exists) and fails closed on dot-and-space parts (0.5.1) · [ ] a `~/.claude` that is itself a link: compare with the protected files' resolved paths · [ ] bash-guard: paths inside commands are still matched as text (0.5.1 reviews)
 - [ ] The launcher never trusts a `WindowsApps` alias, so users of the Python install manager (3.14+, python.org's default) keep 0.4.0 speed like Store users: find a safe way to tell a real alias from the Store stub; and a cached name whose PATH target broke is run without proof, never re-probed (0.5.1 reviews). 0.7.5 leaves both halves as they are (D-YK42), with one recovery: a name whose Python refuses the isolated start is probed again (R1); a target that broke with another exit code is still run without proof. The close is to remember the `PATH` hit beside the name, for comparison only (0.7.5 plan §8, D-YK42)
 - [x] Hooks start Python without isolation (0.5.1 security review): done in 0.7.5, `-I -S -X utf8` in `py.sh` (see "0.7.5" below)
-- [ ] Hooks run from an install the model can write (0.5.1 security review; 0.7.5 plan §2b): three rows stay open and are stated by class in `SECURITY.md`: the plugin's own files (`hooks.json`, `py.sh`, the hook files, their compiled copies), the interpreter's own files, and which interpreter `PATH`, a venv or the `py` launcher's settings pick. Only something outside the user's account (an install owned by another account, Claude Code's own permission rules and sandbox) closes them. A guard for the hook files would be new patterns in two always-on rules and would refuse a plugin developer's own edits when a checkout is loaded as the plugin: a candidate for the guard batch (0.7.7), with its own review round
+- [ ] Hooks run from an install the model can write (0.5.1 security review; 0.7.5 plan §2b): three rows stay open and are stated by class in `SECURITY.md`: the plugin's own files (`hooks.json`, `py.sh`, the hook files, their compiled copies), the interpreter's own files, and which interpreter `PATH`, a venv or the `py` launcher's settings pick. Only something outside the user's account (an install owned by another account, Claude Code's own permission rules and sandbox) closes them. A guard for the hook files would be new patterns in two always-on rules and would refuse a plugin developer's own edits when a checkout is loaded as the plugin: a candidate for the guard batch (0.7.8), with its own review round
 - [ ] Sandbox mode: the skills' state writes are refused (sandboxed Bash cannot write `~/.claude`); move the skill → hook hand-off off the filesystem (the hooks read it from the transcript), so it works sandboxed and prompt-free
 
 ## 0.6.0 — recall: "the summary is not a source" (design and contract `docs/notes/recall-design.md`; plan approved 2026-11-08)
@@ -134,16 +134,28 @@ Released 2026-11-24 (T3 and the review done; the live F2 adapter check skipped, 
 - [x] R1 security round over `py.sh` and `heartbeat.py`: one lockout found (a remembered name whose Python later refuses `-I` blocked every turn) and fixed; the claim narrowed to Python
 - [x] T3 (2026-11-27) · [x] released 2026-11-27 · [ ] tag (the maintainer's)
 
+## 0.7.6 — the skills ask for less (plan `docs/notes/0.7.6-plan.md`; approved 2026-11-27; eight frontmatter lines, test honesty and docs, no new rule, gate, adapter key or option)
+- [x] E1 what a narrowed grant does on the laptop (2026-11-27, Windows 11 build 26300, Git Bash 5.3, Claude Code 2.1.332, default mode, settings sources project; 44 headless runs): the plugin-root variable is substituted in a rule, a rule that carries the command's double quotes matches it, a command the model types ran under the narrowed grant (typed, forked, model-invoked), and five argument tails ran no second command under either grant
+- [x] F1 no `Bash(bash *)` and no `Bash(python3 *)`: each launcher rule names the launcher, one hook script and one option; reply-style's `python3` removed; `heartbeat-test.sh` g1 to g4 and m4 to m7 fail if a wide grant comes back
+- [x] R1 security round over the grants: one finding fixed. make-prompt's `Bash(git *)` (a `-c` alias runs any program) is now `git branch --show-current`, `git status --short *` and `git log *` (D-YK47 re-decided); the grant checks read every `allowed-tools` spelling, catch any shell or interpreter first word and limit `git` to read forms (g5, m8 to m12)
+- [x] make-prompt loads in default permission mode again: its four `!` lines had brace groups, which Claude Code 2.1.332 refuses, so the skill aborted at load (0.7.5 too); g6 and m13
+- [x] F2 docs, counts and version: README, SECURITY ("What the skills pre-approve (0.7.6)"), CONTRIBUTING, CHANGELOG, both manifests at 0.7.6
+- [x] T3 fix: git and svn rules can no longer take an option that writes a file or runs a program; three living-docs free-id rules stated
+- [x] T3 (2026-11-27) · [x] released 2026-11-27 · [ ] tag (the maintainer's)
+
 ## To 1.0, in order (0.7.4 plan §2b)
 1. Done in 0.7.5: Python starts isolated (the open rows are stated by class in `SECURITY.md`; a guard for the plugin's files is a candidate for item 3)
-2. The skills' `Bash(bash *)` grants narrowed, with the ledger and receipts in one view: 0.7.6. Claude, after one headless experiment; the view's look needs one mock the maintainer taps
-3. The guard batch (state folders under `owner-file`, the staged settings copy, folder targets of the owner's files): 0.7.7. Claude, with its own review round
+2. Split in two. (a) The skills' `Bash(bash *)` grants narrowed: done in 0.7.6. (b) The ledger and receipts in one view: 0.7.7. Claude builds it; its look: the maintainer chose look B on 2026-11-27 (the report table, then each run-plan run's receipts).
+3. The guard batch (state folders under `owner-file`, the staged settings copy, folder targets of the owner's files): 0.7.8. Claude, with its own review round
 4. The owner's rules out of the make-prompt template: Claude writes the diff; which rules are personal is the maintainer's
 5. The evals CI fix: each try is a push and a CI run with the repo secret (maintainer and Claude)
 6. Method M's two-valued Stop wait: Claude, on a quiet laptop only
 7. Maintainer only: the receipts post, the README lead, the listing, the demo gif, the live status-line check, the tag and release page, five real A/B tasks, the icon
 
-## Next release (after 0.7.5) — open items
+## Next release (after 0.7.6) — open items
+- [ ] `ledger.py --put` accepts fields the hooks own (0.7.6 R1 finding 5; older than 0.7.6, not changed by it). A 0.7.8 candidate, with its own review round
+- [ ] `ledger.py --report` ends with a traceback on a bad ledger line (it reads every line with `json.loads` and no guard); `--receipts` does not. Fix with the 0.7.7 view, which skips and counts a bad line, or alone
+- [ ] A `PreSkillShellCommand` hook could let bash-guard see a skill's `!` lines, which Claude Code runs before any `PreToolUse` hook. Experiment first: does such an event exist on the Claude Code versions the README names, and what does it carry
 - [ ] The launcher's shell is not isolated (0.7.5 R1): bash reads its own start-up settings (`BASH_ENV`, `SHELLOPTS`, exported functions) and `PATH` from the session's environment before `py.sh` runs. `bash -p` in the command string covers only the inner bash; a command without `args` is read by a shell first. Candidate: the `args` form, `bash -p` as the program. Experiment first: which `bash` that form finds on Windows, the oldest Claude Code that knows `args`, one event's cost. Then all 19 commands at once, own review round. With the guard batch: `file-guard` compares only the plugin's option names in a settings `env` block
 - [ ] `file-guard-test.sh` and `run.sh` start the launcher without a temp `HOME`, so a full run rewrites the real `~/.claude/smartuse/interpreter` (found in 0.7.5: the file now carries a mark and is rewritten once). Fix: those suites use a temp `HOME`
 - [x] Done in 0.7.4 (F1, F2). The original item: The paid check misses a counter whose own path passes 259 characters (0.7.3 E1): after `LongPathsEnabled` is switched off over a counter in a full-key folder of 245 characters or more, the project moves to the short key, the plain `os.path.isfile` does not see the old counter, and the count starts again; doctor does not see it either. Fix: the paid check and doctor look for the other folder's counter through the extended-length path form (`\\?\`); new code in the paid check, so with the paid-reasons batch and its own review round
@@ -175,7 +187,7 @@ Rule 1's open-before-done gate ships in 0.6.0 as the fresh-source gate (opened =
 - [ ] The owner's personal rules out of the make-prompt template
 - [x] Uninstall and privacy sections in the README: what the hooks read, what they write, how to remove the state under `~/.claude/smartuse/` (0.7.1, F5)
 - [ ] Merge the ledger and the receipts into one view
-- [ ] The skills' broad `Bash(bash *)` grants narrowed to the commands each skill runs
+- [x] The skills' broad `Bash(bash *)` grants narrowed to the commands each skill runs (0.7.6; make-prompt's `git *` narrowed to three read forms in the R1 fix)
 - [ ] The evals CI fix: slash-command cases score 0 in CI on Claude Code 2.1.322, so the evals workflow (`.github/workflows/evals.yml`) is run by hand until this is fixed
 - [ ] Marketplace listing (community marketplace form), awesome-lists PRs (YK's clicks)
 - [ ] README demo gif re-recorded on the laptop with the status line visible
