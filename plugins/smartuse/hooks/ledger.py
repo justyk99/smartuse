@@ -18,6 +18,12 @@ State dir:   <key> is the repo's full resolved path with every character outside
              written; only --receipts reads it, to list its archived runs after the keyed dir's, marked as shared (legacy_dir()).
              Records keep "project" (the folder name, for readability) and add "project_path" (the resolved path).
 Report:      bash py.sh ledger.py --report [N]   -> a table of the last N ledger lines + totals (used by /smartuse:ledger).
+             bash py.sh ledger.py --view [N] [task word] [all]  -> --report's table of the last N runs (default 10; a word: every run of
+                                                           the tasks holding it; all: every run), then under it the --receipts block of each
+                                                           run-plan run shown, read from that run's own archive (runs/<started_at>_<task>.json
+                                                           in the state dir its project_path gives), or `steps: not kept (<archive>)`; a last
+                                                           block `running now` while this project's routing.json is active. Reads only, writes
+                                                           nothing; a ledger line it cannot print is skipped and counted (`N lines unreadable`).
              bash py.sh ledger.py --receipts [task|all]  -> one row per plan step of the latest run (or a named run / every archived run),
                                                            from routing.json + runs/, plus a summary line with the agent-output share
                                                            by model (used by /smartuse:receipts). The keyed dir comes first; the 0.3.0
@@ -467,19 +473,27 @@ def report(n=10):
     if not rows:
         print("ledger: empty")
         return
-    print(f"ledger: {len(rows)} tasks  ({LEDGER})")
-    print("| when | project | skill | mode | task | min | fresh-in | cache-read | out | self-check |")
-    print("|---|---|---|---|---|---|---|---|---|---|")
-    for r in rows[-n:]:
+    for line in report_lines(rows, rows[-n:]):
+        print(line)
+
+
+def report_lines(rows, shown):
+    """The lines --report prints: `rows` is every ledger line (the count and the medians), `shown` the table's rows. A generator, so
+    a line that cannot be formatted ends the output where it always did. --view prints these same lines (look B), so the two
+    cannot disagree."""
+    yield f"ledger: {len(rows)} tasks  ({LEDGER})"
+    yield "| when | project | skill | mode | task | min | fresh-in | cache-read | out | self-check |"
+    yield "|---|---|---|---|---|---|---|---|---|---|"
+    for r in shown:
         f = flat(r.get("tokens") or {})
-        print(f"| {str(r.get('ts',''))[:16]} | {r.get('project')} | {r.get('skill')} | {r.get('mode')} | {str(r.get('task',''))[:40]} | "
-              f"{(r.get('duration_s') or 0)/60:.1f} | {f['input'] + f['cache_create']:,} | {f['cache_read']:,} | {r.get('total_output',0):,} | {r.get('self_check') or ''} |")
+        yield (f"| {str(r.get('ts',''))[:16]} | {r.get('project')} | {r.get('skill')} | {r.get('mode')} | {str(r.get('task',''))[:40]} | "
+               f"{(r.get('duration_s') or 0)/60:.1f} | {f['input'] + f['cache_create']:,} | {f['cache_read']:,} | {r.get('total_output',0):,} | {r.get('self_check') or ''} |")
     ins = [r.get("total_input", 0) for r in rows]; outs = [r.get("total_output", 0) for r in rows]
-    print(f"median total-in {int(statistics.median(ins)):,} (mostly cache reads) · median out {int(statistics.median(outs)):,} · total out {sum(outs):,}")
+    yield f"median total-in {int(statistics.median(ins)):,} (mostly cache reads) · median out {int(statistics.median(outs)):,} · total out {sum(outs):,}"
     by = {}
     for r in rows:
         k = f"{r.get('skill')}/{r.get('mode')}"; by.setdefault(k, []).append(r.get("total_output", 0))
-    print("by skill/mode (median out): " + " · ".join(f"{k} {int(statistics.median(v)):,} (n={len(v)})" for k, v in by.items()))
+    yield "by skill/mode (median out): " + " · ".join(f"{k} {int(statistics.median(v)):,} (n={len(v)})" for k, v in by.items())
 
 
 def fmt_k(n):
@@ -595,6 +609,27 @@ def pick_runs(which):
     return project, sdir, picks
 
 
+def run_block(path, r, legacy=False, project_name=""):
+    """The lines --receipts prints for one run (markdown form): the header, the LEGACY_NOTE line for a run from the 0.3.0 dir, one
+    row per plan step, then summary_line. A generator, as report_lines. --view prints this same block under its report table."""
+    units = r.get("units") or []
+    totals, del_out = run_totals(units)
+    state = "active" if r.get("active") else "closed"
+    yield f"receipts: {r.get('task')} · dial {r.get('dial')} · started {r.get('started_at')} · {state} · {len(units)} steps  ({path})"
+    if legacy:
+        yield LEGACY_NOTE.format(name=project_name)
+    yield "| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |"
+    yield "|---|---|---|---|---|---|---|---|---|---|---|---|"
+    for u in units:
+        ov = u.get("override") or {}
+        ov_s = f"{ov.get('from')}→{ov.get('to')}" if ov else ""
+        ai, ao = int(u.get("agent_input") or 0), int(u.get("agent_output") or 0)
+        yield (f"| {u.get('id')} | {str(u.get('title') or '')[:36]} | {u.get('tier') or ''} | {u.get('model') or ''} | {ov_s} | "
+               f"{u.get('status') or u.get('outcome') or 'pending'} | {'yes' if u.get('escalated') else ''} | {u.get('verify') or ''} | "
+               f"{u.get('agent_calls') or ''} | {fmt_k(ai) if ai else ''} | {fmt_k(ao) if ao else ''} | {str(u.get('check') or '')[:40]} |")
+    yield summary_line(r, units, totals, del_out)
+
+
 def receipts(which=None, as_json=False):
     """One row per plan step plus a summary line (markdown), or with as_json the run(s) as JSON: one object for a single run,
     a list for "all" — {"task","dial","started_at","closed_at","active","needs_human","path","legacy","steps":[units verbatim],
@@ -612,31 +647,153 @@ def receipts(which=None, as_json=False):
             if not as_json:
                 print(f"receipts: cannot read {path}")
             continue
-        units = r.get("units") or []
-        totals, del_out = run_totals(units)
         if as_json:
+            units = r.get("units") or []
+            totals, del_out = run_totals(units)
             out.append({"task": r.get("task"), "dial": r.get("dial"), "started_at": r.get("started_at"), "closed_at": r.get("closed_at"),
                         "active": bool(r.get("active")), "needs_human": r.get("needs_human"), "path": str(path), "legacy": legacy,
                         "steps": units, "totals": totals})
             continue
-        state = "active" if r.get("active") else "closed"
-        print(f"receipts: {r.get('task')} · dial {r.get('dial')} · started {r.get('started_at')} · {state} · {len(units)} steps  ({path})")
-        if legacy:
-            print(LEGACY_NOTE.format(name=project.name))
-        print("| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |")
-        print("|---|---|---|---|---|---|---|---|---|---|---|---|")
-        for u in units:
-            ov = u.get("override") or {}
-            ov_s = f"{ov.get('from')}→{ov.get('to')}" if ov else ""
-            ai, ao = int(u.get("agent_input") or 0), int(u.get("agent_output") or 0)
-            print(f"| {u.get('id')} | {str(u.get('title') or '')[:36]} | {u.get('tier') or ''} | {u.get('model') or ''} | {ov_s} | "
-                  f"{u.get('status') or u.get('outcome') or 'pending'} | {'yes' if u.get('escalated') else ''} | {u.get('verify') or ''} | "
-                  f"{u.get('agent_calls') or ''} | {fmt_k(ai) if ai else ''} | {fmt_k(ao) if ao else ''} | {str(u.get('check') or '')[:40]} |")
-        print(summary_line(r, units, totals, del_out))
+        for line in run_block(path, r, legacy, project.name):
+            print(line)
         if len(picks) > 1:
             print()
     if as_json:
         print(json.dumps(out if which == "all" else (out[0] if out else None), indent=2, ensure_ascii=False))
+
+
+def clean_text(s, n=60):
+    """A field of the ledger or of a run, made safe to print: a control character (C0, DEL, C1), a line or paragraph separator
+    and a lone surrogate each become one space, then the text is cut at n characters. Never raises."""
+    return "".join(" " if (ord(c) < 32 or 127 <= ord(c) < 160 or c in "\u2028\u2029" or 0xD800 <= ord(c) <= 0xDFFF) else c
+                   for c in str(s))[:n]
+
+
+def clean_deep(v, n=200):
+    """A run read from a file with every string in it passed through clean_text; numbers and the shape stay as they are."""
+    if isinstance(v, str):
+        return clean_text(v, n)
+    if isinstance(v, list):
+        return [clean_deep(x, n) for x in v]
+    if isinstance(v, dict):
+        return {k: clean_deep(x, n) for k, x in v.items()}
+    return v
+
+
+def view_row(r):
+    """A ledger line as --view prints it, or None when it cannot be printed: not a JSON object, a number field that is not a
+    finite number, or tokens that flat() cannot add. A printed text field is cleaned and cut (task and project are the model's
+    words). Works on a copy; the ledger is never changed."""
+    if not isinstance(r, dict):
+        return None
+    c = dict(r)
+    for k in ("duration_s", "total_input", "total_output"):
+        v = c.get(k, 0)
+        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) < float("inf")):   # NaN fails too
+            return None
+    for k in ("ts", "project", "skill", "mode", "task", "self_check"):
+        if c.get(k) is not None:
+            c[k] = clean_text(c[k], 200 if k == "task" else 80)   # task: not cut below safe_name's 80, so archive_name(c) still names the run's file
+    try:
+        list(report_lines([c], [c]))   # a dry run of the report's own formatting: a line it cannot print is not shown
+    except Exception:
+        return None
+    return c
+
+
+def view_args(args):
+    """--view's words -> (N or None, task word or None, every run?), or None for an option it does not know. Digits are N (the
+    last N runs), `all` every run, any other word a task filter (the first one); order does not matter."""
+    n = word = None
+    every = False
+    for a in args:
+        if a.startswith("-"):
+            return None
+        if a.lower() == "all":
+            every = True
+        elif a.isascii() and a.isdigit():
+            n = n if n is not None else int(a[:9])
+        elif word is None:
+            word = a.lower()
+    return n, word, every
+
+
+def view_steps(r):
+    """A run-plan ledger line -> (the archived run, its path), else (None, None): the run's own archive only, runs/<started_at>_<task>.json
+    in the state folder the key rule gives for the line's project_path. A project_path that is not an absolute path or holds `..`
+    is never used; nothing is created; a file that is missing or unreadable is None. Never raises."""
+    try:
+        pp = r.get("project_path")
+        if not isinstance(pp, str) or not os.path.isabs(pp) or ".." in pathlib.PurePath(pp).parts:
+            return None, None
+        path = state_dir(pathlib.Path(pp)) / "runs" / archive_name(r)
+        return read_run(path), path
+    except Exception:
+        return None, None
+
+
+def view_block(path, run):
+    """The --receipts block of a run for --view, its strings cleaned, as lines; a run that cannot be printed -> one line."""
+    try:
+        return list(run_block(path, clean_deep(run)))
+    except Exception:
+        return [f"steps: unreadable ({path.name})"]
+
+
+def view(args):
+    """--view [N] [task word] [all]: the --report table of the last N runs (default 10; a word: every run of the tasks holding it; `all`:
+    every run), then, under it, the --receipts block of each run-plan run shown, each read from its own archive (view_steps), or
+    `steps: not kept (<archive name>)`; then a block `running now` when this project's routing.json is active. Read only: nothing
+    is created or written. The ledger is anyone's data: a line that is not a JSON object, or has a field it cannot print, is
+    skipped and counted (`N lines unreadable`), and every printed field is cleaned (clean_text). The table and its closing lines
+    are report_lines, the blocks run_block: --view and --report / --receipts cannot disagree."""
+    a = view_args(args)
+    if a is None:
+        return refuse("view", "unknown option; use --view [N] [task word] [all]")
+    n, word, every = a
+    if n is not None and n < 1:
+        return refuse("view", "N must be 1 or more")
+    rows, bad, out = [], 0, []
+    have = LEDGER.exists()
+    if not have:
+        out.append("ledger: empty (no task recorded yet)")
+    else:
+        try:
+            text = LEDGER.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return refuse("view", f"cannot read {LEDGER}")
+        for l in text.splitlines():
+            if not l.strip():
+                continue
+            try:
+                r = view_row(json.loads(l))
+            except Exception:
+                r = None
+            if r is None:
+                bad += 1
+            else:
+                rows.append(r)
+    shown = [r for r in rows if word in str(r.get("task") or "").lower()] if word else rows
+    cap = n if n is not None else (None if (every or word) else 10)
+    shown = shown[-cap:] if cap else shown
+    if have:
+        out += list(report_lines(rows, shown)) if rows else ["ledger: empty"]
+        if rows and word and not shown:
+            out.append(f'no run of a task holding "{clean_text(word)}"')
+        if bad:
+            out.append(f"{bad} line{'' if bad == 1 else 's'} unreadable")
+    for r in shown:
+        if r.get("skill") != "run-plan":
+            continue
+        run, path = view_steps(r)
+        out.append("")
+        out += view_block(path, run) if run is not None else [f"steps: not kept ({archive_name(r)})"]
+    cur_path = state_dir(cli_project()) / "routing.json"
+    cur = read_run(cur_path)
+    if cur is not None and cur.get("active") and (not word or word in archive_name(cur).lower()):
+        out += ["", "running now"] + view_block(cur_path, cur)
+    print("\n".join(out))
+    return 0
 
 
 def recompute():
@@ -905,6 +1062,12 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--receipts":
         args = sys.argv[2:]
         receipts(next((a for a in args if a != "--json"), None), as_json="--json" in args); return
+    if len(sys.argv) > 1 and sys.argv[1] == "--view":
+        try:
+            rc = view(sys.argv[2:])
+        except Exception as e:   # the view never ends on a traceback
+            rc = refuse("view", f"{type(e).__name__}: {e}")
+        sys.exit(rc)
     if len(sys.argv) > 1 and sys.argv[1] == "--report":
         report(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
         return
