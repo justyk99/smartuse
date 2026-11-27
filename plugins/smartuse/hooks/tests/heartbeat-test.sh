@@ -1071,7 +1071,7 @@ L = '"${CLAUDE_PLUGIN_ROOT}/hooks/'
 # g4's table: the launcher rules each skill is granted, as "script option [literal words] [*]" (the fix's table; 0.7.6 plan F1)
 TABLE = {
     "doctor": ["heartbeat.py --doctor"],
-    "ledger": ["ledger.py --report *"],
+    "ledger": ["ledger.py --view *"],
     "receipts": ["ledger.py --receipts *"],
     "status": ["heartbeat.py --line"],
     "living-docs": ["ledger.py --state-dir --create", "ledger.py --put pending.json *"],
