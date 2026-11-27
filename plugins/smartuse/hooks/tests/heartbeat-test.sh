@@ -1054,8 +1054,10 @@ done
 # to Python); g3 every launcher command a skill's text starts is covered by a rule of that same skill (matching as the permissions page says: the text before the first `*` as written, `*` is any
 # text, a trailing ` *` also takes the bare command); g4 each skill's launcher rules equal the table below; g5 no git rule is wider than one read subcommand (never `git *`, `git -c`, `git config`,
 # `git alias`; `git branch` only as --show-current) and every git command on a `!` line is covered by a rule of its skill (R1 fix round); g6 no `!` command holds a brace group, (( )), $( ) or a
-# ( ) subshell (Claude Code cannot check those before they run and aborts the skill at load; make-prompt did, 0.7.5 and 0.7.6).
-gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> seven lines "OK|BAD g<n> ..."
+# ( ) subshell (Claude Code cannot check those before they run and aborts the skill at load; make-prompt did, 0.7.5 and 0.7.6); g7 (T3 fix round) no git or svn rule has a `*` where an option can sit
+# (--output=<path>, --diff-cmd, -x, --config-option): exact, or `-- *`, or on the commented allow-list. T3 fix round also: g1 exempts only `--version` and the exact `node -v` forms (not `-v` for every
+# interpreter); the reader skips `#` lines inside the list, accepts `- ` items at the key's own indent and flags any other line before the next key.
+gcheck() { # $1 = a plugin folder (skills/*/SKILL.md), $2 = its hooks folder -> eight lines "OK|BAD g<n> ..."
   py - "$1" "$2" <<'PY'
 import glob, os, re, sys
 root, hooks = sys.argv[1], sys.argv[2]
@@ -1115,23 +1117,31 @@ def unquote(v):
     if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
         return v[1:-1].replace('\\"', '"').replace("\\\\", "\\")
     return v
-def raw_values(fm):  # the text after `allowed-tools:` (one line) or the list items under it; None when the key is absent
+def raw_values(fm):  # (kind, values, odd): the text after `allowed-tools:` (one line) or the list items under it; kind None when the key is absent; odd = the first line the reader does not understand, else ""
     lines = fm.splitlines()
     for i, l in enumerate(lines):
-        m = re.match(r"allowed-tools:[ \t]*(.*)$", l)
+        m = re.match(r"([ \t]*)allowed-tools:[ \t]*(.*)$", l)
         if not m:
             continue
-        if m.group(1).strip():
-            return "line", [m.group(1).strip()]
-        items = []
+        kind_indent, val = len(m.group(1)), m.group(2).strip()
+        if val and not val.startswith("#"):
+            return "line", [val], ""
+        items, odd, item_indent = [], "", None
         for l2 in lines[i + 1:]:
-            m2 = re.match(r"[ \t]+-[ \t]+(.*)$", l2)
-            if m2:
-                items.append(m2.group(1).strip())
-            elif l2.strip():
+            s = l2.strip()
+            if not s or s.startswith("#"):  # a blank line or a `# comment` line inside the list is skipped, never the end of it (T3 finding 2)
+                continue
+            m2 = re.match(r"([ \t]*)-[ \t]+(.*)$", l2)
+            if m2 and len(m2.group(1)) >= kind_indent and item_indent in (None, len(m2.group(1))):  # an item at the key's own indent counts (YAML allows `- x` under `key:` with no extra indent); every item sits at one indent
+                item_indent = len(m2.group(1))
+                items.append(m2.group(2).strip())
+            elif not m2 and re.match(r"[A-Za-z_][A-Za-z0-9_-]*:", l2.lstrip()) and len(l2) - len(l2.lstrip()) <= kind_indent:
+                break  # the next key: the list is over
+            else:
+                odd = s[:60]  # any other line before the next key: fail closed
                 break
-        return "list", items
-    return None, None
+        return "list", items, odd
+    return None, None, ""
 def items_of(v):  # one YAML value -> its items: a value quoted as a whole is unquoted, then split; else split, then each item unquoted
     v = v.strip()
     if len(v) >= 2 and v[0] in "'\"" and v[-1] == v[0]:
@@ -1140,12 +1150,12 @@ def items_of(v):  # one YAML value -> its items: a value quoted as a whole is un
             return split_top(unquote(v))
     return [unquote(x) for x in split_top(v)]
 def rules_of(fm):
-    kind, vals = raw_values(fm)
+    kind, vals, odd = raw_values(fm)
     if kind is None:
         return None
     return [r for v in vals for r in items_of(v)]
 def yaml_ok(fm):  # a scalar must be a plain one without ": " or " #", or quoted and closed (the one-line comma form is read by Claude Code, but only a quoted item is valid YAML around "Bash(: ...)")
-    kind, vals = raw_values(fm)
+    kind, vals, odd = raw_values(fm)
     for v in vals or []:
         if v[:1] == "'":
             if len(v) < 2 or v[-1] != "'" or "'" in v[1:-1].replace("''", ""):
@@ -1202,7 +1212,12 @@ SELF = [
     ("allowed-tools: Bash(bash *) Read, Write", ["Bash(bash *)", "Read", "Write"], True),
     ("allowed-tools:\n  - 'Bash(ls *) Bash(cp *)'\n  - Read Edit", ["Bash(ls *)", "Bash(cp *)", "Read", "Edit"], True),
     ("allowed-tools: 'Bash(a b *)' \"Bash(c)\",Read", ["Bash(a b *)", "Bash(c)", "Read"], False),  # read right, but not valid YAML (a closed quote, then more text)
+    ("allowed-tools:\n  # a note\n  - 'Bash(bash *)'\n  # another\n  - Read\n\n  - Write\nname: x", ["Bash(bash *)", "Read", "Write"], True),  # T3 finding 2: a comment or a blank line inside the list is skipped
+    ("name: x\nallowed-tools:\n- 'Bash(python3 *)'\n- Read\ndescription: y", ["Bash(python3 *)", "Read"], True),  # T3 finding 2: the list at the key's own indent
+    ("allowed-tools: # a note\n  - Read\n  - Edit", ["Read", "Edit"], True),  # a comment after the key, the list below
 ]
+ODDSELF = ["allowed-tools:\n  - Read\n  Bash(bash *)\n  - Write", "allowed-tools:\n  - Read\n    - Write", "allowed-tools:\n  - Read\n  bash: x\nname: y", "allowed-tools:\n  - Read\nBash(bash *)\n", "allowed-tools:\n  - Read\n - Write"]  # T3 finding 2: any other line before the next key is BAD (fail closed)
+NOTODD = ["allowed-tools:\n  - Read\nname: y", "allowed-tools:\n  # c\n  - Read\n\nname: y", "allowed-tools: Read, Write", "allowed-tools:\n- Read\nname: y"]
 GOODTOK = ["Read", "Bash(x *)", "Write(~/a b)", "mcp__srv__tool", "Bash(bash \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *)"]
 BADTOK = ["Bash(grep *", "Bash (x)", "(x)", "Bash(a)b", "Read)", "Bash(a) Bash(b)", "-c", "*", "Bash(a(b)"]
 bad = []
@@ -1211,6 +1226,12 @@ for i, (fm, want, ok) in enumerate(SELF, 1):
         bad.append("self-test %d read %r" % (i, rules_of(fm)))
     if yaml_ok(fm) != ok:
         bad.append("self-test %d yaml_ok is %s" % (i, yaml_ok(fm)))
+for fm in ODDSELF:
+    if not raw_values(fm)[2]:
+        bad.append("self-test: %r is read without a flag" % fm)
+for fm in NOTODD:
+    if raw_values(fm)[2]:
+        bad.append("self-test: %r is flagged: %r" % (fm, raw_values(fm)[2]))
 for tk in GOODTOK:
     if not well_formed(tk):
         bad.append("self-test: %r should be an item" % tk)
@@ -1220,6 +1241,8 @@ for tk in BADTOK:
 for name, (fm, t) in skills.items():
     if rules_of(fm) is None:
         bad.append("%s has no allowed-tools" % name)
+    elif raw_values(fm)[2]:
+        bad.append("%s: allowed-tools holds a line the reader does not understand: %r" % (name, raw_values(fm)[2]))
     elif not yaml_ok(fm):
         bad.append("%s: allowed-tools is not valid YAML" % name)
     else:
@@ -1228,20 +1251,23 @@ for name, (fm, t) in skills.items():
                 bad.append("%s: item %r is not Name or Name(...)" % (name, r[:60]))
 if len(skills) < 8:
     bad.append("only %d skills found" % len(skills))
-res["g0"] = ("BAD g0 " + "; ".join(bad)) if bad else "OK g0 the reader returns the right rules for its %d self-test lines (comma, space, YAML list), every one of the %d skills' lines is valid YAML and every item is Name or Name(...)" % (len(SELF), len(skills))
+res["g0"] = ("BAD g0 " + "; ".join(bad)) if bad else "OK g0 the reader returns the right rules for its %d self-test lines (comma, space, YAML list, a comment inside the list, a list at the key's own indent), flags %d odd layouts and passes %d plain ones, every one of the %d skills' lines is valid YAML and every item is Name or Name(...)" % (len(SELF), len(ODDSELF), len(NOTODD), len(skills))
 # g1
+NODE_V = ("node -v", "node -v*", "node -v 2>/dev/null")  # the exact forms: make-prompt's `!` line is `node -v 2>/dev/null || echo no`, its rule is `node -v*`
 def g1_bad(tool, inner):  # True when a Bash or PowerShell rule grants a bare tool, a shell or an interpreter (the whole launcher shape and a version query are the only ways in)
     if inner is None or inner.strip() in ("", "*"):
         return True
     w, tail = first_word(inner)
     if w in WRAP and any(first_word(x)[0] in INTERP for x in tail.split()[:6]):
         return True
-    return w in INTERP and not (tool == "Bash" and SHAPE.match(inner)) and not re.fullmatch(r"(?:-v|-V|--version)(?: ?\*)?", tail.strip())
+    if w in INTERP and tool == "Bash" and (SHAPE.match(inner) or tail.strip() == "--version" or (w == "node" and inner.strip() in NODE_V)):
+        return False  # the whole launcher shape, `<interpreter> --version`, or an exact `node -v` form; nothing else (`python3 -v`, `sh -v`, `ruby -v`, `env -v` run code or a program: T3 finding 1)
+    return w in INTERP
 LP = 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/'
 G1_MUST_BE_BAD = ["python3 -c *", "sh -c *", "py -3 *", "node -e *", "env bash *", "python3.12 *", "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\" --recompute",
-                  "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *", "bash *", "python *", "/usr/bin/env python3 *", r"C:\Python313\python.exe *", "PWSH.EXE -c *", "timeout 5 bash *", "bash -c *",
+                  "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/py.sh\" *", "bash *", "python *", "python3 -v *", "sh -v *", "ruby -v *", "env -v *", "python3 -I -v -c *", "bash -v *", "node -v -e *", "node -v *", "python3 -V *", "/usr/bin/env python3 *", r"C:\Python313\python.exe *", "PWSH.EXE -c *", "timeout 5 bash *", "bash -c *",
                   LP + "ledger.py\" *", LP + "ledger.py\" -c *", "*", ""]
-G1_MUST_BE_OK = [LP + "ledger.py\" --report *", LP + "heartbeat.py\" --line", "node -v*", "ls *", "command -v *", "git status *", ": smartuse-doctor-canary", "echo *"]
+G1_MUST_BE_OK = [LP + "ledger.py\" --report *", LP + "heartbeat.py\" --line", "node -v*", "node -v", "node -v 2>/dev/null", "python3 --version", "node --version", "sh --version","ls *", "command -v *", "git status *", ": smartuse-doctor-canary", "echo *"]
 bad = ["self-test: %r is not flagged" % x for x in G1_MUST_BE_BAD if not g1_bad("Bash", x)] + ["self-test: %r is flagged" % x for x in G1_MUST_BE_OK if g1_bad("Bash", x)]
 for name, (fm, t) in skills.items():
     for r in rules_of(fm) or []:
@@ -1319,11 +1345,44 @@ for name, (fm, t) in skills.items():
                 bad.append("%s: %s" % (name, r))
     for ln, line in enumerate(t.splitlines(), 1):
         for span in re.findall(r"!`([^`]*)`", line):
-            for seg in re.findall(r"\bgit [a-z-]+[^|;&{}`]*", span):
+            for seg in re.findall(r"\b(?:git|svn) [a-z-]+[^|;&{}`]*", span):  # svn too (T3 finding 3): `svn info`, `svn status` on a `!` line need a rule
                 nbang += 1
                 if not any(covers(i, seg.strip()) for i in inners):
                     bad.append("%s:%d `!` line runs `%s`, no rule covers it" % (name, ln, seg.strip()[:60]))
-res["g5"] = ("BAD g5 " + "; ".join(bad)) if bad or n == 0 or nbang == 0 else "OK g5 %d git rules, none wider than one read subcommand (branch only as --show-current; never git *, -c, config, alias), and all %d git commands on `!` lines are covered by a rule of their skill" % (n, nbang)
+res["g5"] = ("BAD g5 " + "; ".join(bad)) if bad or n == 0 or nbang == 0 else "OK g5 %d git rules, none wider than one read subcommand (branch only as --show-current; never git *, -c, config, alias), and all %d git and svn commands on `!` lines are covered by a rule of their skill" % (n, nbang)
+# g7 (T3 finding 3): a git or svn rule leaves no hole where an option can sit. `git log|diff|show` take `--output=<path>` (write a file), `svn diff` takes `--diff-cmd=<prog>` and `-x` (run a program),
+# `svn info|status|log` take `--config-option=config:tunnels:...` (runs a program over svn+ssh). So a git/svn rule is exact (no `*`), or its one `*` stands right after ` -- ` (after `--` everything is a path,
+# an option there is a file name), or it is on G7_ALLOW below with the reason it cannot be narrowed. An allow-list entry no skill uses any more is BAD too (the list may not outlive the need).
+G7_ALLOW = {  # (skill, the rule inside Bash(...)) -> why it cannot be narrowed without breaking the skill's flow
+    ("living-docs", "git show --stat *"): "the body types `git show --stat <hash>` (living-docs/SKILL.md:55): a free commit id, no `--` in the command; an option after it (--output=<path>) would write a file",
+    ("living-docs", "git show * -- *"): "the body types `git show <hash> -- <file>` (:55): the free commit id sits before the `--`, and an option there (--output=<path>) would write a file",
+    ("living-docs", "svn diff -c *"): "the body types `svn diff -c rNNNN --summarize` and `svn diff -c rNNNN <file>` with the adapter's svn_flags (:55): a free revision and free flags, no `--`; --diff-cmd, -x and --config-option could follow",
+}
+def g7_bad(inner):  # True when a git or svn rule has a `*` that is not the one right after ` -- `
+    w, tail = first_word(inner)
+    if w not in ("git", "svn") or "*" not in inner:
+        return False
+    return not (inner.count("*") == 1 and inner.endswith(" -- *"))
+G7_MUST_BE_BAD = ["git log *", "git diff *", "git show *", "svn diff *", "svn info *", "svn status *", "svn log *", "git status --short *", "git log --format=%an *", "git show * -- *", "svn diff -c *", "git*", "git log -- * *",
+                  "git log * -- *", "svn log -q -l 20 *", "svn info --show-item *", "git log --oneline -6*", "svn *", "git diff -- a*"]
+G7_MUST_BE_OK = ["git log --format=%an -- *", "git diff -- *", "svn diff -- *", "git status --short", "git status --short 2>/dev/null", "git log --oneline -6", "git log --oneline -6 2>/dev/null", "svn info --show-item revision",
+                 "svn info --show-item revision 2>/dev/null", "svn status", "svn status 2>/dev/null", "git branch --show-current", "git branch --show-current 2>/dev/null", "ls *", "echo *", "grep *", "node -v*"]
+bad = ["self-test: %r is not flagged" % x for x in G7_MUST_BE_BAD if not g7_bad(x)] + ["self-test: %r is flagged" % x for x in G7_MUST_BE_OK if g7_bad(x)]
+bad += ["allow-list entry %r has no reason" % (k,) for k, v in G7_ALLOW.items() if len(v) < 20]
+used, ngit = set(), 0
+for name, (fm, t) in skills.items():
+    for r in rules_of(fm) or []:
+        tool, inner = tool_inner(r)
+        if tool not in ("Bash", "PowerShell") or inner is None or first_word(inner)[0] not in ("git", "svn"):
+            continue
+        ngit += 1
+        if g7_bad(inner):
+            if (name, inner) in G7_ALLOW:
+                used.add((name, inner))
+            else:
+                bad.append("%s: %s (a git or svn rule with a hole where an option can sit; narrow it to the exact command or to `-- *`)" % (name, r))
+bad += ["allow-list entry %r is used by no skill" % (k,) for k in G7_ALLOW if k not in used]
+res["g7"] = ("BAD g7 " + "; ".join(bad)) if bad or ngit == 0 else "OK g7 %d git and svn rules: each is exact, or ends in ` -- *`, or is one of the %d on the allow-list (each with its reason); %d forms self-tested" % (ngit, len(G7_ALLOW), len(G7_MUST_BE_BAD) + len(G7_MUST_BE_OK))
 # g6: Claude Code checks every `!` command before it runs and aborts the whole skill at load on a group it cannot check (0.7.6 live run, default mode: "A group in braces or double parentheses in this
 # command can't be checked before it runs"). So no `!` command (a one-line `!` span or a ```! fenced block) holds a brace group `{ ...; }`, `((`, `$(` or a `( ... )` subshell. Quoted text is literal
 # (`echo "(x)"` is fine), `${VAR}` is a variable, not a group. Plain pipes and `||` need none of these.
@@ -1361,11 +1420,11 @@ for name, (fm, t) in skills.items():
         if why:
             bad.append("%s:%d `!` line holds %s: %s" % (name, ln, why, s.strip()[:70]))
 res["g6"] = ("BAD g6 " + "; ".join(bad)) if bad or n == 0 else "OK g6 %d `!` commands in the skills, none with a brace group, (( )), $( ) or a ( ) subshell (Claude Code cannot check those before they run and aborts the skill at load); %d forms self-tested" % (n, len(G6_MUST_BE_BAD) + len(G6_MUST_BE_OK))
-for k in ("g0", "g1", "g2", "g3", "g4", "g5", "g6"):
+for k in ("g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7"):
     print(res[k])
 PY
 }
-gmut() { # $1 = m4..m13, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
+gmut() { # $1 = m4..m16, $2 = a SKILL.md in a temp copy -> rewritten in place; prints CHANGED or UNCHANGED
   py - "$1" "$2" <<'PY'
 import re, sys
 name, p = sys.argv[1], sys.argv[2]
@@ -1395,16 +1454,22 @@ elif name == "m12":  # receipts: the launcher run through sh (R1 finding 3)
 elif name == "m13":  # make-prompt: the VCS line put back as it was in 0.7.5 and 0.7.6, with the `{ ...; } | wc -l` group that aborted the skill at load
     OLD = "- VCS: !`git branch --show-current 2>/dev/null || svn info --show-item revision 2>/dev/null || echo none` · dirty files: !`{ git status --short 2>/dev/null || svn status 2>/dev/null || true; } | wc -l`"
     t = re.sub(r"^- VCS:[^\n]*$", lambda m: OLD, t, count=1, flags=re.M)
+elif name == "m14":  # ledger: a `# comment` line, then a whole-shell rule, inside the list (T3 finding 2: the reader used to stop at the comment)
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  # a note\n  - 'Bash(bash *)'\n", t, count=1, flags=re.M)
+elif name == "m15":  # reply-style: the list at the key's own indent, holding Bash(python3 *) (T3 finding 2: the reader used to read zero rules)
+    t = swap(t, "allowed-tools:\n- 'Bash(python3 *)'\n")
+elif name == "m16":  # make-prompt: `Bash(git log *)` back (T3 finding 3: --output=<path> writes a file)
+    t = re.sub(r"^(allowed-tools:\n)", lambda m: m.group(1) + "  - 'Bash(git log *)'\n", t, count=1, flags=re.M)
 open(p, "w", encoding="utf-8", newline="").write(t)
 print("CHANGED" if t != o else "UNCHANGED")
 PY
 }
 GR=$(gcheck "$H/.." "$H")
-for G in g0 g1 g2 g3 g4 g5 g6; do
+for G in g0 g1 g2 g3 g4 g5 g6 g7; do
   GL=$(printf '%s\n' "$GR" | grep "^[A-Z]* $G " || true)
   case "$GL" in "OK $G "*) echo "PASS 0.7.6 F1 $G ${GL#OK $G }";; *) echo "FAIL 0.7.6 F1 $G ${GL:-no output from the helper: $GR}"; fail=1;; esac
 done
-for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4" "m8 reply-style g1" "m9 status g1" "m10 make-prompt g5" "m11 status g1" "m12 receipts g1" "m13 make-prompt g6"; do
+for MUT in "m4 ledger g1" "m5 receipts g3" "m6 run-plan g2" "m7 status g4" "m8 reply-style g1" "m9 status g1" "m10 make-prompt g5" "m11 status g1" "m12 receipts g1" "m13 make-prompt g6" "m14 ledger g1" "m15 reply-style g1" "m16 make-prompt g7"; do
   read -r MN MS MG <<< "$MUT"
   rm -rf "$D/g1m"; mkdir -p "$D/g1m"; cp -r "$H/../skills" "$D/g1m/"
   if [ "$(gmut "$MN" "$D/g1m/skills/$MS/SKILL.md")" != "CHANGED" ]; then echo "FAIL 0.7.6 F1 $MN the mutation changed nothing (the text it edits moved)"; fail=1; continue; fi
