@@ -3,7 +3,8 @@
 # (tokens by model on the line and on the running plan step), none once the run is closed; --receipts summary with the
 # agent-output share by model; --json; the state dir keyed by the full path (the 0.3.0 folder-name dir: listed by --receipts, marked
 # as shared, never read by the hooks nor written); --state-dir [--create] (always the keyed dir); non-ASCII under cp1252;
-# the skills' state writes --put / --unit / --run / --get (keyed dir only, hook- and gate-owned fields kept, typed values).
+# the skills' state writes --put / --unit / --run / --get (keyed dir only, hook- and gate-owned fields kept, typed values);
+# --view (0.7.7): --report's table, then the --receipts block of each run-plan run shown, read only (the last block of this file).
 set -e; D=$(mktemp -d); H="$(cd "$(dirname "$0")/.." && pwd)"; export HOME="$D/home"; mkdir -p "$HOME" "$D/proj"
 py() { bash "$H/py.sh" "$@"; }   # the plugin's launcher: python3, else python, else py -3 (on stock Windows python3 is only the Store stub)
 REAL=$(py -c "import sys; sys.stdout.write(sys.executable)")   # the interpreter the launcher found: the two cp1252 cases start it directly, because the launcher's -I ignores PYTHONIOENCODING (0.7.5)
@@ -393,4 +394,214 @@ else
   echo "SKIP L1 held handle: Windows only"
 fi
 for c in L2 L3 L4 L5 L6 L7; do py "$D/l.py" "$H/ledger.py" $c || { echo "FAIL $c (see the assertion above)"; exit 1; }; done
+# --- ledger.py --view (0.7.7 V1): look B = --report's table, then the --receipts block of each run-plan run shown, each read from that run's
+# own archive (runs/<started_at>_<task>.json in the state dir its project_path gives), or `steps: not kept (<archive>)`; a last block `running now`
+# while this project's routing.json is active. Read only. The ledger is anyone's data: a line it cannot print is skipped and counted, a printed field is
+# cleaned. Own temp HOMEs (one per case) and a small invented fixture (vbuild.py: three projects, tokens invented, the steps of the repo's public
+# example run); the paths in the output are made stable by norm.py (the HOME shown as ~, the sample-repo state key as <key>).
+EXJ="$H/../../../bench/results-example/2026-10-21-csv-export/routing-archived.json"; [ -f "$EXJ" ] || { echo "FAIL the repo's example run is not at $EXJ"; exit 1; }; EXJ=$(wp "$EXJ")
+mkdir -p "$D/vp/sample-repo" "$D/vp/shop-api" "$D/vp/docs-site"; VKEY=$(key "$(wp "$D/vp/sample-repo")")
+cat > "$D/norm.py" <<'PY'
+import sys
+t = sys.stdin.read().replace("\r", "").replace("\\", "/")
+for a, b in ((sys.argv[1], "~"), (sys.argv[2], "<key>")):
+    t = t.replace(a, b)
+sys.stdout.buffer.write(t.encode("utf-8"))   # bytes: no CRLF on Windows
+PY
+cat > "$D/vbuild.py" <<'PY'
+"""Fixture builder for the --view cases of ledger-test.sh. usage: vbuild.py <mode> <home> <example routing-archived.json> <dir sample-repo> <dir shop-api> <dir docs-site>
+Writes only under <home>/.claude/smartuse/. The data is invented except the steps of the repo's public example run; every token cell is invented."""
+import sys, json, re, pathlib, datetime
+mode, home, ex = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+proj = dict(zip(("sample-repo", "shop-api", "docs-site"), map(pathlib.Path, sys.argv[4:7])))
+SM = home / ".claude" / "smartuse"
+
+
+def key(p):
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(pathlib.Path(p).resolve())).lstrip("-")
+
+
+def safe(s):
+    return "".join(c if c.isalnum() or c in "-_." else "-" for c in str(s))[:80]
+
+
+def line(project, task, skill, mode, start, dur_s, calls, t_in, t_out, check, path=None):
+    t0 = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ")
+    end = (t0 + datetime.timedelta(seconds=dur_s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cr, cc = int(t_in * 0.82), int(t_in * 0.16)
+    tokens = {"claude-fable-5-1": {"input": t_in - cr - cc, "output": t_out, "cache_read": cr, "cache_create": cc, "calls": calls}}
+    return {"ts": end, "project": project, "project_path": str(proj[project].resolve()) if path is None else path, "session_id": "s-" + task,
+            "skill": skill, "task": task, "mode": mode, "started_at": start, "duration_s": dur_s, "assistant_calls": calls, "tokens": tokens,
+            "total_input": t_in, "total_output": t_out, "self_check": check, "corrections": None, "notes": "test fixture"}
+
+
+def archive(project, task, start, edit=None):
+    run = json.loads(ex.read_text(encoding="utf-8"))
+    run["task"], run["started_at"] = task, start
+    if edit:
+        edit(run)
+    d = SM / "projects" / key(proj[project]) / "runs"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{safe(start)}_{safe(task)}.json").write_text(json.dumps(run, indent=2), encoding="utf-8")
+
+
+def write(rows):
+    SM.mkdir(parents=True, exist_ok=True)
+    (SM / "ledger.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+
+EX = [line("sample-repo", "csv-export-orders", "make-prompt", "quick", "2026-10-21T15:13:36Z", 144, 6, 186420, 9310, "14/14"),
+      line("sample-repo", "csv-export-orders", "run-plan", "safe", "2026-10-21T15:16:00Z", 384, 22, 1203800, 21650, "5/6")]
+if mode == "example":      # the repo's example run: its six steps archived, and two ledger lines rebuilt from its README (2.4 and 6.4 minutes)
+    archive("sample-repo", "csv-export-orders", "2026-10-21T15:16:00Z")
+    write(EX)
+elif mode == "nosteps":    # the run-plan run's own archive is gone; another run of the same task has one (another start time)
+    archive("sample-repo", "csv-export-orders", "2026-10-22T09:00:00Z", edit=lambda r: r["units"][0].__setitem__("title", "OTHER-RUN-STEP"))
+    write(EX + [line("sample-repo", "csv-export-orders", "living-docs", "", "2026-10-21T15:24:00Z", 70, 4, 91200, 3100, "")])
+elif mode == "many":       # 14 runs, 5 tasks, 3 projects; three run-plan runs: two keep their steps, one does not
+    R = [line("sample-repo", "csv-export-orders", "make-prompt", "quick", "2026-10-21T15:13:36Z", 144, 6, 186420, 9310, "14/14"),
+         line("sample-repo", "csv-export-orders", "run-plan", "safe", "2026-10-21T15:16:00Z", 384, 22, 1203800, 21650, "5/6"),
+         line("sample-repo", "csv-export-orders", "living-docs", "", "2026-10-21T15:24:00Z", 70, 4, 91200, 3100, ""),
+         line("shop-api", "invoice-pdf", "make-prompt", "full", "2026-10-22T09:02:10Z", 410, 11, 402900, 18700, "13/14"),
+         line("shop-api", "invoice-pdf", "run-plan", "aggressive", "2026-10-22T09:10:00Z", 1260, 61, 3980400, 64200, "8/9"),
+         line("shop-api", "invoice-pdf", "living-docs", "", "2026-10-22T09:33:00Z", 95, 5, 110300, 4100, ""),
+         line("shop-api", "login-rate-limit", "make-prompt", "quick", "2026-10-23T13:40:00Z", 130, 5, 150100, 7200, "14/14"),
+         line("shop-api", "login-rate-limit", "run-plan", "safe", "2026-10-23T13:43:00Z", 520, 30, 1700500, 28800, "6/6"),
+         line("docs-site", "docs-refresh", "make-prompt", "quick", "2026-10-24T08:00:00Z", 120, 4, 98000, 5200, "12/14"),
+         line("docs-site", "docs-refresh", "run-plan", "off", "2026-10-24T08:03:00Z", 300, 18, 905000, 17100, "4/4"),
+         line("docs-site", "docs-refresh", "living-docs", "", "2026-10-24T08:10:00Z", 60, 3, 70500, 2600, ""),
+         line("docs-site", "nav-cleanup", "make-prompt", "quick", "2026-10-25T10:00:00Z", 100, 4, 88000, 4100, "14/14"),
+         line("sample-repo", "csv-export-orders", "living-docs", "", "2026-10-26T11:00:00Z", 55, 3, 64000, 2400, ""),
+         line("sample-repo", "nav-cleanup", "make-prompt", "quick", "2026-10-27T10:00:00Z", 90, 3, 80000, 3900, "14/14")]
+    archive("sample-repo", "csv-export-orders", "2026-10-21T15:16:00Z")
+    archive("shop-api", "invoice-pdf", "2026-10-22T09:10:00Z", edit=lambda r: r["units"].__setitem__(slice(None), r["units"][:5]))
+    archive("docs-site", "docs-refresh", "2026-10-24T08:03:00Z", edit=lambda r: r["units"].__setitem__(slice(None), r["units"][:4]))   # login-rate-limit: no archive
+    write(R)
+elif mode == "paths":      # run-plan lines whose project_path cannot lead to a state folder, and one whose folder has no state folder yet
+    gone = str(proj["docs-site"].resolve()) + "-gone"
+    P = [("empty", ""), ("relative", "."), ("dotdot", str(proj["sample-repo"].resolve()) + "/../docs-site"), ("gone", gone), ("none", None), ("nostate", str(proj["shop-api"].resolve()))]
+    rows = []
+    for i, (name, pp) in enumerate(P):
+        r = line("sample-repo", "path-" + name, "run-plan", "safe", f"2026-10-21T15:1{i}:00Z", 60, 2, 1000, 100, "1/1", path="x")
+        if pp is None:
+            del r["project_path"]
+        else:
+            r["project_path"] = pp
+        rows.append(r)
+    archive("sample-repo", "path-relative", "2026-10-21T15:11:00Z")   # what "." (the cwd) or ".." would reach, if a line's path were followed
+    archive("docs-site", "path-dotdot", "2026-10-21T15:12:00Z")
+    write(rows)
+else:
+    sys.exit("unknown mode " + mode)
+PY
+vuse() { VH="$D/$1"; mkdir -p "$VH"; VHP=$(HOME="$VH" py -c 'import os,pathlib; print(pathlib.Path(os.environ["HOME"]).as_posix())'); }   # VH: the HOME of this case; VHP: the HOME as the interpreter prints it
+vmk() { py "$D/vbuild.py" "$1" "$(wp "$VH")" "$EXJ" "$(wp "$D/vp/sample-repo")" "$(wp "$D/vp/shop-api")" "$(wp "$D/vp/docs-site")"; }
+vled() { ( cd "$D/vp/sample-repo" && env -u CLAUDE_PROJECT_DIR HOME="$VH" bash "$H/py.sh" "$H/ledger.py" "$@" < /dev/null ); }   # ledger.py in this case's HOME, as the Bash tool runs it: from the repo, CLAUDE_PROJECT_DIR unset
+vexpect() { f="$1"; what="$2"; shift 2; vled "$@" | py "$D/norm.py" "$VHP" "$VKEY" > "$D/vact.txt"; if diff "$f" "$D/vact.txt" > "$D/vdiff.txt"; then echo "PASS $what"; else echo "FAIL $what:"; cat "$D/vdiff.txt"; exit 1; fi; }
+vlines() { vled "$@" | tr -d '\r'; }   # the output with LF endings (Windows Python prints CRLF)
+# p1, p2 (pins, green before and after the change: their text was taken from 0.7.6's ledger.py): --report and --receipts print what they printed
+vuse vh1; vmk example
+cat > "$D/pin-report.txt" <<'TXT'
+ledger: 2 tasks  (~/.claude/smartuse/ledger.jsonl)
+| when | project | skill | mode | task | min | fresh-in | cache-read | out | self-check |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-21T15:16 | sample-repo | make-prompt | quick | csv-export-orders | 2.4 | 33,556 | 152,864 | 9,310 | 14/14 |
+| 2026-10-21T15:22 | sample-repo | run-plan | safe | csv-export-orders | 6.4 | 216,685 | 987,115 | 21,650 | 5/6 |
+median total-in 695,110 (mostly cache reads) · median out 15,480 · total out 30,960
+by skill/mode (median out): make-prompt/quick 9,310 (n=1) · run-plan/safe 21,650 (n=1)
+TXT
+vexpect "$D/pin-report.txt" "p1 --report on the fixture: the table and its two closing lines, byte for byte as 0.7.6 printed them (the report is now report_lines, which --view calls too)" --report
+cat > "$D/pin-receipts.txt" <<'TXT'
+receipts: csv-export-orders · dial safe · started 2026-10-21T15:16:00Z · closed · 6 steps  (~/.claude/smartuse/projects/<key>/runs/2026-10-21T15-16-00Z_csv-export-orders.json)
+| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Route decision confirmed (path, colu | judgment | fable |  | pass |  |  |  |  |  | decisions.md: decision line written 2026 |
+| 2 | src/routes/orders-export.js: toCsv() | build | fable |  | pass |  | no gaps | 5 | 110.7k | 2.7k | npm run lint: clean (exit 0); sanity row |
+| 3 | Mount export router in src/server.js | build | fable |  | pass |  | no gaps | 5 | 107.6k | 1.2k | curl export.csv: 200 text/csv, header +  |
+| 4 | tests/orders-export.test.js (unit +  | build | fable |  | pass |  | no gaps | 3 | 64.6k | 1.6k | npm test: Tests 6 passed, 6 total (2 sui |
+| 5 | Docs: DEV.md + USER.md + README line | mechanical | haiku |  | pass |  |  | 3 | 72.8k | 4.5k | grep 'orders/export.csv' README.md:5 hit |
+| 6 | Commit by path, move task folder, /l | judgment | fable |  | blocked |  |  |  |  |  | blocked: run-plan never commits; user's  |
+steps 5 pass · 1 blocked · 0 open · agent tokens in 355.8k / out 10.0k · delegated out 10.0k (100% of agent output) on claude-fable-5-1, claude-haiku-5-5, claude-sonnet-5-5
+TXT
+vexpect "$D/pin-receipts.txt" "p2 --receipts <task> on the fixture: header, six step rows, closing line, byte for byte as 0.7.6 printed them (run_block is shared with --view)" --receipts csv-export-orders
+# w1: look B on the fixture = the repo's example run as S1 rendered it
+cat > "$D/gold-b.txt" <<'TXT'
+ledger: 2 tasks  (~/.claude/smartuse/ledger.jsonl)
+| when | project | skill | mode | task | min | fresh-in | cache-read | out | self-check |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-21T15:16 | sample-repo | make-prompt | quick | csv-export-orders | 2.4 | 33,556 | 152,864 | 9,310 | 14/14 |
+| 2026-10-21T15:22 | sample-repo | run-plan | safe | csv-export-orders | 6.4 | 216,685 | 987,115 | 21,650 | 5/6 |
+median total-in 695,110 (mostly cache reads) · median out 15,480 · total out 30,960
+by skill/mode (median out): make-prompt/quick 9,310 (n=1) · run-plan/safe 21,650 (n=1)
+
+receipts: csv-export-orders · dial safe · started 2026-10-21T15:16:00Z · closed · 6 steps  (~/.claude/smartuse/projects/<key>/runs/2026-10-21T15-16-00Z_csv-export-orders.json)
+| # | step | tier | model | override | outcome | esc | verify | calls | in | out | check |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Route decision confirmed (path, colu | judgment | fable |  | pass |  |  |  |  |  | decisions.md: decision line written 2026 |
+| 2 | src/routes/orders-export.js: toCsv() | build | fable |  | pass |  | no gaps | 5 | 110.7k | 2.7k | npm run lint: clean (exit 0); sanity row |
+| 3 | Mount export router in src/server.js | build | fable |  | pass |  | no gaps | 5 | 107.6k | 1.2k | curl export.csv: 200 text/csv, header +  |
+| 4 | tests/orders-export.test.js (unit +  | build | fable |  | pass |  | no gaps | 3 | 64.6k | 1.6k | npm test: Tests 6 passed, 6 total (2 sui |
+| 5 | Docs: DEV.md + USER.md + README line | mechanical | haiku |  | pass |  |  | 3 | 72.8k | 4.5k | grep 'orders/export.csv' README.md:5 hit |
+| 6 | Commit by path, move task folder, /l | judgment | fable |  | blocked |  |  |  |  |  | blocked: run-plan never commits; user's  |
+steps 5 pass · 1 blocked · 0 open · agent tokens in 355.8k / out 10.0k · delegated out 10.0k (100% of agent output) on claude-fable-5-1, claude-haiku-5-5, claude-sonnet-5-5
+TXT
+vexpect "$D/gold-b.txt" "w1 --view on the fixture = look B: today's --report table, then the --receipts block of the run-plan row" --view
+# w2: the block under the table IS what --receipts prints for that run (the same closing line), six step rows; the exit status is 0
+vlines --view | sed -n '/^receipts:/,$p' > "$D/v-block.txt"; vlines --receipts csv-export-orders > "$D/r-block.txt"; rc=0; vled --view > /dev/null 2>&1 || rc=$?
+[ "$rc" = 0 ] && cmp -s "$D/v-block.txt" "$D/r-block.txt" && [ "$(grep -c '^| [1-6] |' "$D/v-block.txt")" = 6 ] && grep -q '^steps 5 pass · 1 blocked · 0 open' "$D/v-block.txt" && echo "PASS w2 --view's run block equals --receipts <task> for the same run (six step rows, the same closing line), exit 0" || { echo "FAIL w2 (rc $rc):"; diff "$D/v-block.txt" "$D/r-block.txt" || true; exit 1; }
+# w3 + w4: a run-plan line whose own archive is gone prints `steps: not kept (<archive>)`; the other run of the same task (another start time, with its own archive) is never shown in its place
+vuse vh2; vmk nosteps
+cat > "$D/gold-nosteps.txt" <<'TXT'
+ledger: 3 tasks  (~/.claude/smartuse/ledger.jsonl)
+| when | project | skill | mode | task | min | fresh-in | cache-read | out | self-check |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-21T15:16 | sample-repo | make-prompt | quick | csv-export-orders | 2.4 | 33,556 | 152,864 | 9,310 | 14/14 |
+| 2026-10-21T15:22 | sample-repo | run-plan | safe | csv-export-orders | 6.4 | 216,685 | 987,115 | 21,650 | 5/6 |
+| 2026-10-21T15:25 | sample-repo | living-docs |  | csv-export-orders | 1.2 | 16,416 | 74,784 | 3,100 |  |
+median total-in 186,420 (mostly cache reads) · median out 9,310 · total out 34,060
+by skill/mode (median out): make-prompt/quick 9,310 (n=1) · run-plan/safe 21,650 (n=1) · living-docs/ 3,100 (n=1)
+
+steps: not kept (2026-10-21T15-16-00Z_csv-export-orders.json)
+TXT
+vexpect "$D/gold-nosteps.txt" "w3 a run-plan line with no archive of its own -> 'steps: not kept (<archive name>)' under the table, no block, nothing else changes" --view
+vlines --view | grep -q '^steps: not kept' && ! vlines --view | grep -q "OTHER-RUN-STEP" && [ -f "$VH/.claude/smartuse/projects/$VKEY/runs/2026-10-22T09-00-00Z_csv-export-orders.json" ] && echo "PASS w4 a second archived run of the same task with another start time exists and is not shown under the first line (never the nearest run, never a guess)" || { echo "FAIL w4 the other run's step was shown"; exit 1; }
+# w5: a half line, a line that is a list, a line with no task: the readable ones are shown (the line with no task too), `2 lines unreadable`, no traceback, exit 0
+vuse vh3; vmk example
+printf '%s\n' '{"ts":"2026-10-21T15:2' '[1, 2]' '{"ts":"2026-10-22T08:00:00Z","project":"sample-repo","skill":"living-docs","mode":"","started_at":"2026-10-22T08:00:00Z","duration_s":60,"tokens":{},"total_input":10,"total_output":5}' >> "$VH/.claude/smartuse/ledger.jsonl"
+rc=0; vled --view > "$D/vo.txt" 2> "$D/ve.txt" || rc=$?; tr -d '\r' < "$D/vo.txt" > "$D/vo2.txt"
+[ "$rc" = 0 ] && [ ! -s "$D/ve.txt" ] && grep -qx '2 lines unreadable' "$D/vo2.txt" && [ "$(grep -c '^| 2026' "$D/vo2.txt")" = 3 ] && grep -qF '| 2026-10-22T08:00 | sample-repo | living-docs |  |  | 1.0 | 0 | 0 | 5 |  |' "$D/vo2.txt" && [ "$(grep -c '^receipts:' "$D/vo2.txt")" = 1 ] && ! grep -q Traceback "$D/vo2.txt" "$D/ve.txt" && echo "PASS w5 a half line and a list line -> '2 lines unreadable'; the two runs and the line with no task are shown, the run's block too; no traceback, exit 0" || { echo "FAIL w5 (rc $rc):"; cat "$D/vo2.txt" "$D/ve.txt"; exit 1; }
+printf '%s\n' '{"ts":"2026-10-22T08:05:00Z","project":"sample-repo","skill":"living-docs","task":"t","duration_s":"60","total_input":10,"total_output":5}' '{"ts":"2026-10-22T08:06:00Z","skill":"living-docs","task":"t","duration_s":60,"tokens":{"m":{"input":"x"}},"total_input":10,"total_output":5}' >> "$VH/.claude/smartuse/ledger.jsonl"
+vlines --view | grep -qx '4 lines unreadable' && echo "PASS w5b a line whose duration is a string and a line whose tokens cannot be added are counted as unreadable too (not a traceback)" || { echo "FAIL w5b:"; vlines --view; exit 1; }
+printf '%s\n' '{"ts":"2026-10-22T08:07:00Z","project":"sample-repo","skill":"living-docs","task":"t","duration_s":60,"total_input":10,"total_output":NaN}' >> "$VH/.claude/smartuse/ledger.jsonl"
+vlines --view | grep -qx '5 lines unreadable' && echo "PASS w5c a NaN count is unreadable (the median would raise), not a traceback" || { echo "FAIL w5c:"; vlines --view; exit 1; }
+# w6: a task name of 300 characters with an escape character and a newline: one row, the escape and the newline become spaces, the cap holds
+vuse vh4; vmk example
+py - "$VH/.claude/smartuse/ledger.jsonl" <<'PY'
+import json, sys
+r = json.loads(open(sys.argv[1], encoding="utf-8").read().splitlines()[0])
+r.update(ts="2026-10-22T08:00:00Z", skill="living-docs", mode="", task="x" * 30 + "\x1b[31m\nred" + "y" * 262, project="sample\x1b[0m-repo")
+open(sys.argv[1], "a", encoding="utf-8").write(json.dumps(r) + "\n")
+PY
+vlines --view > "$D/vo2.txt"
+[ "$(grep -c '^| 2026' "$D/vo2.txt")" = 3 ] && ! grep -q "$(printf '\033')" "$D/vo2.txt" && grep -qF '| sample [0m-repo | living-docs |  | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx [31m redy | 2.4 |' "$D/vo2.txt" && echo "PASS w6 a 300-character task with an escape and a newline: one row, escape and newline are spaces, cut at 40 characters; a project name is cleaned the same way" || { echo "FAIL w6:"; cat -A "$D/vo2.txt" | head -12; exit 1; }
+# w7: --view N, --view <word>, --view all, both together; a word that matches nothing; a bad N or option is refused
+vuse vh5; vmk many
+rows() { vlines "$@" | grep -c '^| 2026'; }
+[ "$(rows --view)" = 10 ] && [ "$(vlines --view | grep -E '^(receipts:|steps: not kept)' | cut -d' ' -f1-3)" = "$(printf '%s\n' 'receipts: invoice-pdf ·' 'steps: not kept' 'receipts: docs-refresh ·')" ] && vlines --view | grep -qx 'steps: not kept (2026-10-23T13-43-00Z_login-rate-limit.json)' && echo "PASS w7 --view: the last 10 of 14 runs; a block per run-plan row shown, in table order (two kept, one not kept)" || { echo "FAIL w7 default:"; vlines --view | cut -c1-120; exit 1; }
+[ "$(rows --view 3)" = 3 ] && [ "$(vlines --view 3 | grep -c '^receipts:')" = 0 ] && [ "$(rows --view invoice-pdf)" = 3 ] && [ "$(vlines --view invoice-pdf | grep -c '^receipts: invoice-pdf')" = 1 ] && [ "$(rows --view all)" = 14 ] && [ "$(vlines --view all | grep -c '^receipts:')" = 3 ] && [ "$(vlines --view all | grep -c '^steps: not kept')" = 1 ] && [ "$(rows --view 2 docs)" = 2 ] && [ "$(vlines --view 2 docs | grep -c '^receipts: docs-refresh')" = 1 ] && echo "PASS w7 --view 3 (the last three rows) · --view <task word> (only that task's three rows and its block) · --view all (14 rows, three blocks, one 'not kept') · --view 2 docs (the last two runs of tasks holding 'docs')" || { echo "FAIL w7 N / word / all"; exit 1; }
+OUT=$(vlines --view nonesuch); rc=0; vled --view 0 > /dev/null 2> "$D/ve0.txt" || rc=$?; rc2=0; vled --view --json > /dev/null 2> "$D/ve1.txt" || rc2=$?
+echo "$OUT" | grep -qx 'no run of a task holding "nonesuch"' && [ "$rc" = 1 ] && [ "$rc2" = 1 ] && grep -q '^view refused: N must be 1 or more' "$D/ve0.txt" && grep -q '^view refused: unknown option' "$D/ve1.txt" && echo "PASS w7 a word that matches nothing says so; --view 0 and an option it does not know are refused (exit 1, one line on stderr)" || { echo "FAIL w7 refusals (rc $rc $rc2):"; echo "$OUT"; cat "$D/ve0.txt" "$D/ve1.txt"; exit 1; }
+# w8: an empty and a missing ledger print today's two lines, as --report does; nothing is made
+vuse vh6; OUT=$(vlines --view); [ "$OUT" = "ledger: empty (no task recorded yet)" ] && [ "$OUT" = "$(vlines --report)" ] && [ -z "$(ls -A "$VH")" ] || { echo "FAIL w8 missing ledger: '$OUT'"; exit 1; }
+vuse vh7; mkdir -p "$VH/.claude/smartuse"; : > "$VH/.claude/smartuse/ledger.jsonl"; OUT=$(vlines --view); [ "$OUT" = "ledger: empty" ] && [ "$OUT" = "$(vlines --report)" ] && echo "PASS w8 a missing and an empty ledger print --report's own two lines (ledger: empty (no task recorded yet) / ledger: empty); nothing is made" || { echo "FAIL w8 empty ledger: '$OUT'"; exit 1; }
+# w9: a run in progress (this project's routing.json, active) and no ledger line for it yet: a last block `running now`; a word that does not name it leaves it out
+vuse vh8; vled --put routing.json '{"active":true,"task":"live-task","dial":"safe","started_at":"2026-10-28T10:00:00Z","units":[{"id":1,"title":"decide","tier":"judgment","model":"session","status":"pass"},{"id":2,"title":"build it","tier":"build","model":"opus","status":"running"},{"id":3,"title":"test it","tier":"build","model":"opus","status":"pending"}]}' > /dev/null
+vlines --view > "$D/vo2.txt"
+[ "$(sed -n 1,3p "$D/vo2.txt" | tr '\n' '|')" = 'ledger: empty (no task recorded yet)||running now|' ] && grep -q '^receipts: live-task · dial safe · started 2026-10-28T10:00:00Z · active · 3 steps' "$D/vo2.txt" && [ "$(grep -c '^| [1-3] |' "$D/vo2.txt")" = 3 ] && grep -q '^steps 1 pass · 0 blocked · 2 open' "$D/vo2.txt" && ! vlines --view nomatch | grep -q 'running now' && vlines --view live | grep -qx 'running now' && echo "PASS w9 an active routing.json and no ledger line: 'running now' and its three steps; a word that does not name the run leaves the block out, one that does keeps it" || { echo "FAIL w9:"; cat "$D/vo2.txt"; exit 1; }
+# w10 + w11: --view writes nothing (every file under the HOME and the projects keeps its bytes; no folder is made for a project_path that has none), and a project_path that is empty, missing, relative, holds `..`, or names a folder that is gone gives `steps: not kept`
+vuse vh9; vmk paths; NOSTATE="$VH/.claude/smartuse/projects/$(key "$(wp "$D/vp/shop-api")")"
+vled --view > /dev/null; S0=$(snap "$VH"); S1=$(snap "$D/vp")   # the first call may write py.sh's interpreter hint; the snapshots come after it
+vlines --view > "$D/vo2.txt"; vlines --view all > /dev/null; vlines --view path-gone > /dev/null; vlines --view 2 > /dev/null; rc=0; vled --view > /dev/null 2>&1 || rc=$?
+grep -q '^ledger: 6 tasks' "$D/vo2.txt" && [ "$(snap "$VH")" = "$S0" ] && [ "$(snap "$D/vp")" = "$S1" ] && [ ! -e "$NOSTATE" ] && echo "PASS w10 five --view calls: every file under the HOME and the projects has the same hash, and no state folder was made for a project_path that had none" || { echo "FAIL w10 something was written or made"; exit 1; }
+[ "$rc" = 0 ] && [ "$(grep -c '^steps: not kept' "$D/vo2.txt")" = 6 ] && ! grep -q '^receipts:' "$D/vo2.txt" && ! grep -q Traceback "$D/vo2.txt" && echo "PASS w11 a project_path that is empty, missing, '.', holds '..', is gone, or has no state folder -> 'steps: not kept' (6 of 6), never another project's run; no exception, exit 0" || { echo "FAIL w11 (rc $rc):"; cat "$D/vo2.txt"; exit 1; }
 echo "ALL PASS"
