@@ -22,10 +22,8 @@ allowed-tools:
   - 'Bash(mkdir *)'
   - 'Bash(command -v *)'
   - 'Bash(test *)'
-  - 'Bash(git diff *)'
-  - 'Bash(git status *)'
-  - 'Bash(svn diff *)'
-  - 'Bash(svn status *)'
+  - 'Bash(git diff -- *)'
+  - 'Bash(svn diff -- *)'
 disable-model-invocation: true
 ---
 

@@ -12,11 +12,9 @@ allowed-tools:
   - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --state-dir --create)'
   - 'Bash(bash "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py" --put pending.json *)'
   - 'Bash(date *)'
-  - 'Bash(git show *)'
-  - 'Bash(git log *)'
-  - 'Bash(git diff *)'
-  - 'Bash(svn diff *)'
-  - 'Bash(svn log *)'
+  - 'Bash(git show --stat *)'
+  - 'Bash(git show * -- *)'
+  - 'Bash(svn diff -c *)'
 ---
 
 # living-docs — keep the DEV + USER doc of a feature current (v1.0, 2026-10-15)
